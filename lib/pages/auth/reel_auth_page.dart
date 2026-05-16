@@ -38,9 +38,16 @@ class _ReelAuthPageState extends State<ReelAuthPage> {
       });
       _nextStep();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.toString()}')),
-      );
+      debugPrint('Appwrite Auth Error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Login Error: ${e.toString()}'),
+            backgroundColor: Colors.redAccent,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
