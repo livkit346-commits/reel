@@ -10,10 +10,13 @@ workflows:
     scripts:
       - name: Get Flutter packages
         script: flutter pub get
-      - name: Build Android APK
-        script: flutter build apk --release
+      - name: Build Android
+        script: |
+          flutter build apk --release
+          flutter build appbundle --release
     artifacts:
       - build/app/outputs/flutter-apk/*.apk
+      - build/app/outputs/bundle/release/*.aab
     publishing:
       email:
         recipients:
