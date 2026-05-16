@@ -21,23 +21,23 @@ class AppwriteService {
     storage = Storage(client);
   }
 
-  // Auth: Phone Session
-  Future<String> createPhoneSession(String phoneNumber) async {
+  // Auth: Phone Token (Sends SMS)
+  Future<String> createPhoneToken(String phoneNumber) async {
     try {
-      final sessionToken = await account.createPhoneSession(
+      final token = await account.createPhoneToken(
         userId: ID.unique(),
         phone: phoneNumber,
       );
-      return sessionToken.userId;
+      return token.userId;
     } catch (e) {
       rethrow;
     }
   }
 
-  // Auth: Verify OTP
-  Future<models.Session> updatePhoneSession(String userId, String secret) async {
+  // Auth: Verify OTP and Create Session
+  Future<models.Session> createSession(String userId, String secret) async {
     try {
-      final session = await account.updatePhoneSession(
+      final session = await account.createSession(
         userId: userId,
         secret: secret,
       );

@@ -31,7 +31,7 @@ class _ReelAuthPageState extends State<ReelAuthPage> {
   Future<void> _onPhoneSubmitted(String phone) async {
     final appwrite = context.read<AppwriteService>();
     try {
-      final userId = await appwrite.createPhoneSession(phone);
+      final userId = await appwrite.createPhoneToken(phone);
       setState(() {
         _phoneNumber = phone;
         _userId = userId;
@@ -47,7 +47,7 @@ class _ReelAuthPageState extends State<ReelAuthPage> {
   Future<void> _onOtpVerified(String secret) async {
     final appwrite = context.read<AppwriteService>();
     try {
-      await appwrite.updatePhoneSession(_userId, secret);
+      await appwrite.createSession(_userId, secret);
       _nextStep();
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
