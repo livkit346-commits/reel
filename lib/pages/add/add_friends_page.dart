@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:reel/services/appwrite_service.dart';
-import 'package:appwrite/models.dart' as models;
-import 'package:appwrite/appwrite.dart';
+import 'package:reel/services/supabase_service.dart';
 
 class AddFriendsPage extends StatefulWidget {
   const AddFriendsPage({super.key});
@@ -13,7 +11,7 @@ class AddFriendsPage extends StatefulWidget {
 
 class _AddFriendsPageState extends State<AddFriendsPage> {
   final TextEditingController _searchController = TextEditingController();
-  List<models.Document> _searchResults = [];
+  List<dynamic> _searchResults = [];
   bool _searching = false;
 
   Future<void> _searchUsers(String query) async {
@@ -23,18 +21,11 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
     }
 
     setState(() => _searching = true);
-    final appwrite = context.read<AppwriteService>();
+    final supabase = context.read<SupabaseService>();
     
     try {
-      final response = await appwrite.databases.listDocuments(
-        databaseId: 'main_db',
-        collectionId: 'users',
-        queries: [
-          Query.search('name', query),
-          Query.limit(10),
-        ],
-      );
-      setState(() => _searchResults = response.documents);
+      final response = await supabase.searchUsers(query);
+      setState(() => _searchResults = response);
     } catch (e) {
       // Handle error
     } finally {
@@ -55,6 +46,7 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Nearby Section
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: Row(
@@ -76,8 +68,8 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: Theme.of(context).primaryColor.withOpacity(0.2)),
               ),
-              child: FutureBuilder<List<models.Document>>(
-                future: context.read<AppwriteService>().getNearbyUsers(),
+              child: FutureBuilder<List<dynamic>>(
+                future: context.read<SupabaseService>().getNearbyUsers(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
                   final users = snapshot.data!;
@@ -93,11 +85,11 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                           children: [
                             CircleAvatar(
                               radius: 30,
-                              backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${user.$id}'),
+                              backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${user['id']}'),
                             ),
                             const SizedBox(height: 4),
                             Text(
-                              user.data['name']?.split(' ')[0] ?? 'Nearby',
+                              user['name']?.split(' ')[0] ?? 'Nearby',
                               style: const TextStyle(color: Colors.white70, fontSize: 11),
                             ),
                           ],
@@ -139,9 +131,9 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                   return ListTile(
                     leading: CircleAvatar(
                       radius: 24,
-                      backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${user.$id}'),
+                      backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${user['id']}'),
                     ),
-                    title: Text(user.data['name'] ?? 'User', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    title: Text(user['name'] ?? 'User', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                     trailing: ElevatedButton(
                       onPressed: () {},
                       style: ElevatedButton.styleFrom(

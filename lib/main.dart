@@ -1,15 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/auth/reel_auth_page.dart';
+import 'package:reel/services/supabase_service.dart';
 import 'package:reel/theme/reel_theme.dart';
-import 'package:reel/services/appwrite_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  await Supabase.initialize(
+    url: 'https://zvxrcwgvvubgqlxbcyov.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2eHJjd2d2dnViZ3FseGJjeW92Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NjM4MDgsImV4cCI6MjA5NDUzOTgwOH0.RVrUvHt-fnh7n02ap39-y9gpjvu4x6p0Xaq-CH8qP6w',
+  );
+
   runApp(
     MultiProvider(
       providers: [
-        Provider<AppwriteService>(create: (_) => AppwriteService()),
+        Provider<SupabaseService>(create: (_) => SupabaseService()),
       ],
       child: const ReelApp(),
     ),

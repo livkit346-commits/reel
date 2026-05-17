@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/main_screen.dart';
-import 'package:reel/services/appwrite_service.dart';
+import 'package:reel/services/supabase_service.dart';
 
 class ProfileSetupView extends StatefulWidget {
   const ProfileSetupView({super.key});
@@ -12,20 +12,26 @@ class ProfileSetupView extends StatefulWidget {
 
 class _ProfileSetupViewState extends State<ProfileSetupView> {
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController(); // Added for phone number
   bool _loading = false;
 
   Future<void> _onFinish() async {
     if (_nameController.text.trim().isEmpty) return;
 
     setState(() => _loading = true);
-    final appwrite = context.read<AppwriteService>();
+    final supabase = context.read<SupabaseService>();
     
     try {
-      // Get current user ID from Appwrite session
-      final user = await appwrite.account.get();
-      
-      // Create user document in Appwrite
-      await appwrite.createUserProfile(user.$id, _nameController.text, null);
+      final user = supabase.currentUser;
+      if (user == null) throw Exception("User not authenticated.");
+
+      // Create user document in Supabase
+      await supabase.createUserProfile(
+        user.id, 
+        _nameController.text.trim(), 
+        null, 
+        _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null
+      );
 
       if (mounted) {
         Navigator.pushAndRemoveUntil(
@@ -61,18 +67,18 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
           ),
           const SizedBox(height: 12),
           Text(
-            'Please provide your name and an optional profile photo.',
+            'Please provide your name and an optional phone number to connect with friends.',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: Colors.white60,
                 ),
           ),
-          const SizedBox(height: 48),
+          const SizedBox(height: 32),
           Center(
             child: Stack(
               children: [
                 Container(
-                  width: 120,
-                  height: 120,
+                  width: 100,
+                  height: 100,
                   decoration: BoxDecoration(
                     color: const Color(0x1AFFFFFF),
                     shape: BoxShape.circle,
@@ -84,14 +90,14 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
                   child: const Icon(
                     Icons.add_a_photo_outlined,
                     color: Colors.white30,
-                    size: 40,
+                    size: 32,
                   ),
                 ),
                 Positioned(
                   bottom: 0,
                   right: 0,
                   child: Container(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
                       color: Theme.of(context).primaryColor,
                       shape: BoxShape.circle,
@@ -99,20 +105,30 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
                     child: const Icon(
                       Icons.camera_alt,
                       color: Colors.white,
-                      size: 20,
+                      size: 16,
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 48),
+          const SizedBox(height: 32),
           TextField(
             controller: _nameController,
             style: const TextStyle(color: Colors.white),
             decoration: const InputDecoration(
-              hintText: 'Type your name here...',
+              hintText: 'Display Name (Required)',
               prefixIcon: Icon(Icons.person_outline, color: Colors.white38),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _phoneController,
+            keyboardType: TextInputType.phone,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: 'Phone Number (Optional)',
+              prefixIcon: Icon(Icons.phone_outlined, color: Colors.white38),
             ),
           ),
           const Spacer(),

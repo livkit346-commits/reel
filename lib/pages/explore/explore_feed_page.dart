@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:reel/services/appwrite_service.dart';
-import 'package:appwrite/models.dart' as models;
+import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/explore/create_post_screen.dart';
 
 class ExploreFeedPage extends StatefulWidget {
@@ -12,17 +11,17 @@ class ExploreFeedPage extends StatefulWidget {
 }
 
 class _ExploreFeedPageState extends State<ExploreFeedPage> {
-  late Future<List<models.Document>> _feedFuture;
+  late Future<List<dynamic>> _feedFuture;
 
   @override
   void initState() {
     super.initState();
-    _feedFuture = context.read<AppwriteService>().getExploreFeed();
+    _feedFuture = context.read<SupabaseService>().getExploreFeed();
   }
 
   Future<void> _refreshFeed() async {
     setState(() {
-      _feedFuture = context.read<AppwriteService>().getExploreFeed();
+      _feedFuture = context.read<SupabaseService>().getExploreFeed();
     });
   }
 
@@ -40,7 +39,7 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
         onRefresh: _refreshFeed,
         color: Theme.of(context).primaryColor,
         backgroundColor: Colors.black,
-        child: FutureBuilder<List<models.Document>>(
+        child: FutureBuilder<List<dynamic>>(
           future: _feedFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
@@ -72,7 +71,7 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
                     ),
                   ),
                 ),
-                // Feed: X-Style Posts from Appwrite
+                // Feed: X-Style Posts
                 if (posts.isEmpty)
                   const SliverFillRemaining(
                     child: Center(child: Text('No posts yet', style: TextStyle(color: Colors.white54))),
@@ -135,16 +134,16 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
 }
 
 class ExplorePostItem extends StatelessWidget {
-  final models.Document post;
+  final Map<String, dynamic> post;
   const ExplorePostItem({super.key, required this.post});
 
   @override
   Widget build(BuildContext context) {
-    final String text = post.data['text'] ?? '';
-    final String userName = post.data['userName'] ?? 'User';
-    final String? imageId = post.data['imageId'];
-    final String createdAt = post.data['createdAt'] ?? '';
-    final int likes = post.data['likes'] ?? 0;
+    final String text = post['text'] ?? '';
+    final String userName = post['userName'] ?? 'User';
+    final String? imageUrl = post['imageUrl'];
+    final String userId = post['userId'] ?? 'unknown';
+    final int likes = post['likes'] ?? 0;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -156,7 +155,7 @@ class ExplorePostItem extends StatelessWidget {
         children: [
           CircleAvatar(
             radius: 24,
-            backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${post.data['userId']}'),
+            backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=$userId'),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -183,15 +182,15 @@ class ExplorePostItem extends StatelessWidget {
                   text,
                   style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
                 ),
-                if (imageId != null)
+                if (imageUrl != null)
                   Container(
                     margin: const EdgeInsets.only(top: 12),
                     height: 200,
                     width: double.infinity,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
-                      image: const DecorationImage(
-                        image: NetworkImage('https://picsum.photos/600/400'), // Replace with Appwrite storage URL
+                      image: DecorationImage(
+                        image: NetworkImage(imageUrl),
                         fit: BoxFit.cover,
                       ),
                     ),

@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:reel/services/appwrite_service.dart';
+import 'package:reel/services/supabase_service.dart';
 
 class CreatePostScreen extends StatefulWidget {
   const CreatePostScreen({super.key});
@@ -28,29 +28,24 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     if (_textController.text.trim().isEmpty && _image == null) return;
 
     setState(() => _loading = true);
-    final appwrite = context.read<AppwriteService>();
+    final supabase = context.read<SupabaseService>();
 
     try {
-      final user = await appwrite.account.get();
-      final userProfile = await appwrite.getUserProfile(user.$id);
-      final userName = userProfile?.data['name'] ?? 'User';
+      final user = supabase.currentUser;
+      if (user == null) throw Exception("User not authenticated.");
+      final userProfile = await supabase.getUserProfile(user.id);
+      final userName = userProfile?['name'] ?? 'User';
 
-      String? imageId;
+      String? imageUrl;
       if (_image != null) {
-        // Upload image to Appwrite Storage first
-        // final file = await appwrite.storage.createFile(
-        //   bucketId: 'posts_images',
-        //   fileId: ID.unique(),
-        //   file: InputFile.fromPath(path: _image!.path),
-        // );
-        // imageId = file.$id;
+        // TODO: Upload image to Supabase Storage
       }
 
-      await appwrite.createPost(
-        user.$id,
+      await supabase.createPost(
+        user.id,
         userName,
         _textController.text,
-        imageId,
+        imageUrl,
       );
 
       if (mounted) Navigator.pop(context, true);

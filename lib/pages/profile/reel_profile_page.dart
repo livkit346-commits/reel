@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:reel/services/appwrite_service.dart';
-import 'package:appwrite/models.dart' as models;
+import 'package:reel/services/supabase_service.dart';
 
 class ReelProfilePage extends StatefulWidget {
   const ReelProfilePage({super.key});
@@ -11,7 +10,7 @@ class ReelProfilePage extends StatefulWidget {
 }
 
 class _ReelProfilePageState extends State<ReelProfilePage> {
-  late Future<models.Document?> _profileFuture;
+  late Future<Map<String, dynamic>?> _profileFuture;
 
   @override
   void initState() {
@@ -20,15 +19,20 @@ class _ReelProfilePageState extends State<ReelProfilePage> {
   }
 
   void _loadProfile() {
-    final appwrite = context.read<AppwriteService>();
-    _profileFuture = appwrite.account.get().then((user) => appwrite.getUserProfile(user.$id));
+    final supabase = context.read<SupabaseService>();
+    final user = supabase.currentUser;
+    if (user != null) {
+      _profileFuture = supabase.getUserProfile(user.id);
+    } else {
+      _profileFuture = Future.value(null);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: FutureBuilder<models.Document?>(
+      body: FutureBuilder<Map<String, dynamic>?>(
         future: _profileFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -36,8 +40,8 @@ class _ReelProfilePageState extends State<ReelProfilePage> {
           }
           
           final userProfile = snapshot.data;
-          final name = userProfile?.data['name'] ?? 'User';
-          final userId = userProfile?.$id ?? 'unknown';
+          final name = userProfile?['name'] ?? 'User';
+          final userId = userProfile?['id'] ?? 'unknown';
 
           return CustomScrollView(
             slivers: [

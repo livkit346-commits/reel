@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:reel/services/appwrite_service.dart';
-import 'package:reel/widgets/auth/phone_input_view.dart';
-import 'package:reel/widgets/auth/otp_verification_view.dart';
+import 'package:reel/services/supabase_service.dart';
+import 'package:reel/widgets/auth/email_auth_view.dart';
 import 'package:reel/widgets/auth/profile_setup_view.dart';
+import 'package:reel/pages/main_screen.dart';
 
 class ReelAuthPage extends StatefulWidget {
   const ReelAuthPage({super.key});
@@ -14,8 +14,6 @@ class ReelAuthPage extends StatefulWidget {
 
 class _ReelAuthPageState extends State<ReelAuthPage> {
   final PageController _pageController = PageController();
-  String _phoneNumber = '';
-  String _userId = '';
   int _currentStep = 0;
 
   void _nextStep() {
@@ -28,38 +26,45 @@ class _ReelAuthPageState extends State<ReelAuthPage> {
     );
   }
 
-  Future<void> _onPhoneSubmitted(String phone) async {
-    final appwrite = context.read<AppwriteService>();
+  Future<void> _onEmailAuthSubmitted(String email, String password, bool isSignUp) async {
+    final supabaseService = context.read<SupabaseService>();
     try {
-      final userId = await appwrite.createPhoneToken(phone);
-      setState(() {
-        _phoneNumber = phone;
-        _userId = userId;
-      });
-      _nextStep();
+      if (isSignUp) {
+        await supabaseService.signUpWithEmail(email, password);
+        _nextStep(); // Go to profile setup
+      } else {
+        await supabaseService.signInWithEmail(email, password);
+        
+        // If login successful, check if profile exists
+        final user = supabaseService.currentUser;
+        if (user != null) {
+          final profile = await supabaseService.getUserProfile(user.id);
+          if (mounted) {
+            if (profile != null && profile['name'] != null) {
+              // Profile exists, go to main screen
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const MainScreen()),
+                (route) => false,
+              );
+            } else {
+              // No profile, go to profile setup
+              _nextStep();
+            }
+          }
+        }
+      }
     } catch (e) {
-      debugPrint('Appwrite Auth Error: $e');
+      debugPrint('Supabase Auth Error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Login Error: ${e.toString()}'),
+            content: Text('Error: ${e.toString()}'),
             backgroundColor: Colors.redAccent,
             duration: const Duration(seconds: 5),
           ),
         );
       }
-    }
-  }
-
-  Future<void> _onOtpVerified(String secret) async {
-    final appwrite = context.read<AppwriteService>();
-    try {
-      await appwrite.createSession(_userId, secret);
-      _nextStep();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('OTP Verification Failed: ${e.toString()}')),
-      );
     }
   }
 
@@ -74,7 +79,7 @@ class _ReelAuthPageState extends State<ReelAuthPage> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Row(
-                children: List.generate(3, (index) {
+                children: List.generate(2, (index) {
                   return Expanded(
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 300),
@@ -97,18 +102,7 @@ class _ReelAuthPageState extends State<ReelAuthPage> {
                 controller: _pageController,
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
-                  PhoneInputView(onSubmitted: _onPhoneSubmitted),
-                  OtpVerificationView(
-                    phoneNumber: _phoneNumber,
-                    onVerified: (secret) => _onOtpVerified(secret),
-                    onBack: () {
-                      setState(() => _currentStep--);
-                      _pageController.previousPage(
-                        duration: const Duration(milliseconds: 500),
-                        curve: Curves.easeInOutQuart,
-                      );
-                    },
-                  ),
+                  EmailAuthView(onSubmitted: _onEmailAuthSubmitted),
                   const ProfileSetupView(),
                 ],
               ),
