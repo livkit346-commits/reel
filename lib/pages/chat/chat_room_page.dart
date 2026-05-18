@@ -1,0 +1,350 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
+import 'package:reel/services/supabase_service.dart';
+import 'package:reel/widgets/chat/cached_media_view.dart';
+
+class ChatRoomPage extends StatefulWidget {
+  final String chatId;
+  final String otherUserId;
+  final String otherUserName;
+
+  const ChatRoomPage({
+    super.key,
+    required this.chatId,
+    required this.otherUserId,
+    required this.otherUserName,
+  });
+
+  @override
+  State<ChatRoomPage> createState() => _ChatRoomPageState();
+}
+
+class _ChatRoomPageState extends State<ChatRoomPage> {
+  final TextEditingController _messageController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final ImagePicker _picker = ImagePicker();
+  
+  String _disappearingDuration = 'off'; // 'off', '24h', '48h'
+  bool _isSending = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadChatSettings();
+  }
+
+  Future<void> _loadChatSettings() async {
+    final supabase = context.read<SupabaseService>();
+    try {
+      final chat = await supabase.client.from('chats').select('disappearingDuration').eq('id', widget.chatId).single();
+      setState(() {
+        _disappearingDuration = chat['disappearingDuration'] as String? ?? 'off';
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _updateDisappearingSettings(String duration) async {
+    final supabase = context.read<SupabaseService>();
+    try {
+      await supabase.client.from('chats').update({'disappearingDuration': duration}).eq('id', widget.chatId);
+      setState(() {
+        _disappearingDuration = duration;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Disappearing messages set to $duration'),
+          backgroundColor: Theme.of(context).primaryColor,
+        ),
+      );
+    } catch (_) {}
+  }
+
+  // Pre-compresses image natively using Picker dimensions & qualities
+  Future<void> _sendImage() async {
+    final pickedFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 60, // Instantly pre-compresses image before uploading
+      maxWidth: 1080,
+    );
+
+    if (pickedFile != null) {
+      _sendMediaMessage(File(pickedFile.path), 'image');
+    }
+  }
+
+  Future<void> _sendVideo() async {
+    final pickedFile = await _picker.pickVideo(
+      source: ImageSource.gallery,
+      maxDuration: const Duration(seconds: 30),
+    );
+
+    if (pickedFile != null) {
+      final file = File(pickedFile.path);
+      final sizeInBytes = await file.length();
+      final sizeInMB = sizeInBytes / (1024 * 1024);
+
+      // WhatsApp size restriction: Limit to small files (15MB)
+      if (sizeInMB > 15.0) {
+        if (mounted) {
+          showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              backgroundColor: Colors.grey[900],
+              title: const Text('File Too Large', style: TextStyle(color: Colors.white)),
+              content: const Text(
+                'Videos must be smaller than 15MB to save bandwidth, similar to WhatsApp limits.',
+                style: TextStyle(color: Colors.white70),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+
+      _sendMediaMessage(file, 'video');
+    }
+  }
+
+  Future<void> _sendMediaMessage(File file, String type) async {
+    setState(() => _isSending = true);
+    final supabase = context.read<SupabaseService>();
+    try {
+      await supabase.sendMessage(
+        chatId: widget.chatId,
+        mediaFile: file,
+        mediaType: type,
+        disappearingDuration: _disappearingDuration,
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to send media')),
+      );
+    } finally {
+      setState(() => _isSending = false);
+    }
+  }
+
+  Future<void> _sendTextMessage() async {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+
+    _messageController.clear();
+    final supabase = context.read<SupabaseService>();
+
+    try {
+      await supabase.sendMessage(
+        chatId: widget.chatId,
+        text: text,
+        disappearingDuration: _disappearingDuration,
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to send message')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+
+    // Real-time listener using Supabase Streams
+    final messageStream = supabase.client
+        .from('messages')
+        .stream(primaryKey: ['id'])
+        .eq('chatId', widget.chatId)
+        .order('createdAt', ascending: true);
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.grey[950],
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${widget.otherUserId}'),
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.otherUserName,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                ),
+                Text(
+                  _disappearingDuration == 'off' ? 'tap for disappearing setting' : '⏰ disappearing: $_disappearingDuration',
+                  style: const TextStyle(fontSize: 11, color: Colors.white54),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            color: Colors.grey[900],
+            onSelected: _updateDisappearingSettings,
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'off',
+                child: Text('Disappearing: Off', style: TextStyle(color: Colors.white)),
+              ),
+              const PopupMenuItem(
+                value: '24h',
+                child: Text('Disappearing: 24 Hours', style: TextStyle(color: Colors.white)),
+              ),
+              const PopupMenuItem(
+                value: '48h',
+                child: Text('Disappearing: 48 Hours', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Message stream list
+          Expanded(
+            child: StreamBuilder<List<Map<String, dynamic>>>(
+              stream: messageStream,
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final messages = snapshot.data!;
+
+                // Auto-mark other user's messages as received on receipt
+                // Once marked received, Postgres instantly deletes them from server to preserve privacy!
+                for (final msg in messages) {
+                  final senderId = msg['senderId'] as String;
+                  final isReceived = msg['received'] as bool;
+                  if (senderId != myId && !isReceived) {
+                    supabase.markMessageAsReceived(msg['id'] as String);
+                  }
+                }
+
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (_scrollController.hasClients) {
+                    _scrollController.animateTo(
+                      _scrollController.position.maxScrollExtent,
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOut,
+                    );
+                  }
+                });
+
+                if (messages.isEmpty) {
+                  return const Center(
+                    child: Text(
+                      'No messages. Chat is fully encrypted & ephemeral.',
+                      style: TextStyle(color: Colors.white30, fontSize: 13),
+                    ),
+                  );
+                }
+
+                return ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  itemCount: messages.length,
+                  itemBuilder: (context, index) {
+                    final msg = messages[index];
+                    final isMe = msg['senderId'] == myId;
+                    final text = msg['text'] as String?;
+                    final mediaUrl = msg['mediaUrl'] as String?;
+                    final mediaType = msg['mediaType'] as String?;
+
+                    return Align(
+                      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isMe ? Theme.of(context).primaryColor : Colors.grey[900],
+                          borderRadius: BorderRadius.circular(16).copyWith(
+                            topRight: isMe ? const Radius.circular(0) : const Radius.circular(16),
+                            topLeft: isMe ? const Radius.circular(16) : const Radius.circular(0),
+                          ),
+                        ),
+                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (mediaUrl != null && mediaType != null) ...[
+                              CachedMediaView(url: mediaUrl, mediaType: mediaType),
+                              const SizedBox(height: 6),
+                            ],
+                            if (text != null && text.isNotEmpty)
+                              Text(
+                                text,
+                                style: const TextStyle(color: Colors.white, fontSize: 15),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          if (_isSending)
+            Container(
+              color: Colors.black,
+              padding: const EdgeInsets.all(8.0),
+              child: const LinearProgressIndicator(),
+            ),
+          // Chat input field
+          SafeArea(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              color: Colors.grey[950],
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.image_outlined, color: Colors.white70),
+                    onPressed: _sendImage,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.videocam_outlined, color: Colors.white70),
+                    onPressed: _sendVideo,
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Type a secure message...',
+                        hintStyle: const TextStyle(color: Colors.white38),
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                    ),
+                  ),
+                  FloatingActionButton.small(
+                    onPressed: _sendTextMessage,
+                    backgroundColor: Theme.of(context).primaryColor,
+                    child: const Icon(Icons.send, color: Colors.white, size: 18),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

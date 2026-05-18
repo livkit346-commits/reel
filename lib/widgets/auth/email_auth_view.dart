@@ -14,6 +14,7 @@ class _EmailAuthViewState extends State<EmailAuthView> {
   final TextEditingController _passwordController = TextEditingController();
   bool _isSignUp = false;
   bool _isLoading = false;
+  bool _obscurePassword = true;
 
   void _submit() {
     if (_emailController.text.trim().isEmpty || _passwordController.text.isEmpty) return;
@@ -68,12 +69,23 @@ class _EmailAuthViewState extends State<EmailAuthView> {
           const SizedBox(height: 16),
           TextField(
             controller: _passwordController,
-            obscureText: true,
+            obscureText: _obscurePassword,
             style: const TextStyle(color: Colors.white, fontSize: 18),
             decoration: InputDecoration(
               hintText: 'Password',
               hintStyle: const TextStyle(color: Colors.white38),
               prefixIcon: const Icon(Icons.lock_outline, color: Colors.white54),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                  color: Colors.white54,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _obscurePassword = !_obscurePassword;
+                  });
+                },
+              ),
               filled: true,
               fillColor: Colors.white.withOpacity(0.05),
               border: OutlineInputBorder(

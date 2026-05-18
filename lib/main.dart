@@ -13,18 +13,21 @@ void main() async {
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2eHJjd2d2dnViZ3FseGJjeW92Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NjM4MDgsImV4cCI6MjA5NDUzOTgwOH0.RVrUvHt-fnh7n02ap39-y9gpjvu4x6p0Xaq-CH8qP6w',
   );
 
+  final session = Supabase.instance.client.auth.currentSession;
+
   runApp(
     MultiProvider(
       providers: [
         Provider<SupabaseService>(create: (_) => SupabaseService()),
       ],
-      child: const ReelApp(),
+      child: ReelApp(showMainScreen: session != null),
     ),
   );
 }
 
 class ReelApp extends StatelessWidget {
-  const ReelApp({super.key});
+  final bool showMainScreen;
+  const ReelApp({super.key, required this.showMainScreen});
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +35,8 @@ class ReelApp extends StatelessWidget {
       title: 'Reel',
       debugShowCheckedModeBanner: false,
       theme: ReelTheme.darkTheme,
-      home: const ReelAuthPage(),
+      home: showMainScreen ? const MainScreen() : const ReelAuthPage(),
     );
   }
 }
+

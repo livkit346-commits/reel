@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/services/supabase_service.dart';
 
 class AddFriendsPage extends StatefulWidget {
@@ -13,6 +14,40 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
   final TextEditingController _searchController = TextEditingController();
   List<dynamic> _searchResults = [];
   bool _searching = false;
+
+  Future<void> _startChat(BuildContext context, String otherUserId, String otherUserName) async {
+    final supabase = context.read<SupabaseService>();
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+
+      final chatId = await supabase.createOrGetChat(otherUserId);
+      
+      if (mounted) {
+        Navigator.pop(context); // Pop loading dialog
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatRoomPage(
+              chatId: chatId,
+              otherUserId: otherUserId,
+              otherUserName: otherUserName,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to initiate chat')),
+        );
+      }
+    }
+  }
 
   Future<void> _searchUsers(String query) async {
     if (query.isEmpty) {
@@ -79,20 +114,24 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                     itemCount: users.length,
                     itemBuilder: (context, index) {
                       final user = users[index];
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 16),
-                        child: Column(
-                          children: [
-                            CircleAvatar(
-                              radius: 30,
-                              backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${user['id']}'),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              user['name']?.split(' ')[0] ?? 'Nearby',
-                              style: const TextStyle(color: Colors.white70, fontSize: 11),
-                            ),
-                          ],
+                      final name = user['name'] ?? 'Nearby';
+                      return InkWell(
+                        onTap: () => _startChat(context, user['id'], name),
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 16),
+                          child: Column(
+                            children: [
+                              CircleAvatar(
+                                radius: 30,
+                                backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${user['id']}'),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                name.split(' ')[0],
+                                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     },
@@ -128,19 +167,30 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                 itemCount: _searchResults.length,
                 itemBuilder: (context, index) {
                   final user = _searchResults[index];
+                  final name = user['name'] ?? 'User';
                   return ListTile(
                     leading: CircleAvatar(
                       radius: 24,
                       backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${user['id']}'),
                     ),
-                    title: Text(user['name'] ?? 'User', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    trailing: ElevatedButton(
-                      onPressed: () {},
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Theme.of(context).primaryColor,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                      ),
-                      child: const Text('Add'),
+                    title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    onTap: () => _startChat(context, user['id'], name),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.chat_bubble_outline, color: Colors.white70),
+                          onPressed: () => _startChat(context, user['id'], name),
+                        ),
+                        ElevatedButton(
+                          onPressed: () {},
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Theme.of(context).primaryColor,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          ),
+                          child: const Text('Add'),
+                        ),
+                      ],
                     ),
                   );
                 },
