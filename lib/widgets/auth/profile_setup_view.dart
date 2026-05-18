@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/main_screen.dart';
 import 'package:reel/services/supabase_service.dart';
@@ -12,8 +14,49 @@ class ProfileSetupView extends StatefulWidget {
 
 class _ProfileSetupViewState extends State<ProfileSetupView> {
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _phoneController = TextEditingController(); // Added for phone number
+  final TextEditingController _phoneController = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
+  
+  File? _avatarFile;
+  String? _uploadedPhotoUrl;
   bool _loading = false;
+  bool _uploadingAvatar = false;
+
+  Future<void> _pickAndUploadAvatar() async {
+    final pickedFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 50,
+      maxWidth: 500,
+    );
+
+    if (pickedFile != null) {
+      setState(() {
+        _avatarFile = File(pickedFile.path);
+        _uploadingAvatar = true;
+      });
+
+      final supabase = context.read<SupabaseService>();
+      try {
+        final url = await supabase.uploadAvatar(_avatarFile!);
+        setState(() {
+          _uploadedPhotoUrl = url;
+        });
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Avatar uploaded successfully!')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to upload avatar: ${e.toString()}')),
+          );
+        }
+      } finally {
+        setState(() => _uploadingAvatar = false);
+      }
+    }
+  }
 
   Future<void> _onFinish() async {
     if (_nameController.text.trim().isEmpty) return;
@@ -29,7 +72,7 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
       await supabase.createUserProfile(
         user.id, 
         _nameController.text.trim(), 
-        null, 
+        _uploadedPhotoUrl, 
         _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null
       );
 
@@ -74,42 +117,60 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
           ),
           const SizedBox(height: 32),
           Center(
-            child: Stack(
-              children: [
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    color: const Color(0x1AFFFFFF),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Theme.of(context).primaryColor.withOpacity(0.5),
-                      width: 2,
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.add_a_photo_outlined,
-                    color: Colors.white30,
-                    size: 32,
-                  ),
-                ),
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: Container(
-                    padding: const EdgeInsets.all(6),
+            child: InkWell(
+              onTap: _uploadingAvatar ? null : _pickAndUploadAvatar,
+              borderRadius: BorderRadius.circular(50),
+              child: Stack(
+                children: [
+                  Container(
+                    width: 100,
+                    height: 100,
                     decoration: BoxDecoration(
-                      color: Theme.of(context).primaryColor,
+                      color: const Color(0x1AFFFFFF),
                       shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Theme.of(context).primaryColor.withOpacity(0.5),
+                        width: 2,
+                      ),
+                      image: _avatarFile != null
+                          ? DecorationImage(image: FileImage(_avatarFile!), fit: BoxFit.cover)
+                          : null,
                     ),
-                    child: const Icon(
-                      Icons.camera_alt,
-                      color: Colors.white,
-                      size: 16,
+                    child: _avatarFile == null
+                        ? const Icon(
+                            Icons.add_a_photo_outlined,
+                            color: Colors.white30,
+                            size: 32,
+                          )
+                        : null,
+                  ),
+                  if (_uploadingAvatar)
+                    Positioned.fill(
+                      child: Container(
+                        decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                        child: const Center(
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).primaryColor,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.camera_alt,
+                        color: Colors.white,
+                        size: 16,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 32),
@@ -135,7 +196,7 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _loading ? null : _onFinish,
+              onPressed: _loading || _uploadingAvatar ? null : _onFinish,
               child: _loading 
                 ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                 : const Text('Finish'),

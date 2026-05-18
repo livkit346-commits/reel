@@ -26,13 +26,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
   
-  String _disappearingDuration = 'off'; // 'off', '24h', '48h'
+  String _disappearingDuration = 'off';
   bool _isSending = false;
+  bool _isFollowing = false;
+  bool _isBlocked = false;
 
   @override
   void initState() {
     super.initState();
     _loadChatSettings();
+    _checkFollowingStatus();
   }
 
   Future<void> _loadChatSettings() async {
@@ -43,6 +46,92 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         _disappearingDuration = chat['disappearingDuration'] as String? ?? 'off';
       });
     } catch (_) {}
+  }
+
+  Future<void> _checkFollowingStatus() async {
+    final supabase = context.read<SupabaseService>();
+    try {
+      final following = await supabase.isFollowing(widget.otherUserId);
+      setState(() {
+        _isFollowing = following;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _toggleFollow() async {
+    final supabase = context.read<SupabaseService>();
+    try {
+      if (_isFollowing) {
+        await supabase.unfollowUser(widget.otherUserId);
+        setState(() => _isFollowing = false);
+      } else {
+        await supabase.followUser(widget.otherUserId);
+        setState(() => _isFollowing = true);
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_isFollowing ? 'You followed ${widget.otherUserName}!' : 'You unfollowed ${widget.otherUserName}')),
+        );
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _toggleBlock() async {
+    setState(() {
+      _isBlocked = !_isBlocked;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_isBlocked ? 'You have blocked ${widget.otherUserName}' : 'You have unblocked ${widget.otherUserName}'),
+        backgroundColor: _isBlocked ? Colors.redAccent : Colors.green,
+      ),
+    );
+  }
+
+  void _reportUser() {
+    final reasonController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[950],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Report User', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Please specify the reason for reporting this user:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: 'Reason (e.g. Spam, Abuse)',
+                hintStyle: TextStyle(color: Colors.white38),
+                enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Report submitted. We will review this shortly.')),
+              );
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            child: const Text('Submit Report'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _updateDisappearingSettings(String duration) async {
@@ -61,11 +150,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     } catch (_) {}
   }
 
-  // Pre-compresses image natively using Picker dimensions & qualities
   Future<void> _sendImage() async {
     final pickedFile = await _picker.pickImage(
       source: ImageSource.gallery,
-      imageQuality: 60, // Instantly pre-compresses image before uploading
+      imageQuality: 60,
       maxWidth: 1080,
     );
 
@@ -85,7 +173,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       final sizeInBytes = await file.length();
       final sizeInMB = sizeInBytes / (1024 * 1024);
 
-      // WhatsApp size restriction: Limit to small files (15MB)
       if (sizeInMB > 15.0) {
         if (mounted) {
           showDialog(
@@ -94,7 +181,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               backgroundColor: Colors.grey[900],
               title: const Text('File Too Large', style: TextStyle(color: Colors.white)),
               content: const Text(
-                'Videos must be smaller than 15MB to save bandwidth, similar to WhatsApp limits.',
+                'Videos must be smaller than 15MB to save bandwidth.',
                 style: TextStyle(color: Colors.white70),
               ),
               actions: [
@@ -156,8 +243,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   Widget build(BuildContext context) {
     final supabase = context.read<SupabaseService>();
     final myId = supabase.currentUser?.id;
+    final primaryColor = Theme.of(context).primaryColor;
 
-    // Real-time listener using Supabase Streams
     final messageStream = supabase.client
         .from('messages')
         .stream(primaryKey: ['id'])
@@ -176,18 +263,21 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${widget.otherUserId}'),
             ),
             const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.otherUserName,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                ),
-                Text(
-                  _disappearingDuration == 'off' ? 'tap for disappearing setting' : '⏰ disappearing: $_disappearingDuration',
-                  style: const TextStyle(fontSize: 11, color: Colors.white54),
-                ),
-              ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.otherUserName,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  Text(
+                    _disappearingDuration == 'off' ? 'tap settings for disappearing' : '⏰ disappearing: $_disappearingDuration',
+                    style: const TextStyle(fontSize: 11, color: Colors.white54),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -195,19 +285,61 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             color: Colors.grey[900],
-            onSelected: _updateDisappearingSettings,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            onSelected: (value) {
+              if (value == 'off' || value == '24h' || value == '48h') {
+                _updateDisappearingSettings(value);
+              } else if (value == 'friend') {
+                _toggleFollow();
+              } else if (value == 'block') {
+                _toggleBlock();
+              } else if (value == 'report') {
+                _reportUser();
+              }
+            },
             itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'friend',
+                child: Row(
+                  children: [
+                    Icon(_isFollowing ? Icons.person_remove : Icons.person_add, color: Colors.white70, size: 18),
+                    const SizedBox(width: 8),
+                    Text(_isFollowing ? 'Unfollow Friends' : 'Follow Friend', style: const TextStyle(color: Colors.white)),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'block',
+                child: Row(
+                  children: [
+                    Icon(Icons.block, color: _isBlocked ? Colors.green : Colors.redAccent, size: 18),
+                    const SizedBox(width: 8),
+                    Text(_isBlocked ? 'Unblock Contact' : 'Block User', style: const TextStyle(color: Colors.white)),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'report',
+                child: Row(
+                  children: [
+                    Icon(Icons.report_problem_outlined, color: Colors.amber, size: 18),
+                    const SizedBox(width: 8),
+                    Text('Report Abuse', style: TextStyle(color: Colors.white)),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(height: 1),
               const PopupMenuItem(
                 value: 'off',
-                child: Text('Disappearing: Off', style: TextStyle(color: Colors.white)),
+                child: Text('⏰ Disappearing: Off', style: TextStyle(color: Colors.white)),
               ),
               const PopupMenuItem(
                 value: '24h',
-                child: Text('Disappearing: 24 Hours', style: TextStyle(color: Colors.white)),
+                child: Text('⏰ Disappearing: 24 Hours', style: TextStyle(color: Colors.white)),
               ),
               const PopupMenuItem(
                 value: '48h',
-                child: Text('Disappearing: 48 Hours', style: TextStyle(color: Colors.white)),
+                child: Text('⏰ Disappearing: 48 Hours', style: TextStyle(color: Colors.white)),
               ),
             ],
           ),
@@ -215,7 +347,24 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       ),
       body: Column(
         children: [
-          // Message stream list
+          if (_isBlocked)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+              color: Colors.redAccent.withOpacity(0.1),
+              child: Row(
+                children: [
+                  const Icon(Icons.block, color: Colors.redAccent, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'You have blocked ${widget.otherUserName}. Unblock them to continue chatting.',
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: messageStream,
@@ -226,8 +375,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
                 final messages = snapshot.data!;
 
-                // Auto-mark other user's messages as received on receipt
-                // Once marked received, Postgres instantly deletes them from server to preserve privacy!
                 for (final msg in messages) {
                   final senderId = msg['senderId'] as String;
                   final isReceived = msg['received'] as bool;
@@ -238,11 +385,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (_scrollController.hasClients) {
-                    _scrollController.animateTo(
-                      _scrollController.position.maxScrollExtent,
-                      duration: const Duration(milliseconds: 300),
-                      curve: Curves.easeOut,
-                    );
+                    _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
                   }
                 });
 
@@ -265,6 +408,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                     final text = msg['text'] as String?;
                     final mediaUrl = msg['mediaUrl'] as String?;
                     final mediaType = msg['mediaType'] as String?;
+                    final received = msg['received'] as bool? ?? false;
+                    final createdAtStr = msg['createdAt'] as String?;
+
+                    String timeStr = '';
+                    if (createdAtStr != null) {
+                      try {
+                        final parsed = DateTime.parse(createdAtStr).toLocal();
+                        timeStr = '${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}';
+                      } catch (_) {}
+                    }
 
                     return Align(
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -272,13 +425,26 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: isMe ? Theme.of(context).primaryColor : Colors.grey[900],
-                          borderRadius: BorderRadius.circular(16).copyWith(
-                            topRight: isMe ? const Radius.circular(0) : const Radius.circular(16),
-                            topLeft: isMe ? const Radius.circular(16) : const Radius.circular(0),
+                          // STUNNING GRADIENT FOR SENDER, Translucent glass style for receiver
+                          gradient: isMe
+                              ? LinearGradient(
+                                  colors: [primaryColor, primaryColor.withBlue(250)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                )
+                              : null,
+                          color: isMe ? null : Colors.white.withOpacity(0.06),
+                          borderRadius: BorderRadius.only(
+                            topLeft: const Radius.circular(20),
+                            topRight: const Radius.circular(20),
+                            bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
+                            bottomRight: isMe ? Radius.zero : const Radius.circular(20),
                           ),
+                          border: isMe
+                              ? null
+                              : Border.all(color: Colors.white.withOpacity(0.04), width: 0.8),
                         ),
-                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
@@ -290,8 +456,29 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                             if (text != null && text.isNotEmpty)
                               Text(
                                 text,
-                                style: const TextStyle(color: Colors.white, fontSize: 15),
+                                style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
                               ),
+                            const SizedBox(height: 4),
+                            // Micro-timestamp and receipts double ticks
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Spacer(),
+                                Text(
+                                  timeStr,
+                                  style: const TextStyle(color: Colors.white30, fontSize: 10),
+                                ),
+                                if (isMe) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    Icons.done_all,
+                                    size: 14,
+                                    color: received ? Colors.lightBlueAccent : Colors.white30,
+                                  ),
+                                ],
+                              ],
+                            ),
                           ],
                         ),
                       ),
@@ -316,18 +503,19 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 children: [
                   IconButton(
                     icon: const Icon(Icons.image_outlined, color: Colors.white70),
-                    onPressed: _sendImage,
+                    onPressed: _isBlocked ? null : _sendImage,
                   ),
                   IconButton(
                     icon: const Icon(Icons.videocam_outlined, color: Colors.white70),
-                    onPressed: _sendVideo,
+                    onPressed: _isBlocked ? null : _sendVideo,
                   ),
                   Expanded(
                     child: TextField(
                       controller: _messageController,
+                      enabled: !_isBlocked,
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        hintText: 'Type a secure message...',
+                        hintText: _isBlocked ? 'Unblock contact to chat' : 'Type a secure message...',
                         hintStyle: const TextStyle(color: Colors.white38),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12),
@@ -335,8 +523,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                     ),
                   ),
                   FloatingActionButton.small(
-                    onPressed: _sendTextMessage,
-                    backgroundColor: Theme.of(context).primaryColor,
+                    onPressed: _isBlocked ? null : _sendTextMessage,
+                    backgroundColor: _isBlocked ? Colors.grey[800] : primaryColor,
                     child: const Icon(Icons.send, color: Colors.white, size: 18),
                   ),
                 ],

@@ -31,7 +31,37 @@ class _ReelAuthPageState extends State<ReelAuthPage> {
     try {
       if (isSignUp) {
         await supabaseService.signUpWithEmail(email, password);
-        _nextStep(); // Go to profile setup
+        
+        final user = supabaseService.currentUser;
+        if (user != null) {
+          _nextStep(); // Safe to proceed to profile setup
+        } else {
+          // Email confirmation is active on Supabase, alert user and do not transition
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => AlertDialog(
+                backgroundColor: Colors.grey[950],
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                title: const Text('Verify Email', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                content: const Text(
+                  'A secure verification link has been sent to your email. Please click the link inside your email, then return here to Log In!',
+                  style: TextStyle(color: Colors.white70, height: 1.4),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      // Reload state to show login tab
+                    },
+                    child: const Text('Got it'),
+                  ),
+                ],
+              ),
+            );
+          }
+        }
       } else {
         await supabaseService.signInWithEmail(email, password);
         

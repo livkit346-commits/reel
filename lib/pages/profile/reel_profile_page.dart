@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/auth/reel_auth_page.dart';
 import 'package:reel/services/supabase_service.dart';
@@ -13,8 +15,13 @@ class ReelProfilePage extends StatefulWidget {
 class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProviderStateMixin {
   late Future<Map<String, dynamic>?> _profileFuture;
   late TabController _tabController;
+  final ImagePicker _picker = ImagePicker();
+  
   List<dynamic> _userPosts = [];
   bool _loadingPosts = true;
+  bool _uploadingAvatar = false;
+  int _followersCount = 0;
+  int _followingCount = 0;
 
   @override
   void initState() {
@@ -33,8 +40,11 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
     final supabase = context.read<SupabaseService>();
     final user = supabase.currentUser;
     if (user != null) {
-      _profileFuture = supabase.getUserProfile(user.id);
+      setState(() {
+        _profileFuture = supabase.getUserProfile(user.id);
+      });
       _loadUserPosts(user.id);
+      _loadSocialStats(user.id);
     } else {
       _profileFuture = Future.value(null);
     }
@@ -61,18 +71,63 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
     }
   }
 
+  Future<void> _loadSocialStats(String userId) async {
+    final supabase = context.read<SupabaseService>();
+    try {
+      final followers = await supabase.getFollowersCount(userId);
+      final following = await supabase.getFollowingCount(userId);
+      if (mounted) {
+        setState(() {
+          _followersCount = followers;
+          _followingCount = following;
+        });
+      }
+    } catch (_) {}
+  }
+
+  // Upload new profile avatar natively
+  Future<void> _uploadProfilePicture() async {
+    final pickedFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 50,
+      maxWidth: 500,
+    );
+
+    if (pickedFile != null) {
+      setState(() => _uploadingAvatar = true);
+      final supabase = context.read<SupabaseService>();
+      try {
+        await supabase.uploadAvatar(File(pickedFile.path));
+        _loadProfile(); // Reload dynamic profile details
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Profile picture updated successfully!')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to update picture: ${e.toString()}')),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _uploadingAvatar = false);
+      }
+    }
+  }
+
   // Edit profile dialog
   Future<void> _editProfile(BuildContext context, Map<String, dynamic>? profile) async {
     final nameController = TextEditingController(text: profile?['name']);
     final phoneController = TextEditingController(text: profile?['phone']);
-    // Custom mockable fields for Bio and Location
-    final bioController = TextEditingController(text: 'Flutter Developer & Designer. Building premium experiences on the Reel App! 🚀✨');
+    final bioController = TextEditingController(text: profile?['bio'] ?? '');
     final locationController = TextEditingController(text: 'Nigeria');
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.grey[950],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Edit Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         content: SingleChildScrollView(
           child: Column(
@@ -90,8 +145,8 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
               const SizedBox(height: 12),
               TextField(
                 controller: bioController,
-                style: const TextStyle(color: Colors.white),
                 maxLines: 2,
+                style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
                   labelText: 'Bio',
                   labelStyle: TextStyle(color: Colors.white54),
@@ -130,6 +185,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
             onPressed: () async {
               final name = nameController.text.trim();
               final phone = phoneController.text.trim();
+              final bio = bioController.text.trim();
               if (name.isEmpty) return;
 
               final supabase = context.read<SupabaseService>();
@@ -138,7 +194,8 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                 try {
                   await supabase.client.from('users').update({
                     'name': name,
-                    'phone': phone,
+                    'phone': phone.isNotEmpty ? phone : null,
+                    'bio': bio.isNotEmpty ? bio : null,
                   }).eq('id', user.id);
                   if (context.mounted) {
                     Navigator.pop(context);
@@ -155,7 +212,6 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
     );
   }
 
-  // Settings bottom sheet containing fully functional privacy controls and logout
   void _showSettingsBottomSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -201,7 +257,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                 leading: const Icon(Icons.logout_outlined, color: Colors.redAccent),
                 title: const Text('Log Out', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
                 onTap: () async {
-                  Navigator.pop(context); // Close bottom sheet
+                  Navigator.pop(context);
                   final supabase = context.read<SupabaseService>();
                   await supabase.signOut();
                   if (context.mounted) {
@@ -254,137 +310,181 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
           final userProfile = snapshot.data;
           final name = userProfile?['name'] ?? 'User';
           final phone = userProfile?['phone'] ?? 'No phone linked';
+          final bio = userProfile?['bio'] ?? 'Flutter Developer & Designer. Building premium experiences on the Reel App! 🚀✨';
+          final photoUrl = userProfile?['photoUrl'] as String?;
           final userId = userProfile?['id'] ?? 'unknown';
 
           return NestedScrollView(
             headerSliverBuilder: (context, innerBoxIsScrolled) {
               return [
                 SliverAppBar(
-                  expandedHeight: 180,
+                  expandedHeight: 0,
                   pinned: true,
-                  floating: false,
                   backgroundColor: Colors.black,
                   elevation: 0,
+                  title: const Text('Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   actions: [
                     IconButton(
                       icon: const Icon(Icons.more_vert, color: Colors.white),
                       onPressed: () => _showSettingsBottomSheet(context),
                     ),
                   ],
-                  flexibleSpace: FlexibleSpaceBar(
-                    background: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image.network(
-                          'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
-                          fit: BoxFit.cover,
-                        ),
-                        Container(color: Colors.black26),
-                      ],
-                    ),
-                  ),
                 ),
                 SliverToBoxAdapter(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Overlapping Circle Avatar with Outlined Edit Button
-                        Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            // Height increased to 56 so the profile name is cleanly positioned below the overlapping avatar
-                            const SizedBox(height: 56),
-                            Positioned(
-                              top: -46,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.black, width: 4),
-                                ),
-                                child: CircleAvatar(
-                                  radius: 42,
-                                  backgroundColor: Colors.white10,
-                                  backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=$userId'),
-                                ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // BACKGROUND COVER AND OVERLAPPING AVATAR BUILT IN A SINGLE COORDINATE SPACE
+                      // This eliminates Z-index clipping bugs on all devices.
+                      Stack(
+                        clipBehavior: Clip.none,
+                        alignment: Alignment.centerLeft,
+                        children: [
+                          // Cover Banner
+                          Image.network(
+                            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+                            height: 140,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                          ),
+                          // Pinned Circle Avatar Overlapping the bottom boundary
+                          Positioned(
+                            bottom: -36,
+                            left: 16,
+                            child: InkWell(
+                              onTap: _uploadProfilePicture,
+                              borderRadius: BorderRadius.circular(42),
+                              child: Stack(
+                                children: [
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: Colors.black, width: 4),
+                                    ),
+                                    child: CircleAvatar(
+                                      radius: 38,
+                                      backgroundColor: Colors.white10,
+                                      backgroundImage: photoUrl != null
+                                          ? NetworkImage(photoUrl)
+                                          : NetworkImage('https://i.pravatar.cc/150?u=$userId') as ImageProvider,
+                                    ),
+                                  ),
+                                  if (_uploadingAvatar)
+                                    Positioned.fill(
+                                      child: Container(
+                                        decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
+                                        child: const Center(
+                                          child: SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  Positioned(
+                                    bottom: 0,
+                                    right: 0,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).primaryColor,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(Icons.camera_alt, color: Colors.white, size: 10),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                OutlinedButton(
-                                  onPressed: () => _editProfile(context, userProfile),
-                                  style: OutlinedButton.styleFrom(
-                                    side: const BorderSide(color: Colors.white30),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                  ),
-                                  child: const Text(
-                                    'Edit profile',
-                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                  ),
-                                ),
-                              ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      // Action buttons row (Edit Profile)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            OutlinedButton(
+                              onPressed: () => _editProfile(context, userProfile),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Colors.white30),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              ),
+                              child: const Text(
+                                'Edit profile',
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
-                        // User Name and Handle (Cleanly positioned under the Circle Avatar)
-                        Text(
-                          name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '@${name.toLowerCase().replaceAll(' ', '')}',
-                          style: const TextStyle(color: Colors.white54, fontSize: 15),
-                        ),
-                        const SizedBox(height: 14),
-                        // User Bio
-                        Text(
-                          'Flutter Developer & Designer. Building premium experiences on the Reel App! 🚀✨',
-                          style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15, height: 1.3),
-                        ),
-                        const SizedBox(height: 14),
-                        // Location, Link, Joined Date Row
-                        Row(
+                      ),
+                      const SizedBox(height: 8),
+                      // Profile Identity - Cleanly Positioned Under Avatar
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(Icons.location_on_outlined, color: Colors.white54, size: 16),
-                            const SizedBox(width: 4),
-                            const Text('Nigeria', style: TextStyle(color: Colors.white54, fontSize: 14)),
-                            const SizedBox(width: 16),
-                            const Icon(Icons.calendar_today_outlined, color: Colors.white54, size: 14),
-                            const SizedBox(width: 4),
-                            const Text('Joined May 2026', style: TextStyle(color: Colors.white54, fontSize: 14)),
+                            Text(
+                              name,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '@${name.toLowerCase().replaceAll(' ', '')}',
+                              style: const TextStyle(color: Colors.white54, fontSize: 14),
+                            ),
+                            const SizedBox(height: 12),
+                            // User Bio
+                            Text(
+                              bio,
+                              style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14, height: 1.3),
+                            ),
+                            const SizedBox(height: 12),
+                            // Location, Link, Joined Date Row
+                            Row(
+                              children: [
+                                const Icon(Icons.location_on_outlined, color: Colors.white54, size: 14),
+                                const SizedBox(width: 4),
+                                const Text('Nigeria', style: TextStyle(color: Colors.white54, fontSize: 13)),
+                                const SizedBox(width: 16),
+                                const Icon(Icons.calendar_today_outlined, color: Colors.white54, size: 13),
+                                const SizedBox(width: 4),
+                                const Text('Joined May 2026', style: TextStyle(color: Colors.white54, fontSize: 13)),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            // Phone Row
+                            Row(
+                              children: [
+                                const Icon(Icons.phone_outlined, color: Colors.white54, size: 14),
+                                const SizedBox(width: 4),
+                                Text(phone, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            // Dynamic Followers / Following Stats
+                            Row(
+                              children: [
+                                _buildRichStat('$_followingCount', 'Following'),
+                                const SizedBox(width: 20),
+                                _buildRichStat('$_followersCount', 'Followers'),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        // Phone Row
-                        Row(
-                          children: [
-                            const Icon(Icons.phone_outlined, color: Colors.white54, size: 16),
-                            const SizedBox(width: 4),
-                            Text(phone, style: const TextStyle(color: Colors.white54, fontSize: 14)),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                        // Followers / Following Stats
-                        Row(
-                          children: [
-                            _buildRichStat('124', 'Following'),
-                            const SizedBox(width: 20),
-                            _buildRichStat('2.5K', 'Followers'),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
                 SliverPersistentHeader(
@@ -428,12 +528,12 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
       children: [
         Text(
           count,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
         ),
         const SizedBox(width: 4),
         Text(
           label,
-          style: const TextStyle(color: Colors.white54, fontSize: 15),
+          style: const TextStyle(color: Colors.white54, fontSize: 14),
         ),
       ],
     );
@@ -480,19 +580,19 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                       children: [
                         Text(
                           name,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                         ),
                         const SizedBox(width: 4),
                         Text(
                           '@${name.toLowerCase().replaceAll(' ', '')} • 2h',
-                          style: const TextStyle(color: Colors.white54, fontSize: 14),
+                          style: const TextStyle(color: Colors.white54, fontSize: 13),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Text(
                       text,
-                      style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
+                      style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
                     ),
                     const SizedBox(height: 12),
                     Row(

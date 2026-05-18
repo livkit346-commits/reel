@@ -13,7 +13,50 @@ class AddFriendsPage extends StatefulWidget {
 class _AddFriendsPageState extends State<AddFriendsPage> {
   final TextEditingController _searchController = TextEditingController();
   List<dynamic> _searchResults = [];
+  List<dynamic> _incomingFollows = []; // Real followers who follow the current user
+  Set<String> _myFollowing = {}; // User IDs that the current user is following
   bool _searching = false;
+  bool _loadingFollowers = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAllSocials();
+  }
+
+  void _loadAllSocials() async {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (myId == null) return;
+
+    try {
+      // 1. Get all followers (people who follow me)
+      final followersResponse = await supabase.client
+          .from('follows')
+          .select('followerId, users!follows_followerId_fkey(id, name, photoUrl)')
+          .eq('followingId', myId);
+
+      // 2. Get all people I am following
+      final followingResponse = await supabase.client
+          .from('follows')
+          .select('followingId')
+          .eq('followerId', myId);
+
+      final followingIds = (followingResponse as List)
+          .map((item) => item['followingId'] as String)
+          .toSet();
+
+      if (mounted) {
+        setState(() {
+          _incomingFollows = followersResponse;
+          _myFollowing = followingIds;
+          _loadingFollowers = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingFollowers = false);
+    }
+  }
 
   Future<void> _startChat(BuildContext context, String otherUserId, String otherUserName) async {
     final supabase = context.read<SupabaseService>();
@@ -68,14 +111,41 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
     }
   }
 
+  Future<void> _toggleFollow(String userId) async {
+    final supabase = context.read<SupabaseService>();
+    final isFollowing = _myFollowing.contains(userId);
+
+    try {
+      if (isFollowing) {
+        await supabase.unfollowUser(userId);
+        setState(() {
+          _myFollowing.remove(userId);
+        });
+      } else {
+        await supabase.followUser(userId);
+        setState(() {
+          _myFollowing.add(userId);
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update friendship status')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).primaryColor;
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.black,
         elevation: 0,
-        title: const Text('Add Friends', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text('Add Friends', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -86,7 +156,7 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
               padding: const EdgeInsets.all(16.0),
               child: Row(
                 children: [
-                  Icon(Icons.location_on, color: Theme.of(context).primaryColor, size: 20),
+                  Icon(Icons.location_on, color: primaryColor, size: 20),
                   const SizedBox(width: 8),
                   const Text(
                     'Nearby Discovery (50m)',
@@ -99,9 +169,9 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
               height: 120,
               margin: const EdgeInsets.symmetric(horizontal: 16),
               decoration: BoxDecoration(
-                color: Theme.of(context).primaryColor.withOpacity(0.05),
+                color: primaryColor.withOpacity(0.05),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Theme.of(context).primaryColor.withOpacity(0.2)),
+                border: Border.all(color: primaryColor.withOpacity(0.2)),
               ),
               child: FutureBuilder<List<dynamic>>(
                 future: context.read<SupabaseService>().getNearbyUsers(),
@@ -168,6 +238,8 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                 itemBuilder: (context, index) {
                   final user = _searchResults[index];
                   final name = user['name'] ?? 'User';
+                  final isFollowing = _myFollowing.contains(user['id']);
+
                   return ListTile(
                     leading: CircleAvatar(
                       radius: 24,
@@ -183,12 +255,12 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                           onPressed: () => _startChat(context, user['id'], name),
                         ),
                         ElevatedButton(
-                          onPressed: () {},
+                          onPressed: () => _toggleFollow(user['id']),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Theme.of(context).primaryColor,
+                            backgroundColor: isFollowing ? Colors.white10 : primaryColor,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                           ),
-                          child: const Text('Add'),
+                          child: Text(isFollowing ? 'Following' : 'Add', style: const TextStyle(color: Colors.white)),
                         ),
                       ],
                     ),
@@ -197,49 +269,61 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
               ),
             ],
             const SizedBox(height: 32),
-            // Friend Requests Section
+            // Real Incoming Follow Requests Section (People who followed the current user)
             const Padding(
               padding: EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                'Friend Requests',
+                'Follow Requests / Followers',
                 style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
             const SizedBox(height: 12),
-            ListView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: 2,
-              itemBuilder: (context, index) {
-                return ListTile(
-                  leading: CircleAvatar(
-                    radius: 24,
-                    backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=request_$index'),
-                  ),
-                  title: const Text('User Request', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  subtitle: const Text('In your same bus', style: TextStyle(color: Colors.white54)),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ElevatedButton(
-                        onPressed: () {},
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Theme.of(context).primaryColor,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            _loadingFollowers
+                ? const Center(child: CircularProgressIndicator())
+                : _incomingFollows.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.all(16.0),
+                        child: Text(
+                          'No incoming follow requests yet.',
+                          style: TextStyle(color: Colors.white38, fontSize: 14),
                         ),
-                        child: const Text('Accept', style: TextStyle(fontWeight: FontWeight.bold)),
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _incomingFollows.length,
+                        itemBuilder: (context, index) {
+                          final item = _incomingFollows[index];
+                          final user = item['users'];
+                          if (user == null) return const SizedBox.shrink();
+                          
+                          final name = user['name'] ?? 'User';
+                          final isFollowing = _myFollowing.contains(user['id']);
+
+                          return ListTile(
+                            leading: CircleAvatar(
+                              radius: 24,
+                              backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${user['id']}'),
+                            ),
+                            title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            subtitle: const Text('Follows you', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ElevatedButton(
+                                  onPressed: () => _toggleFollow(user['id']),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: isFollowing ? Colors.white10 : primaryColor,
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                  ),
+                                  child: Text(isFollowing ? 'Mutual Follow' : 'Follow Back', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white54),
-                        onPressed: () {},
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
             const SizedBox(height: 24),
           ],
         ),

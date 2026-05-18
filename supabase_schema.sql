@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS public.users (
   name TEXT NOT NULL,
   photoUrl TEXT,
   phone TEXT,
+  bio TEXT,
   createdAt TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   latitude DOUBLE PRECISION DEFAULT 0.0,
   longitude DOUBLE PRECISION DEFAULT 0.0,
@@ -138,5 +139,47 @@ CREATE OR REPLACE TRIGGER tr_delete_received_message
 AFTER UPDATE ON public.messages
 FOR EACH ROW
 EXECUTE FUNCTION public.delete_received_message();
+
+
+-- Create follows/friends table
+CREATE TABLE IF NOT EXISTS public.follows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "followerId" UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+  "followingId" UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+  "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  UNIQUE("followerId", "followingId")
+);
+
+ALTER TABLE public.follows ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Follows are viewable by everyone" ON public.follows FOR SELECT USING (true);
+CREATE POLICY "Follows can be inserted by authenticated users" ON public.follows FOR INSERT WITH CHECK (true);
+CREATE POLICY "Follows can be deleted by authenticated users" ON public.follows FOR DELETE USING (true);
+
+
+-- Create channels table
+CREATE TABLE IF NOT EXISTS public.channels (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  "creatorId" UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+  "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.channels ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Channels are viewable by everyone" ON public.channels FOR SELECT USING (true);
+CREATE POLICY "Channels can be inserted by creator" ON public.channels FOR INSERT WITH CHECK (true);
+
+
+-- Create channel_subscribers table
+CREATE TABLE IF NOT EXISTS public.channel_subscribers (
+  "channelId" UUID REFERENCES public.channels(id) ON DELETE CASCADE NOT NULL,
+  "userId" UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+  PRIMARY KEY ("channelId", "userId")
+);
+
+ALTER TABLE public.channel_subscribers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Subscribers are viewable by everyone" ON public.channel_subscribers FOR SELECT USING (true);
+CREATE POLICY "Subscribers can be inserted by user" ON public.channel_subscribers FOR INSERT WITH CHECK (true);
+CREATE POLICY "Subscribers can be deleted by user" ON public.channel_subscribers FOR DELETE USING (true);
+
 
 

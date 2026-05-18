@@ -60,18 +60,40 @@ class SupabaseService {
   User? get currentUser => client.auth.currentUser;
 
   // Profile: Create/Update user doc
-  Future<void> createUserProfile(String userId, String name, String? photoUrl, String? phoneNumber) async {
+  Future<void> createUserProfile(String userId, String name, String? photoUrl, String? phoneNumber, {String? bio}) async {
     try {
       await client.from('users').upsert({
         'id': userId,
         'name': name,
         'photoUrl': photoUrl,
         'phone': phoneNumber,
+        'bio': bio,
         'createdAt': DateTime.now().toIso8601String(),
         'latitude': 0.0,
         'longitude': 0.0,
         'lastSeen': DateTime.now().toIso8601String(),
       });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Profile: Upload avatar image
+  Future<String> uploadAvatar(File imageFile) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      final fileName = 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final storagePath = 'avatars/$myId/$fileName';
+
+      // Upload to avatars bucket
+      await client.storage.from('media').upload(storagePath, imageFile);
+      final photoUrl = getMediaUrl('media', storagePath);
+
+      // Update users table
+      await client.from('users').update({'photoUrl': photoUrl}).eq('id', myId);
+      return photoUrl;
     } catch (e) {
       rethrow;
     }
@@ -137,6 +159,38 @@ class SupabaseService {
       });
     } catch (e) {
       rethrow;
+    }
+  }
+
+  // Status: Upload and Create status
+  Future<void> uploadAndCreateStatus(File imageFile, String userName) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      final fileName = 'status_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final storagePath = 'statuses/$myId/$fileName';
+
+      await client.storage.from('media').upload(storagePath, imageFile);
+      final imageUrl = getMediaUrl('media', storagePath);
+
+      await createStatus(myId, userName, imageUrl);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Status: Retrieve active statuses
+  Future<List<dynamic>> getActiveStatuses() async {
+    try {
+      final response = await client
+          .from('statuses')
+          .select()
+          .order('createdAt', ascending: false)
+          .limit(20);
+      return response;
+    } catch (e) {
+      return [];
     }
   }
 
@@ -304,6 +358,154 @@ class SupabaseService {
       await client.from('messages').delete().eq('id', messageId);
     } catch (e) {
       // Ignore
+    }
+  }
+
+  // SOCIALS & FRIENDS SERVICES
+
+  // Follow/Add user
+  Future<void> followUser(String otherUserId) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      await client.from('follows').insert({
+        'followerId': myId,
+        'followingId': otherUserId,
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Unfollow user
+  Future<void> unfollowUser(String otherUserId) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      await client.from('follows').delete().eq('followerId', myId).eq('followingId', otherUserId);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Check if following
+  Future<bool> isFollowing(String otherUserId) async {
+    final myId = currentUser?.id;
+    if (myId == null) return false;
+
+    try {
+      final response = await client
+          .from('follows')
+          .select()
+          .eq('followerId', myId)
+          .eq('followingId', otherUserId)
+          .maybeSingle();
+      return response != null;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Get following count
+  Future<int> getFollowingCount(String userId) async {
+    try {
+      final response = await client
+          .from('follows')
+          .select('id', const FetchOptions(count: CountOption.exact))
+          .eq('followerId', userId);
+      return response.length;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // Get followers count
+  Future<int> getFollowersCount(String userId) async {
+    try {
+      final response = await client
+          .from('follows')
+          .select('id', const FetchOptions(count: CountOption.exact))
+          .eq('followingId', userId);
+      return response.length;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // CHANNELS SERVICES
+
+  // Create channel
+  Future<void> createChannel(String name) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      final channel = await client.from('channels').insert({
+        'name': name,
+        'creatorId': myId,
+      }).select('id').single();
+
+      // Automatically subscribe creator
+      await followChannel(channel['id'] as String);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Get all channels
+  Future<List<dynamic>> getChannels() async {
+    try {
+      final response = await client.from('channels').select().order('createdAt', ascending: false);
+      return response;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // Follow/Subscribe channel
+  Future<void> followChannel(String channelId) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      await client.from('channel_subscribers').insert({
+        'channelId': channelId,
+        'userId': myId,
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Unfollow/Unsubscribe channel
+  Future<void> unfollowChannel(String channelId) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      await client.from('channel_subscribers').delete().eq('channelId', channelId).eq('userId', myId);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Check if subscribed to channel
+  Future<bool> isSubscribedToChannel(String channelId) async {
+    final myId = currentUser?.id;
+    if (myId == null) return false;
+
+    try {
+      final response = await client
+          .from('channel_subscribers')
+          .select()
+          .eq('channelId', channelId)
+          .eq('userId', myId)
+          .maybeSingle();
+      return response != null;
+    } catch (e) {
+      return false;
     }
   }
 }
