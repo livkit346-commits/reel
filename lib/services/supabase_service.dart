@@ -413,7 +413,7 @@ class SupabaseService {
     try {
       final response = await client
           .from('follows')
-          .select('id', const FetchOptions(count: CountOption.exact))
+          .select('id')
           .eq('followerId', userId);
       return response.length;
     } catch (e) {
@@ -426,7 +426,7 @@ class SupabaseService {
     try {
       final response = await client
           .from('follows')
-          .select('id', const FetchOptions(count: CountOption.exact))
+          .select('id')
           .eq('followingId', userId);
       return response.length;
     } catch (e) {
