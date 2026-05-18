@@ -35,7 +35,7 @@ class ReelApp extends StatelessWidget {
       title: 'Reel',
       debugShowCheckedModeBanner: false,
       theme: ReelTheme.darkTheme,
-      home: showMainScreen ? const MainScreen() : const ReelAuthPage(),
+      home: showMainScreen ? MainScreen() : ReelAuthPage(),
     );
   }
 }

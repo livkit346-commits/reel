@@ -140,7 +140,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 22,
-                            fontWeight: FontWeight.extrabold,
+                            fontWeight: FontWeight.w800,
                             letterSpacing: -0.5,
                           ),
                         ),
@@ -151,14 +151,13 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                         ),
                         const SizedBox(height: 14),
                         // User Bio (Mocked for now)
-                        const Text(
+                        Text(
                           'Flutter Developer & Designer. Building premium experiences on the Reel App! 🚀✨',
-                          style: TextStyle(color: Colors.white90, fontSize: 15, height: 1.3),
+                          style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15, height: 1.3),
                         ),
                         const SizedBox(height: 14),
                         // Location, Link, Joined Date Row
                         Row(
-                          flex: 1,
                           children: [
                             const Icon(Icons.location_on_outlined, color: Colors.white54, size: 16),
                             const SizedBox(width: 4),
