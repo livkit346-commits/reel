@@ -220,10 +220,44 @@ class SupabaseService {
 
   // CHAT SERVICES
 
+  // Check if mutual friends (both users follow each other)
+  Future<bool> isMutualFriend(String otherUserId) async {
+    final myId = currentUser?.id;
+    if (myId == null) return false;
+
+    try {
+      // Check if current user follows other user
+      final myFollow = await client
+          .from('follows')
+          .select()
+          .eq('followerId', myId)
+          .eq('followingId', otherUserId)
+          .maybeSingle();
+
+      // Check if other user follows current user
+      final otherFollow = await client
+          .from('follows')
+          .select()
+          .eq('followerId', otherUserId)
+          .eq('followingId', myId)
+          .maybeSingle();
+
+      return myFollow != null && otherFollow != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Create or get chat between current user and another user
   Future<String> createOrGetChat(String otherUserId) async {
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
+
+    // Snapchat Friendship Enforcer: Restrict chats to mutual friends only
+    final areFriends = await isMutualFriend(otherUserId);
+    if (!areFriends) {
+      throw Exception('Not mutual friends');
+    }
 
     try {
       // Check if a chat already exists between these participants
