@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/auth/reel_auth_page.dart';
+import 'package:reel/pages/main_screen.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/theme/reel_theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
