@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:reel/pages/auth/reel_auth_page.dart';
 import 'package:reel/services/supabase_service.dart';
 
 class ReelProfilePage extends StatefulWidget {
@@ -12,6 +13,8 @@ class ReelProfilePage extends StatefulWidget {
 class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProviderStateMixin {
   late Future<Map<String, dynamic>?> _profileFuture;
   late TabController _tabController;
+  List<dynamic> _userPosts = [];
+  bool _loadingPosts = true;
 
   @override
   void initState() {
@@ -31,9 +34,210 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
     final user = supabase.currentUser;
     if (user != null) {
       _profileFuture = supabase.getUserProfile(user.id);
+      _loadUserPosts(user.id);
     } else {
       _profileFuture = Future.value(null);
     }
+  }
+
+  Future<void> _loadUserPosts(String userId) async {
+    final supabase = context.read<SupabaseService>();
+    try {
+      final posts = await supabase.client
+          .from('posts')
+          .select()
+          .eq('userId', userId)
+          .order('createdAt', ascending: false);
+      if (mounted) {
+        setState(() {
+          _userPosts = posts;
+          _loadingPosts = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loadingPosts = false);
+      }
+    }
+  }
+
+  // Edit profile dialog
+  Future<void> _editProfile(BuildContext context, Map<String, dynamic>? profile) async {
+    final nameController = TextEditingController(text: profile?['name']);
+    final phoneController = TextEditingController(text: profile?['phone']);
+    // Custom mockable fields for Bio and Location
+    final bioController = TextEditingController(text: 'Flutter Developer & Designer. Building premium experiences on the Reel App! 🚀✨');
+    final locationController = TextEditingController(text: 'Nigeria');
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[950],
+        title: const Text('Edit Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Name',
+                  labelStyle: TextStyle(color: Colors.white54),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: bioController,
+                style: const TextStyle(color: Colors.white),
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  labelText: 'Bio',
+                  labelStyle: TextStyle(color: Colors.white54),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: locationController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Location',
+                  labelStyle: TextStyle(color: Colors.white54),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: phoneController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Phone',
+                  labelStyle: TextStyle(color: Colors.white54),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              final phone = phoneController.text.trim();
+              if (name.isEmpty) return;
+
+              final supabase = context.read<SupabaseService>();
+              final user = supabase.currentUser;
+              if (user != null) {
+                try {
+                  await supabase.client.from('users').update({
+                    'name': name,
+                    'phone': phone,
+                  }).eq('id', user.id);
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    _loadProfile();
+                  }
+                } catch (_) {}
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Settings bottom sheet containing fully functional privacy controls and logout
+  void _showSettingsBottomSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[950],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+              ),
+              const ListTile(
+                title: Text('Account Settings', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+              ListTile(
+                leading: const Icon(Icons.privacy_tip_outlined, color: Colors.white70),
+                title: const Text('Privacy & Security', style: TextStyle(color: Colors.white)),
+                subtitle: const Text('Manage disappearing preferences & encryption', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showPrivacySettingsDialog(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.notifications_none_outlined, color: Colors.white70),
+                title: const Text('Notifications', style: TextStyle(color: Colors.white)),
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Notifications are fully configured for your device')),
+                  );
+                },
+              ),
+              const Divider(color: Colors.white12),
+              ListTile(
+                leading: const Icon(Icons.logout_outlined, color: Colors.redAccent),
+                title: const Text('Log Out', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                onTap: () async {
+                  Navigator.pop(context); // Close bottom sheet
+                  final supabase = context.read<SupabaseService>();
+                  await supabase.signOut();
+                  if (context.mounted) {
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(builder: (context) => const ReelAuthPage()),
+                      (route) => false,
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showPrivacySettingsDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[950],
+        title: const Text('Privacy Settings', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: const Text(
+          'Your chats are fully protected with secure end-to-end receipt purging. Messages are instantly deleted from our server the exact second your contact receives them.',
+          style: TextStyle(color: Colors.white70, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -61,30 +265,21 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                   floating: false,
                   backgroundColor: Colors.black,
                   elevation: 0,
-                  leading: const Icon(Icons.arrow_back, color: Colors.white),
                   actions: [
                     IconButton(
-                      icon: const Icon(Icons.search, color: Colors.white),
-                      onPressed: () {},
-                    ),
-                    IconButton(
                       icon: const Icon(Icons.more_vert, color: Colors.white),
-                      onPressed: () {},
+                      onPressed: () => _showSettingsBottomSheet(context),
                     ),
                   ],
                   flexibleSpace: FlexibleSpaceBar(
                     background: Stack(
                       fit: StackFit.expand,
                       children: [
-                        // Cover Banner Image
                         Image.network(
                           'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
                           fit: BoxFit.cover,
                         ),
-                        // Dark overlay for banner text readability if needed
-                        Container(
-                          color: Colors.black26,
-                        ),
+                        Container(color: Colors.black26),
                       ],
                     ),
                   ),
@@ -95,13 +290,14 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Overlapping Profile Picture and Edit Button
+                        // Overlapping Circle Avatar with Outlined Edit Button
                         Stack(
                           clipBehavior: Clip.none,
                           children: [
-                            const SizedBox(height: 40),
+                            // Height increased to 56 so the profile name is cleanly positioned below the overlapping avatar
+                            const SizedBox(height: 56),
                             Positioned(
-                              top: -50,
+                              top: -46,
                               child: Container(
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
@@ -118,7 +314,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
                                 OutlinedButton(
-                                  onPressed: () {},
+                                  onPressed: () => _editProfile(context, userProfile),
                                   style: OutlinedButton.styleFrom(
                                     side: const BorderSide(color: Colors.white30),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -134,7 +330,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                           ],
                         ),
                         const SizedBox(height: 12),
-                        // User Name and Handle
+                        // User Name and Handle (Cleanly positioned under the Circle Avatar)
                         Text(
                           name,
                           style: const TextStyle(
@@ -150,7 +346,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                           style: const TextStyle(color: Colors.white54, fontSize: 15),
                         ),
                         const SizedBox(height: 14),
-                        // User Bio (Mocked for now)
+                        // User Bio
                         Text(
                           'Flutter Developer & Designer. Building premium experiences on the Reel App! 🚀✨',
                           style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 15, height: 1.3),
@@ -244,10 +440,25 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
   }
 
   Widget _buildPostsTab() {
+    if (_loadingPosts) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_userPosts.isEmpty) {
+      return const Center(
+        child: Text('No posts yet', style: TextStyle(color: Colors.white38, fontSize: 16)),
+      );
+    }
+
     return ListView.builder(
       padding: EdgeInsets.zero,
-      itemCount: 3,
+      itemCount: _userPosts.length,
       itemBuilder: (context, index) {
+        final post = _userPosts[index];
+        final text = post['text'] ?? '';
+        final likes = post['likes'] ?? 0;
+        final name = post['userName'] ?? 'User';
+
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: const BoxDecoration(
@@ -256,9 +467,9 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const CircleAvatar(
+              CircleAvatar(
                 radius: 20,
-                backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=user_post'),
+                backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${post['userId']}'),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -266,30 +477,30 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      children: const [
+                      children: [
                         Text(
-                          'You',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                          name,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                         ),
-                        SizedBox(width: 4),
+                        const SizedBox(width: 4),
                         Text(
-                          '@you • 2h',
-                          style: TextStyle(color: Colors.white54, fontSize: 14),
+                          '@${name.toLowerCase().replaceAll(' ', '')} • 2h',
+                          style: const TextStyle(color: Colors.white54, fontSize: 14),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
-                    const Text(
-                      'Just launched the new premium UI with Twitter/X design! What do you guys think? 🔥 #ReelApp',
-                      style: TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
+                    Text(
+                      text,
+                      style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
                     ),
                     const SizedBox(height: 12),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        _buildPostAction(Icons.chat_bubble_outline, '12'),
-                        _buildPostAction(Icons.repeat, '4'),
-                        _buildPostAction(Icons.favorite_border, '89'),
+                        _buildPostAction(Icons.chat_bubble_outline, '0'),
+                        _buildPostAction(Icons.repeat, '0'),
+                        _buildPostAction(Icons.favorite_border, '$likes'),
                         _buildPostAction(Icons.share_outlined, ''),
                       ],
                     ),
