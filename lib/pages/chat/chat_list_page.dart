@@ -92,12 +92,7 @@ class _ChatListPageState extends State<ChatListPage> {
             fontWeight: FontWeight.bold,
           ),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: _loadChats,
-          ),
-        ],
+        actions: const [],
       ),
       body: FutureBuilder<List<dynamic>>(
         future: _chatsFuture,

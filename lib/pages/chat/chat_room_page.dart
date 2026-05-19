@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
@@ -33,11 +35,80 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   bool _isFollowing = false;
   bool _isBlocked = false;
 
+  List<Map<String, dynamic>> _localMessages = [];
+  bool _isLoadingLocal = true;
+
   @override
   void initState() {
     super.initState();
     _loadChatSettings();
     _checkFollowingStatus();
+    _loadLocalMessages();
+  }
+
+  Future<void> _loadLocalMessages() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/chats/${widget.chatId}_messages.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final List<dynamic> decoded = jsonDecode(content);
+        setState(() {
+          _localMessages = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+          _isLoadingLocal = false;
+        });
+      } else {
+        setState(() {
+          _isLoadingLocal = false;
+        });
+      }
+    } catch (_) {
+      setState(() {
+        _isLoadingLocal = false;
+      });
+    }
+  }
+
+  Future<void> _saveLocalMessages() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final dir = Directory('${directory.path}/chats');
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      final file = File('${dir.path}/${widget.chatId}_messages.json');
+      await file.writeAsString(jsonEncode(_localMessages));
+    } catch (_) {}
+  }
+
+  void _mergeMessages(List<Map<String, dynamic>> streamMessages) {
+    bool changed = false;
+    for (final streamMsg in streamMessages) {
+      final msgId = streamMsg['id'];
+      final existingIndex = _localMessages.indexWhere((m) => m['id'] == msgId);
+      if (existingIndex == -1) {
+        _localMessages.add(streamMsg);
+        changed = true;
+      } else {
+        // Update values if changed (e.g. received status)
+        final existing = _localMessages[existingIndex];
+        if (existing['received'] != streamMsg['received'] ||
+            existing['mediaUrl'] != streamMsg['mediaUrl'] ||
+            existing['text'] != streamMsg['text']) {
+          _localMessages[existingIndex] = streamMsg;
+          changed = true;
+        }
+      }
+    }
+
+    if (changed) {
+      _localMessages.sort((a, b) {
+        final aTime = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+        final bTime = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+        return aTime.compareTo(bTime);
+      });
+      _saveLocalMessages();
+    }
   }
 
   Future<void> _loadChatSettings() async {
@@ -381,19 +452,24 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             child: StreamBuilder<List<Map<String, dynamic>>>(
               stream: messageStream,
               builder: (context, snapshot) {
-                if (!snapshot.hasData) {
+                if (_isLoadingLocal) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                final messages = snapshot.data!;
+                final streamMessages = snapshot.data ?? [];
 
-                for (final msg in messages) {
-                  final senderId = msg['senderId'] as String;
-                  final isReceived = msg['received'] as bool;
-                  if (senderId != myId && !isReceived) {
-                    supabase.markMessageAsReceived(msg['id'] as String);
+                if (streamMessages.isNotEmpty) {
+                  _mergeMessages(streamMessages);
+                  for (final msg in streamMessages) {
+                    final senderId = msg['senderId'] as String;
+                    final isReceived = msg['received'] as bool? ?? false;
+                    if (senderId != myId && !isReceived) {
+                      supabase.markMessageAsReceived(msg['id'] as String);
+                    }
                   }
                 }
+
+                final displayMessages = _localMessages;
 
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (_scrollController.hasClients) {
@@ -401,7 +477,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   }
                 });
 
-                if (messages.isEmpty) {
+                if (displayMessages.isEmpty) {
                   return const Center(
                     child: Text(
                       'No messages. Chat is fully encrypted & ephemeral.',
@@ -413,9 +489,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 return ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                  itemCount: messages.length,
+                  itemCount: displayMessages.length,
                   itemBuilder: (context, index) {
-                    final msg = messages[index];
+                    final msg = displayMessages[index];
                     final isMe = msg['senderId'] == myId;
                     final text = msg['text'] as String?;
                     final mediaUrl = msg['mediaUrl'] as String?;
@@ -435,9 +511,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
-                          // Instagram direct message style vibrant gradient for sender
                           gradient: isMe
                               ? const LinearGradient(
                                   colors: [
@@ -449,7 +524,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                   end: Alignment.bottomRight,
                                 )
                               : null,
-                          // Instagram high-contrast dark gray bubble for receiver
                           color: isMe ? null : const Color(0xFF262626),
                           borderRadius: BorderRadius.only(
                             topLeft: const Radius.circular(20),
@@ -460,7 +534,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         ),
                         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
                         child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             if (mediaUrl != null && mediaType != null) ...[
@@ -468,26 +542,28 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                               const SizedBox(height: 6),
                             ],
                             if (text != null && text.isNotEmpty)
-                              Text(
-                                text,
-                                style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
+                              Align(
+                                alignment: Alignment.topLeft,
+                                child: Text(
+                                  text,
+                                  style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
+                                ),
                               ),
                             const SizedBox(height: 4),
-                            // Micro-timestamp and receipts double ticks
+                            // Micro-timestamp and receipts double ticks (no Spacer to keep bubble size wrap content)
                             Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Spacer(),
                                 Text(
                                   timeStr,
-                                  style: const TextStyle(color: Colors.white30, fontSize: 10),
+                                  style: const TextStyle(color: Colors.white38, fontSize: 9),
                                 ),
                                 if (isMe) ...[
                                   const SizedBox(width: 4),
                                   Icon(
                                     Icons.done_all,
-                                    size: 14,
+                                    size: 13,
                                     color: received ? Colors.lightBlueAccent : Colors.white30,
                                   ),
                                 ],
@@ -511,35 +587,86 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           // Chat input field
           SafeArea(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: Colors.grey[950],
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFF121212),
+                border: Border(
+                  top: BorderSide(color: Colors.white.withOpacity(0.08), width: 1),
+                ),
+              ),
               child: Row(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.image_outlined, color: Colors.white70),
-                    onPressed: _isBlocked ? null : _sendImage,
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      shape: BoxShape.circle,
+                    ),
+                    margin: const EdgeInsets.only(right: 6),
+                    child: IconButton(
+                      icon: const Icon(Icons.add_photo_alternate_rounded, color: Color(0xFF00BFFF), size: 22),
+                      onPressed: _isBlocked ? null : _sendImage,
+                    ),
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.videocam_outlined, color: Colors.white70),
-                    onPressed: _isBlocked ? null : _sendVideo,
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      shape: BoxShape.circle,
+                    ),
+                    margin: const EdgeInsets.only(right: 10),
+                    child: IconButton(
+                      icon: const Icon(Icons.videocam_rounded, color: Color(0xFF00BFFF), size: 22),
+                      onPressed: _isBlocked ? null : _sendVideo,
+                    ),
                   ),
                   Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      enabled: !_isBlocked,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: _isBlocked ? 'Unblock contact to chat' : 'Type a secure message...',
-                        hintStyle: const TextStyle(color: Colors.white38),
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: TextField(
+                        controller: _messageController,
+                        enabled: !_isBlocked,
+                        style: const TextStyle(color: Colors.white, fontSize: 15),
+                        maxLines: null,
+                        decoration: InputDecoration(
+                          hintText: _isBlocked ? 'Unblock contact to chat' : 'Message...',
+                          hintStyle: const TextStyle(color: Colors.white30, fontSize: 14),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
                       ),
                     ),
                   ),
-                  FloatingActionButton.small(
-                    onPressed: _isBlocked ? null : _sendTextMessage,
-                    backgroundColor: _isBlocked ? Colors.grey[800] : primaryColor,
-                    child: const Icon(Icons.send, color: Colors.white, size: 18),
+                  const SizedBox(width: 10),
+                  GestureDetector(
+                    onTap: _isBlocked ? null : _sendTextMessage,
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: _isBlocked
+                            ? null
+                            : const LinearGradient(
+                                colors: [Color(0xFF00BFFF), Color(0xFF4F5BD5)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                        color: _isBlocked ? Colors.grey[800] : null,
+                        boxShadow: [
+                          if (!_isBlocked)
+                            BoxShadow(
+                              color: const Color(0xFF00BFFF).withOpacity(0.3),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                        ],
+                      ),
+                      child: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                    ),
                   ),
                 ],
               ),
