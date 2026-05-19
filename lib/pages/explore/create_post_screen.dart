@@ -31,21 +31,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
     final supabase = context.read<SupabaseService>();
 
     try {
-      final user = supabase.currentUser;
-      if (user == null) throw Exception("User not authenticated.");
-      final userProfile = await supabase.getUserProfile(user.id);
-      final userName = userProfile?['name'] ?? 'User';
-
-      String? imageUrl;
-      if (_image != null) {
-        // TODO: Upload image to Supabase Storage
-      }
-
-      await supabase.createPost(
-        user.id,
-        userName,
+      await supabase.uploadAndCreatePost(
         _textController.text,
-        imageUrl,
+        _image,
       );
 
       if (mounted) Navigator.pop(context, true);

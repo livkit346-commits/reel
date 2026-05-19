@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
+import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/widgets/user_avatar.dart';
 
 class ChatListPage extends StatefulWidget {
   const ChatListPage({super.key});
@@ -140,14 +142,21 @@ class _ChatListPageState extends State<ChatListPage> {
                 final otherUserName = userProfile['name'] as String? ?? 'User';
                 final otherPhoto = userProfile['photoUrl'] as String?;
 
+                final hasUnread = chatMap['hasUnread'] as bool? ?? false;
+
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  leading: CircleAvatar(
+                  leading: UserAvatar(
+                    userId: otherUserId,
                     radius: 26,
-                    backgroundColor: Colors.white12,
-                    backgroundImage: otherPhoto != null
-                        ? NetworkImage(otherPhoto)
-                        : NetworkImage('https://i.pravatar.cc/150?u=$otherUserId') as ImageProvider,
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ReelProfilePage(userId: otherUserId),
+                        ),
+                      );
+                    },
                   ),
                   title: Text(
                     otherUserName,
@@ -157,11 +166,37 @@ class _ChatListPageState extends State<ChatListPage> {
                       fontSize: 16,
                     ),
                   ),
-                  subtitle: const Text(
-                    'Tap to view encrypted ephemeral messages',
-                    style: TextStyle(color: Colors.white38, fontSize: 13),
+                  subtitle: Text(
+                    hasUnread ? 'New secure message received!' : 'Tap to view encrypted ephemeral messages',
+                    style: TextStyle(
+                      color: hasUnread ? const Color(0xFF00BFFF) : Colors.white38,
+                      fontSize: 13,
+                      fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
+                    ),
                   ),
-                  trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (hasUnread)
+                        Container(
+                          width: 10,
+                          height: 10,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF00BFFF),
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Color(0xFF00BFFF),
+                                blurRadius: 8,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                        ),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
+                    ],
+                  ),
                   onTap: () {
                     Navigator.push(
                       context,

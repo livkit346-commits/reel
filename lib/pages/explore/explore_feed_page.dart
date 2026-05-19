@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/explore/create_post_screen.dart';
+import 'package:reel/pages/profile/reel_profile_page.dart';
+import 'package:reel/pages/updates/updates_page.dart';
+import 'package:reel/widgets/user_avatar.dart';
 
 class ExploreFeedPage extends StatefulWidget {
   const ExploreFeedPage({super.key});
@@ -53,7 +56,7 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
 
             return CustomScrollView(
               slivers: [
-                // Top Row: Nearby Statuses (Keeping as mock for now or fetch later)
+                // Top Row: Active Status Updates
                 SliverToBoxAdapter(
                   child: Container(
                     height: 110,
@@ -61,12 +64,61 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
                     decoration: const BoxDecoration(
                       border: Border(bottom: BorderSide(color: Colors.white12, width: 0.5)),
                     ),
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: 10,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      itemBuilder: (context, index) {
-                        return _buildNearbyStatus(index);
+                    child: FutureBuilder<List<dynamic>>(
+                      future: context.read<SupabaseService>().getExploreStatuses(),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)));
+                        }
+                        final statuses = snapshot.data ?? [];
+                        if (statuses.isEmpty) {
+                          return const Center(
+                            child: Text(
+                              'No recent active status updates',
+                              style: TextStyle(color: Colors.white38, fontSize: 12),
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: statuses.length,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          itemBuilder: (context, index) {
+                            final status = statuses[index];
+                            final userName = status['userName'] ?? status['username'] ?? 'User';
+                            final imageUrl = status['imageUrl'] ?? status['imageurl'] ?? '';
+                            final userId = status['userId'] ?? status['userid'] ?? '';
+
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
+                              child: Column(
+                                children: [
+                                  GestureDetector(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => StatusViewerPage(status: status),
+                                        ),
+                                      );
+                                    },
+                                    child: UserAvatar(
+                                      userId: userId,
+                                      radius: 26,
+                                      border: Border.all(color: const Color(0xFF00BFFF), width: 2),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    userName,
+                                    style: const TextStyle(color: Colors.white70, fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        );
                       },
                     ),
                   ),
@@ -105,32 +157,6 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
       ),
     );
   }
-
-  Widget _buildNearbyStatus(int index) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF00BFFF), width: 2),
-            ),
-            child: CircleAvatar(
-              radius: 30,
-              backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=nearby_$index'),
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Nearby',
-            style: TextStyle(color: Colors.white70, fontSize: 11),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class ExplorePostItem extends StatelessWidget {
@@ -140,9 +166,9 @@ class ExplorePostItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String text = post['text'] ?? '';
-    final String userName = post['userName'] ?? 'User';
-    final String? imageUrl = post['imageUrl'];
-    final String userId = post['userId'] ?? 'unknown';
+    final String userName = post['userName'] ?? post['username'] ?? 'User';
+    final String? imageUrl = post['imageUrl'] ?? post['imageurl'];
+    final String userId = post['userId'] ?? post['userid'] ?? 'unknown';
     final int likes = post['likes'] ?? 0;
 
     return Container(
@@ -153,9 +179,17 @@ class ExplorePostItem extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
+          UserAvatar(
+            userId: userId,
             radius: 24,
-            backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=$userId'),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ReelProfilePage(userId: userId),
+                ),
+              );
+            },
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -164,9 +198,19 @@ class ExplorePostItem extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Text(
-                      userName,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ReelProfilePage(userId: userId),
+                          ),
+                        );
+                      },
+                      child: Text(
+                        userName,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                      ),
                     ),
                     const SizedBox(width: 4),
                     Text(

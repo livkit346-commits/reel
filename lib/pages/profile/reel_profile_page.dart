@@ -3,10 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/auth/reel_auth_page.dart';
+import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/services/supabase_service.dart';
 
 class ReelProfilePage extends StatefulWidget {
-  const ReelProfilePage({super.key});
+  final String? userId; // Optional profile to view
+  
+  const ReelProfilePage({super.key, this.userId});
 
   @override
   State<ReelProfilePage> createState() => _ReelProfilePageState();
@@ -20,8 +23,24 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
   List<dynamic> _userPosts = [];
   bool _loadingPosts = true;
   bool _uploadingAvatar = false;
+  bool _uploadingCover = false;
   int _followersCount = 0;
   int _followingCount = 0;
+
+  // Social Friendship states for other users' profiles
+  bool _isFollowingThisUser = false;
+  bool _userFollowsMe = false;
+  bool _isMutual = false;
+  bool _loadingFriendship = true;
+
+  bool get _isMe {
+    final myId = context.read<SupabaseService>().currentUser?.id;
+    return widget.userId == null || widget.userId == myId;
+  }
+
+  String get _targetUserId {
+    return widget.userId ?? context.read<SupabaseService>().currentUser?.id ?? '';
+  }
 
   @override
   void initState() {
@@ -38,13 +57,17 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
 
   void _loadProfile() {
     final supabase = context.read<SupabaseService>();
-    final user = supabase.currentUser;
-    if (user != null) {
+    final targetId = _targetUserId;
+    
+    if (targetId.isNotEmpty) {
       setState(() {
-        _profileFuture = supabase.getUserProfile(user.id);
+        _profileFuture = supabase.getUserProfile(targetId);
       });
-      _loadUserPosts(user.id);
-      _loadSocialStats(user.id);
+      _loadUserPosts(targetId);
+      _loadSocialStats(targetId);
+      if (!_isMe) {
+        _loadFriendshipStatus(targetId);
+      }
     } else {
       _profileFuture = Future.value(null);
     }
@@ -85,6 +108,114 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
     } catch (_) {}
   }
 
+  Future<void> _loadFriendshipStatus(String otherUserId) async {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (myId == null) return;
+
+    try {
+      final following = await supabase.isFollowing(otherUserId);
+      
+      // Check if other user follows me
+      final otherFollowResponse = await supabase.client
+          .from('follows')
+          .select()
+          .eq('followerId', otherUserId)
+          .eq('followingId', myId)
+          .maybeSingle();
+      
+      final followsMe = otherFollowResponse != null;
+      final mutual = following && followsMe;
+
+      if (mounted) {
+        setState(() {
+          _isFollowingThisUser = following;
+          _userFollowsMe = followsMe;
+          _isMutual = mutual;
+          _loadingFriendship = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingFriendship = false);
+    }
+  }
+
+  Future<void> _toggleFriendship() async {
+    final supabase = context.read<SupabaseService>();
+    final otherUserId = _targetUserId;
+    if (otherUserId.isEmpty) return;
+
+    setState(() => _loadingFriendship = true);
+    try {
+      if (_isFollowingThisUser) {
+        await supabase.unfollowUser(otherUserId);
+      } else {
+        await supabase.followUser(otherUserId);
+      }
+      await _loadFriendshipStatus(otherUserId);
+      await _loadSocialStats(otherUserId);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update friendship status')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingFriendship = false);
+    }
+  }
+
+  Future<void> _startDirectChat(String otherUserName) async {
+    final supabase = context.read<SupabaseService>();
+    final otherUserId = _targetUserId;
+    
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+
+      final chatId = await supabase.createOrGetChat(otherUserId);
+      
+      if (mounted) {
+        Navigator.pop(context); // Pop loader
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatRoomPage(
+              chatId: chatId,
+              otherUserId: otherUserId,
+              otherUserName: otherUserName,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context);
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: Colors.grey[950],
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: const Text('Mutual Friends Only', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            content: Text(
+              'Snapchat Rules: Both you and $otherUserName must add each other as friends before sending private messages!',
+              style: const TextStyle(color: Colors.white70),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK', style: TextStyle(color: Colors.indigoAccent, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+      }
+    }
+  }
+
   // Upload new profile avatar natively
   Future<void> _uploadProfilePicture() async {
     final pickedFile = await _picker.pickImage(
@@ -98,7 +229,8 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
       final supabase = context.read<SupabaseService>();
       try {
         await supabase.uploadAvatar(File(pickedFile.path));
-        _loadProfile(); // Reload dynamic profile details
+        supabase.clearProfileCache(_targetUserId);
+        _loadProfile();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Profile picture updated successfully!')),
@@ -116,12 +248,43 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
     }
   }
 
+  // Upload new cover image banner natively
+  Future<void> _uploadCoverImage() async {
+    final pickedFile = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 60,
+      maxWidth: 1080,
+    );
+
+    if (pickedFile != null) {
+      setState(() => _uploadingCover = true);
+      final supabase = context.read<SupabaseService>();
+      try {
+        await supabase.uploadCoverImage(File(pickedFile.path));
+        supabase.clearProfileCache(_targetUserId);
+        _loadProfile();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Cover banner updated successfully!')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to update cover: ${e.toString()}')),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _uploadingCover = false);
+      }
+    }
+  }
+
   // Edit profile dialog
   Future<void> _editProfile(BuildContext context, Map<String, dynamic>? profile) async {
     final nameController = TextEditingController(text: profile?['name']);
     final phoneController = TextEditingController(text: profile?['phone']);
     final bioController = TextEditingController(text: profile?['bio'] ?? '');
-    final locationController = TextEditingController(text: 'Nigeria');
 
     showDialog(
       context: context,
@@ -155,16 +318,6 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: locationController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Location',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
                 controller: phoneController,
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
@@ -192,16 +345,32 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
               final user = supabase.currentUser;
               if (user != null) {
                 try {
+                  showDialog(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (context) => const Center(child: CircularProgressIndicator()),
+                  );
+
                   await supabase.client.from('users').update({
                     'name': name,
                     'phone': phone.isNotEmpty ? phone : null,
                     'bio': bio.isNotEmpty ? bio : null,
                   }).eq('id', user.id);
+                  supabase.clearProfileCache(user.id);
+                  
                   if (context.mounted) {
-                    Navigator.pop(context);
+                    Navigator.pop(context); // Pop spinner
+                    Navigator.pop(context); // Pop dialog
                     _loadProfile();
                   }
-                } catch (_) {}
+                } catch (e) {
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to update profile: ${e.toString()}')),
+                    );
+                  }
+                }
               }
             },
             style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor),
@@ -298,6 +467,8 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
+    final primaryColor = Theme.of(context).primaryColor;
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: FutureBuilder<Map<String, dynamic>?>(
@@ -308,11 +479,16 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
           }
           
           final userProfile = snapshot.data;
-          final name = userProfile?['name'] ?? 'User';
-          final phone = userProfile?['phone'] ?? 'No phone linked';
-          final bio = userProfile?['bio'] ?? 'Flutter Developer & Designer. Building premium experiences on the Reel App! 🚀✨';
-          final photoUrl = userProfile?['photoUrl'] as String?;
-          final userId = userProfile?['id'] ?? 'unknown';
+          if (userProfile == null) {
+            return const Center(child: Text('User profile not found', style: TextStyle(color: Colors.white54)));
+          }
+
+          final name = userProfile['name'] ?? 'User';
+          final phone = userProfile['phone'] ?? 'No phone linked';
+          final bio = userProfile['bio'] ?? 'Flutter Developer & Designer. Building premium experiences on the Reel App! 🚀✨';
+          final photoUrl = userProfile['photoUrl'] as String?;
+          final coverUrl = userProfile['coverUrl'] as String?;
+          final userId = userProfile['id'] ?? 'unknown';
 
           return NestedScrollView(
             headerSliverBuilder: (context, innerBoxIsScrolled) {
@@ -322,37 +498,82 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                   pinned: true,
                   backgroundColor: Colors.black,
                   elevation: 0,
-                  title: const Text('Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  leading: !_isMe 
+                    ? IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context))
+                    : null,
+                  title: Text(_isMe ? 'My Profile' : name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                   actions: [
-                    IconButton(
-                      icon: const Icon(Icons.more_vert, color: Colors.white),
-                      onPressed: () => _showSettingsBottomSheet(context),
-                    ),
+                    if (_isMe)
+                      IconButton(
+                        icon: const Icon(Icons.more_vert, color: Colors.white),
+                        onPressed: () => _showSettingsBottomSheet(context),
+                      ),
                   ],
                 ),
                 SliverToBoxAdapter(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // BACKGROUND COVER AND OVERLAPPING AVATAR BUILT IN A SINGLE COORDINATE SPACE
-                      // This eliminates Z-index clipping bugs on all devices.
                       Stack(
                         clipBehavior: Clip.none,
                         alignment: Alignment.centerLeft,
                         children: [
                           // Cover Banner
-                          Image.network(
-                            'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
-                            height: 140,
-                            width: double.infinity,
-                            fit: BoxFit.cover,
+                          InkWell(
+                            onTap: _isMe ? _uploadCoverImage : null,
+                            child: Stack(
+                              children: [
+                                coverUrl != null && coverUrl.isNotEmpty
+                                    ? Image.network(
+                                        coverUrl,
+                                        height: 140,
+                                        width: double.infinity,
+                                        fit: BoxFit.cover,
+                                      )
+                                    : Image.network(
+                                        'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+                                        height: 140,
+                                        width: double.infinity,
+                                        fit: BoxFit.cover,
+                                      ),
+                                if (_uploadingCover)
+                                  Positioned.fill(
+                                    child: Container(
+                                      color: Colors.black45,
+                                      child: const Center(
+                                        child: CircularProgressIndicator(color: Colors.white),
+                                      ),
+                                    ),
+                                  ),
+                                if (_isMe)
+                                  Positioned(
+                                    top: 12,
+                                    right: 12,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black54,
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.camera_alt, color: Colors.white, size: 12),
+                                          SizedBox(width: 4),
+                                          Text('Change Cover', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                           // Pinned Circle Avatar Overlapping the bottom boundary
                           Positioned(
                             bottom: -36,
                             left: 16,
                             child: InkWell(
-                              onTap: _uploadProfilePicture,
+                              onTap: _isMe ? _uploadProfilePicture : null,
                               borderRadius: BorderRadius.circular(42),
                               child: Stack(
                                 children: [
@@ -369,7 +590,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                                           : NetworkImage('https://i.pravatar.cc/150?u=$userId') as ImageProvider,
                                     ),
                                   ),
-                                  if (_uploadingAvatar)
+                                  if (_isMe && _uploadingAvatar)
                                     Positioned.fill(
                                       child: Container(
                                         decoration: const BoxDecoration(color: Colors.black45, shape: BoxShape.circle),
@@ -382,18 +603,19 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                                         ),
                                       ),
                                     ),
-                                  Positioned(
-                                    bottom: 0,
-                                    right: 0,
-                                    child: Container(
-                                      padding: const EdgeInsets.all(4),
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(context).primaryColor,
-                                        shape: BoxShape.circle,
+                                  if (_isMe)
+                                    Positioned(
+                                      bottom: 0,
+                                      right: 0,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: primaryColor,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.camera_alt, color: Colors.white, size: 10),
                                       ),
-                                      child: const Icon(Icons.camera_alt, color: Colors.white, size: 10),
                                     ),
-                                  ),
                                 ],
                               ),
                             ),
@@ -401,29 +623,64 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                         ],
                       ),
                       const SizedBox(height: 10),
-                      // Action buttons row (Edit Profile)
+                      // Action buttons row (Edit Profile / Add Friend / Message)
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16.0),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
-                            OutlinedButton(
-                              onPressed: () => _editProfile(context, userProfile),
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Colors.white30),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              ),
-                              child: const Text(
-                                'Edit profile',
-                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                              ),
-                            ),
+                            if (_isMe)
+                              OutlinedButton(
+                                onPressed: () => _editProfile(context, userProfile),
+                                style: OutlinedButton.styleFrom(
+                                  side: const BorderSide(color: Colors.white30),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                ),
+                                child: const Text(
+                                  'Edit profile',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                              )
+                            else ...[
+                              // Snapchat-style Friendship Action Buttons
+                              _loadingFriendship
+                                ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                                : Row(
+                                    children: [
+                                      ElevatedButton(
+                                        onPressed: _toggleFriendship,
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: _isMutual
+                                              ? Colors.white12
+                                              : (_isFollowingThisUser 
+                                                  ? Colors.grey[800] 
+                                                  : (_userFollowsMe ? primaryColor : Colors.indigoAccent)),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                        ),
+                                        child: Text(
+                                          _isMutual
+                                              ? 'Friends'
+                                              : (_isFollowingThisUser
+                                                  ? 'Added'
+                                                  : (_userFollowsMe ? 'Accept' : '+ Add')),
+                                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        icon: const Icon(Icons.chat_bubble_outline, color: Colors.white70),
+                                        onPressed: () => _startDirectChat(name),
+                                      ),
+                                    ],
+                                  ),
+                            ],
                           ],
                         ),
                       ),
                       const SizedBox(height: 8),
-                      // Profile Identity - Cleanly Positioned Under Avatar
+                      // Profile Identity
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16.0),
                         child: Column(
@@ -450,7 +707,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                               style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14, height: 1.3),
                             ),
                             const SizedBox(height: 12),
-                            // Location, Link, Joined Date Row
+                            // Location and Joined Date Row
                             Row(
                               children: [
                                 const Icon(Icons.location_on_outlined, color: Colors.white54, size: 14),
@@ -492,15 +749,15 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                   delegate: _SliverAppBarDelegate(
                     TabBar(
                       controller: _tabController,
-                      indicatorColor: Theme.of(context).primaryColor,
+                      indicatorColor: primaryColor,
                       labelColor: Colors.white,
                       unselectedLabelColor: Colors.white54,
                       indicatorWeight: 3,
                       labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                       tabs: const [
                         Tab(text: 'Posts'),
+                        Tab(text: 'Snaps'),
                         Tab(text: 'Replies'),
-                        Tab(text: 'Media'),
                         Tab(text: 'Likes'),
                       ],
                     ),
@@ -511,10 +768,56 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
             body: TabBarView(
               controller: _tabController,
               children: [
-                _buildPostsTab(),
-                _buildEmptyTab('No replies yet'),
-                _buildEmptyTab('No media yet'),
-                _buildEmptyTab('No likes yet'),
+                // Tab 1: Dynamic Posts
+                _loadingPosts
+                    ? const Center(child: CircularProgressIndicator())
+                    : _userPosts.isEmpty
+                        ? const Center(child: Text('No posts yet', style: TextStyle(color: Colors.white38)))
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(8),
+                            itemCount: _userPosts.length,
+                            itemBuilder: (context, index) {
+                              final post = _userPosts[index];
+                              final postImageUrl = post['imageUrl'] ?? post['imageurl'];
+                              return Card(
+                                color: Colors.white.withOpacity(0.04),
+                                margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        post['text'] ?? '',
+                                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                                      ),
+                                      if (postImageUrl != null) ...[
+                                        const SizedBox(height: 8),
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(12),
+                                          child: Image.network(postImageUrl as String, fit: BoxFit.cover, height: 180, width: double.infinity),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        (post['createdAt'] ?? post['createdat']) != null 
+                                          ? DateTime.parse((post['createdAt'] ?? post['createdat']) as String).toLocal().toString().substring(0, 16)
+                                          : '',
+                                        style: const TextStyle(color: Colors.white30, fontSize: 11),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                // Tab 2: Snaps (Placeholder for other screens)
+                const Center(child: Text('Private Ephemeral Snaps locked 🔒', style: TextStyle(color: Colors.white38))),
+                // Tab 3: Replies (Mock)
+                const Center(child: Text('No replies yet', style: TextStyle(color: Colors.white38))),
+                // Tab 4: Likes (Mock)
+                const Center(child: Text('No liked posts yet', style: TextStyle(color: Colors.white38))),
               ],
             ),
           );
@@ -524,121 +827,21 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
   }
 
   Widget _buildRichStat(String count, String label) {
-    return Row(
-      children: [
-        Text(
-          count,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-        ),
-        const SizedBox(width: 4),
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white54, fontSize: 14),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPostsTab() {
-    if (_loadingPosts) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_userPosts.isEmpty) {
-      return const Center(
-        child: Text('No posts yet', style: TextStyle(color: Colors.white38, fontSize: 16)),
-      );
-    }
-
-    return ListView.builder(
-      padding: EdgeInsets.zero,
-      itemCount: _userPosts.length,
-      itemBuilder: (context, index) {
-        final post = _userPosts[index];
-        final text = post['text'] ?? '';
-        final likes = post['likes'] ?? 0;
-        final name = post['userName'] ?? 'User';
-
-        return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: Colors.white12, width: 0.5)),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              CircleAvatar(
-                radius: 20,
-                backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${post['userId']}'),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          name,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '@${name.toLowerCase().replaceAll(' ', '')} • 2h',
-                          style: const TextStyle(color: Colors.white54, fontSize: 13),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      text,
-                      style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _buildPostAction(Icons.chat_bubble_outline, '0'),
-                        _buildPostAction(Icons.repeat, '0'),
-                        _buildPostAction(Icons.favorite_border, '$likes'),
-                        _buildPostAction(Icons.share_outlined, ''),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildEmptyTab(String message) {
-    return Center(
-      child: Text(
-        message,
-        style: const TextStyle(color: Colors.white38, fontSize: 16),
-      ),
-    );
-  }
-
-  Widget _buildPostAction(IconData icon, String label) {
-    return Row(
-      children: [
-        Icon(icon, color: Colors.white54, size: 18),
-        if (label.isNotEmpty) ...[
-          const SizedBox(width: 4),
-          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+    return RichText(
+      text: TextSpan(
+        style: const TextStyle(color: Colors.white, fontSize: 14),
+        children: [
+          TextSpan(text: count, style: const TextStyle(fontWeight: FontWeight.bold)),
+          const TextSpan(text: ' '),
+          TextSpan(text: label, style: const TextStyle(color: Colors.white54)),
         ],
-      ],
+      ),
     );
   }
 }
 
 class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
   final TabBar _tabBar;
-
   _SliverAppBarDelegate(this._tabBar);
 
   @override

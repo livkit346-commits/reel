@@ -2,7 +2,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/chat/cached_media_view.dart';
 
 class ChatRoomPage extends StatefulWidget {
@@ -256,30 +258,40 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       appBar: AppBar(
         backgroundColor: Colors.grey[950],
         titleSpacing: 0,
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=${widget.otherUserId}'),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.otherUserName,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                  ),
-                  Text(
-                    _disappearingDuration == 'off' ? 'tap settings for disappearing' : '⏰ disappearing: $_disappearingDuration',
-                    style: const TextStyle(fontSize: 11, color: Colors.white54),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+        title: GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ReelProfilePage(userId: widget.otherUserId),
               ),
-            ),
-          ],
+            );
+          },
+          child: Row(
+            children: [
+              UserAvatar(
+                userId: widget.otherUserId,
+                radius: 18,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      widget.otherUserName,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    Text(
+                      _disappearingDuration == 'off' ? 'tap settings for disappearing' : '⏰ disappearing: $_disappearingDuration',
+                      style: const TextStyle(fontSize: 11, color: Colors.white54),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           PopupMenuButton<String>(
@@ -423,26 +435,28 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                       child: Container(
                         margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         decoration: BoxDecoration(
-                          // STUNNING GRADIENT FOR SENDER, Translucent glass style for receiver
+                          // Instagram direct message style vibrant gradient for sender
                           gradient: isMe
-                              ? LinearGradient(
-                                  colors: [primaryColor, primaryColor.withBlue(250)],
+                              ? const LinearGradient(
+                                  colors: [
+                                    Color(0xFF4F5BD5), // Direct Blue
+                                    Color(0xFF962FBF), // Direct Purple
+                                    Color(0xFFD62976), // Direct Pink
+                                  ],
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                 )
                               : null,
-                          color: isMe ? null : Colors.white.withOpacity(0.06),
+                          // Instagram high-contrast dark gray bubble for receiver
+                          color: isMe ? null : const Color(0xFF262626),
                           borderRadius: BorderRadius.only(
                             topLeft: const Radius.circular(20),
                             topRight: const Radius.circular(20),
                             bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
                             bottomRight: isMe ? Radius.zero : const Radius.circular(20),
                           ),
-                          border: isMe
-                              ? null
-                              : Border.all(color: Colors.white.withOpacity(0.04), width: 0.8),
                         ),
                         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
                         child: Column(

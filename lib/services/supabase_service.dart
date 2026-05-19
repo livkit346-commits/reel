@@ -99,6 +99,27 @@ class SupabaseService {
     }
   }
 
+  // Profile: Upload cover image
+  Future<String> uploadCoverImage(File imageFile) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      final fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final storagePath = 'covers/$myId/$fileName';
+
+      // Upload to media bucket
+      await client.storage.from('media').upload(storagePath, imageFile);
+      final coverUrl = getMediaUrl('media', storagePath);
+
+      // Update users table
+      await client.from('users').update({'coverUrl': coverUrl}).eq('id', myId);
+      return coverUrl;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   // Profile: Update location
   Future<void> updateLocation(String userId, double lat, double lng) async {
     try {
@@ -112,14 +133,26 @@ class SupabaseService {
     }
   }
 
+  // Profile Cache
+  final Map<String, Map<String, dynamic>> _profileCache = {};
+  Map<String, Map<String, dynamic>> get profileCache => _profileCache;
+
   // Profile: Get user doc
   Future<Map<String, dynamic>?> getUserProfile(String userId) async {
     try {
       final response = await client.from('users').select().eq('id', userId).maybeSingle();
+      if (response != null) {
+        _profileCache[userId] = response;
+      }
       return response;
     } catch (e) {
       return null;
     }
+  }
+
+  // Profile: Clear cache (useful when editing own profile)
+  void clearProfileCache(String userId) {
+    _profileCache.remove(userId);
   }
 
   // Posts: Create post
@@ -133,6 +166,30 @@ class SupabaseService {
         'createdAt': DateTime.now().toIso8601String(),
         'likes': 0,
       });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Posts: Upload image and create post
+  Future<void> uploadAndCreatePost(String text, File? imageFile) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      final userProfile = await getUserProfile(myId);
+      final userName = userProfile?['name'] ?? 'User';
+
+      String? imageUrl;
+      if (imageFile != null) {
+        final fileName = 'post_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final storagePath = 'posts/$myId/$fileName';
+
+        await client.storage.from('media').upload(storagePath, imageFile);
+        imageUrl = getMediaUrl('media', storagePath);
+      }
+
+      await createPost(myId, userName, text, imageUrl);
     } catch (e) {
       rethrow;
     }
@@ -162,7 +219,49 @@ class SupabaseService {
     }
   }
 
-  // Status: Upload and Create status
+  // Status: Create fully custom status
+  Future<void> createCustomStatus({
+    String? text,
+    File? mediaFile,
+    File? voiceFile,
+  }) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      final userProfile = await getUserProfile(myId);
+      final userName = userProfile?['name'] ?? 'User';
+
+      String? imageUrl;
+      if (mediaFile != null) {
+        final fileName = 'status_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final storagePath = 'statuses/$myId/$fileName';
+        await client.storage.from('media').upload(storagePath, mediaFile);
+        imageUrl = getMediaUrl('media', storagePath);
+      }
+
+      String? voiceUrl;
+      if (voiceFile != null) {
+        final fileName = 'status_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        final storagePath = 'statuses/$myId/$fileName';
+        await client.storage.from('media').upload(storagePath, voiceFile);
+        voiceUrl = getMediaUrl('media', storagePath);
+      }
+
+      await client.from('statuses').insert({
+        'userId': myId,
+        'userName': userName,
+        'imageUrl': imageUrl,
+        'text': text,
+        'voiceUrl': voiceUrl,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Status: Upload and Create status (Legacy helper kept for backward compatibility)
   Future<void> uploadAndCreateStatus(File imageFile, String userName) async {
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
@@ -180,6 +279,34 @@ class SupabaseService {
     }
   }
 
+  // Status View tracking
+  Future<void> viewStatus(String statusId) async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+
+    try {
+      await client.from('status_views').insert({
+        'statusId': statusId,
+        'userId': myId,
+      });
+    } catch (_) {
+      // Ignore if already marked as viewed
+    }
+  }
+
+  // Get view count and details for a status
+  Future<List<dynamic>> getStatusViews(String statusId) async {
+    try {
+      final response = await client
+          .from('status_views')
+          .select('createdAt, users(id, name, photoUrl)')
+          .eq('statusId', statusId);
+      return response;
+    } catch (_) {
+      return [];
+    }
+  }
+
   // Status: Retrieve active statuses
   Future<List<dynamic>> getActiveStatuses() async {
     try {
@@ -191,6 +318,57 @@ class SupabaseService {
       return response;
     } catch (e) {
       return [];
+    }
+  }
+
+  // Status: Retrieve followed and discovering active statuses for Explore
+  Future<List<dynamic>> getExploreStatuses() async {
+    final myId = currentUser?.id;
+    if (myId == null) return [];
+
+    try {
+      // 1. Get followed user IDs
+      final followsList = await client
+          .from('follows')
+          .select('followingId')
+          .eq('followerId', myId);
+      final followedIds = (followsList as List)
+          .map((f) => (f['followingId'] ?? f['followingid'] ?? '').toString())
+          .toList();
+
+      // 2. Fetch all active statuses
+      final allStatuses = await client
+          .from('statuses')
+          .select()
+          .order('createdAt', ascending: false)
+          .limit(40);
+
+      // 3. Separate them into followed statuses, discovering statuses and filter out mock statuses
+      final followedStatuses = [];
+      final discoveryStatuses = [];
+
+      for (var s in allStatuses) {
+        final statusUserId = (s['userId'] ?? s['userid'] ?? '').toString();
+        final statusUserName = (s['userName'] ?? s['username'] ?? 'User').toString();
+
+        // Filter out static mock statuses that say "Nearby"
+        if (statusUserName.toLowerCase() == 'nearby') {
+          continue;
+        }
+
+        if (statusUserId == myId) {
+          followedStatuses.add(s);
+        } else if (followedIds.contains(statusUserId)) {
+          followedStatuses.add(s);
+        } else {
+          discoveryStatuses.add(s);
+        }
+      }
+
+      // Return followed first, followed by discovery statuses
+      return [...followedStatuses, ...discoveryStatuses];
+    } catch (e) {
+      return getActiveStatuses();
     }
   }
 
@@ -206,13 +384,24 @@ class SupabaseService {
 
   // Discovery: Search by name or phone
   Future<List<dynamic>> searchUsers(String query) async {
+    final myId = currentUser?.id;
     try {
-      final response = await client
-          .from('users')
-          .select()
-          .or('name.ilike.%$query%,phone.ilike.%$query%')
-          .limit(10);
-      return response;
+      if (myId != null) {
+        final response = await client
+            .from('users')
+            .select()
+            .neq('id', myId)
+            .or('name.ilike.%$query%,phone.ilike.%$query%')
+            .limit(10);
+        return response;
+      } else {
+        final response = await client
+            .from('users')
+            .select()
+            .or('name.ilike.%$query%,phone.ilike.%$query%')
+            .limit(10);
+        return response;
+      }
     } catch (e) {
       rethrow;
     }
@@ -311,7 +500,19 @@ class SupabaseService {
           .inFilter('chatId', chatIds)
           .neq('userId', myId);
 
-      return response;
+      final chatsList = List<Map<String, dynamic>>.from(response);
+      for (final chat in chatsList) {
+        final cid = chat['chatId'] as String;
+        final unreadCountResponse = await client
+            .from('messages')
+            .select('id')
+            .eq('chatId', cid)
+            .neq('senderId', myId)
+            .eq('received', false);
+        chat['hasUnread'] = unreadCountResponse.isNotEmpty;
+      }
+
+      return chatsList;
     } catch (e) {
       return [];
     }

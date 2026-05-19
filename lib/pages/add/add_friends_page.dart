@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
+import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/widgets/user_avatar.dart';
 
 class AddFriendsPage extends StatefulWidget {
   const AddFriendsPage({super.key});
@@ -150,10 +152,12 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
 
     setState(() => _searching = true);
     final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
     
     try {
       final response = await supabase.searchUsers(query);
-      setState(() => _searchResults = response);
+      final filteredResults = response.where((u) => u['id'] != myId).toList();
+      setState(() => _searchResults = filteredResults);
     } catch (e) {
       // Ignore
     } finally {
@@ -214,6 +218,113 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                                 )
                               : null,
                         ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // "NEARBY DISCOVERY (50M)" HORIZONTAL LIST
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        children: [
+                          Icon(Icons.location_on, color: Colors.cyanAccent, size: 16),
+                          SizedBox(width: 6),
+                          Text(
+                            'NEARBY DISCOVERY (50M)',
+                            style: TextStyle(color: Colors.cyanAccent, fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.8),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      height: 125,
+                      child: FutureBuilder<List<dynamic>>(
+                        future: context.read<SupabaseService>().getNearbyUsers(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+
+                          final allUsers = snapshot.data!;
+                          final myId = context.read<SupabaseService>().currentUser?.id;
+                          final nearby = allUsers.where((u) => u['id'] != myId).toList();
+
+                          if (nearby.isEmpty) {
+                            return const Center(
+                              child: Text('No active users nearby.', style: TextStyle(color: Colors.white38, fontSize: 13)),
+                            );
+                          }
+
+                          return ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            itemCount: nearby.length,
+                            itemBuilder: (context, index) {
+                              final user = nearby[index];
+                              final name = user['name'] ?? 'User';
+                              final photoUrl = user['photoUrl'] as String?;
+                              final isAdded = _myFollowing.contains(user['id']);
+
+                              return Container(
+                                width: 110,
+                                margin: const EdgeInsets.symmetric(horizontal: 6),
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.04),
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.white.withOpacity(0.05), width: 0.8),
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    UserAvatar(
+                                      userId: user['id'],
+                                      radius: 20,
+                                      border: Border.all(color: Colors.cyanAccent, width: 1.5),
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => ReelProfilePage(userId: user['id']),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    SizedBox(
+                                      height: 22,
+                                      child: ElevatedButton(
+                                        onPressed: () {
+                                          if (isAdded) {
+                                            _removeFriend(user['id']);
+                                          } else {
+                                            _addFriend(user['id']);
+                                          }
+                                        },
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: isAdded ? Colors.white12 : Colors.indigoAccent,
+                                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                        ),
+                                        child: Text(
+                                          isAdded ? 'Added' : '+ Add',
+                                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          );
+                        },
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -385,51 +496,69 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
       ),
       child: Row(
         children: [
-          // Circular Avatar (Clean, bordered)
-          CircleAvatar(
+          // Circular Avatar (Clean, bordered) - Tapping opens their profile!
+          UserAvatar(
+            userId: userId,
             radius: 24,
-            backgroundColor: Colors.white10,
-            backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=$userId'),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ReelProfilePage(userId: userId),
+                ),
+              );
+            },
           ),
           const SizedBox(width: 14),
           // User Metadata (Snapchat typography: Bold Name, subtext Username & Mutuals)
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ReelProfilePage(userId: userId),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Text(
-                      username,
-                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                );
+              },
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
                     ),
-                    const SizedBox(width: 6),
-                    Container(
-                      width: 3,
-                      height: 3,
-                      decoration: const BoxDecoration(color: Colors.white38, shape: BoxShape.circle),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        subtext,
-                        style: const TextStyle(color: Colors.white38, fontSize: 12),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Text(
+                        username,
+                        style: const TextStyle(color: Colors.white54, fontSize: 12),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 6),
+                      Container(
+                        width: 3,
+                        height: 3,
+                        decoration: const BoxDecoration(color: Colors.white38, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          subtext,
+                          style: const TextStyle(color: Colors.white38, fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 12),
