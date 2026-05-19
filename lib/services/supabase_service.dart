@@ -223,6 +223,7 @@ class SupabaseService {
   Future<void> createCustomStatus({
     String? text,
     File? mediaFile,
+    String? mediaType, // 'image' or 'video'
     File? voiceFile,
   }) async {
     final myId = currentUser?.id;
@@ -234,7 +235,9 @@ class SupabaseService {
 
       String? imageUrl;
       if (mediaFile != null) {
-        final fileName = 'status_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final isVideo = mediaType == 'video';
+        final extension = isVideo ? 'mp4' : 'jpg';
+        final fileName = 'status_${DateTime.now().millisecondsSinceEpoch}.$extension';
         final storagePath = 'statuses/$myId/$fileName';
         await client.storage.from('media').upload(storagePath, mediaFile);
         imageUrl = getMediaUrl('media', storagePath);
@@ -252,6 +255,7 @@ class SupabaseService {
         'userId': myId,
         'userName': userName,
         'imageUrl': imageUrl,
+        'mediaType': mediaType ?? 'image',
         'text': text,
         'voiceUrl': voiceUrl,
         'createdAt': DateTime.now().toIso8601String(),

@@ -76,6 +76,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
   void _createNewStatus() {
     final textController = TextEditingController();
     File? selectedMedia;
+    String? selectedMediaType; // 'image' or 'video'
     File? selectedVoice;
     bool uploadingStatusLocal = false;
 
@@ -137,14 +138,34 @@ class _UpdatesPageState extends State<UpdatesPage> {
                         children: [
                           ClipRRect(
                             borderRadius: BorderRadius.circular(16),
-                            child: Image.file(selectedMedia!, height: 160, width: double.infinity, fit: BoxFit.cover),
+                            child: selectedMediaType == 'video'
+                                ? Container(
+                                    height: 160,
+                                    width: double.infinity,
+                                    color: Colors.white10,
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        const Icon(Icons.video_library, color: Color(0xFF00BFFF), size: 48),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          'Video Selected: ${selectedMedia!.path.split('/').last}',
+                                          style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : Image.file(selectedMedia!, height: 160, width: double.infinity, fit: BoxFit.cover),
                           ),
                           Positioned(
                             top: 8,
                             right: 8,
                             child: IconButton(
                               icon: const Icon(Icons.cancel, color: Colors.redAccent),
-                              onPressed: () => setModalState(() => selectedMedia = null),
+                              onPressed: () => setModalState(() {
+                                selectedMedia = null;
+                                selectedMediaType = null;
+                              }),
                             ),
                           ),
                         ],
@@ -184,20 +205,45 @@ class _UpdatesPageState extends State<UpdatesPage> {
                               if (picked != null) {
                                 setModalState(() {
                                   selectedMedia = File(picked.path);
+                                  selectedMediaType = 'image';
                                   selectedVoice = null; // Clear other
                                 });
                               }
                             },
-                            icon: const Icon(Icons.photo_library),
-                            label: const Text('Add Image'),
+                            icon: const Icon(Icons.image, size: 18),
+                            label: const Text('Image', style: TextStyle(fontSize: 11)),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.white10,
                               foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              final picked = await _picker.pickVideo(source: ImageSource.gallery);
+                              if (picked != null) {
+                                setModalState(() {
+                                  selectedMedia = File(picked.path);
+                                  selectedMediaType = 'video';
+                                  selectedVoice = null; // Clear other
+                                });
+                              }
+                            },
+                            icon: const Icon(Icons.videocam, size: 18),
+                            label: const Text('Video', style: TextStyle(fontSize: 11)),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white10,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
                         Expanded(
                           child: ElevatedButton.icon(
                             onPressed: () async {
@@ -208,14 +254,16 @@ class _UpdatesPageState extends State<UpdatesPage> {
                               setModalState(() {
                                 selectedVoice = voiceFile;
                                 selectedMedia = null; // Clear other
+                                selectedMediaType = null;
                               });
                             },
-                            icon: const Icon(Icons.mic),
-                            label: const Text('Add Voice'),
+                            icon: const Icon(Icons.mic, size: 18),
+                            label: const Text('Voice', style: TextStyle(fontSize: 11)),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.white10,
                               foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                           ),
                         ),
@@ -244,6 +292,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
                                   await supabase.createCustomStatus(
                                     text: text.isNotEmpty ? text : null,
                                     mediaFile: selectedMedia,
+                                    mediaType: selectedMediaType,
                                     voiceFile: selectedVoice,
                                   );
                                   _loadStatuses();
@@ -708,6 +757,7 @@ class _StatusViewerPageState extends State<StatusViewerPage> {
     final textContent = widget.status['text'] as String?;
     final voiceUrl = (widget.status['voiceUrl'] ?? widget.status['voiceurl']) as String?;
     final userName = widget.status['userName'] ?? widget.status['username'] ?? 'User';
+    final mediaType = (widget.status['mediaType'] ?? widget.status['mediatype'] ?? 'image') as String;
     final posterId = statusUserId ?? '';
 
     return Scaffold(
@@ -730,10 +780,44 @@ class _StatusViewerPageState extends State<StatusViewerPage> {
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  // 1. Background image if set
+                  // 1. Background image or video if set
                   if (imageUrl != null && imageUrl.isNotEmpty)
                     Positioned.fill(
-                      child: Image.network(imageUrl, fit: BoxFit.cover),
+                      child: mediaType == 'video'
+                          ? Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                Container(
+                                  color: Colors.black,
+                                  width: double.infinity,
+                                  height: double.infinity,
+                                  child: const Center(
+                                    child: Icon(Icons.video_library, color: Colors.white24, size: 72),
+                                  ),
+                                ),
+                                Positioned(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(16),
+                                        decoration: const BoxDecoration(
+                                          color: Colors.black54,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.play_arrow, color: Color(0xFF00BFFF), size: 48),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      const Text(
+                                        'Playing Video Update',
+                                        style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            )
+                          : Image.network(imageUrl, fit: BoxFit.cover),
                     ),
                   // 2. High-contrast premium text overlay
                   if (textContent != null && textContent.isNotEmpty)

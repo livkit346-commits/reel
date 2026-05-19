@@ -69,10 +69,14 @@ CREATE TABLE IF NOT EXISTS public.statuses (
   "userId" UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
   "userName" TEXT NOT NULL,
   "imageUrl" TEXT,
+  "mediaType" TEXT DEFAULT 'image', -- 'image' or 'video'
   "text" TEXT,
   "voiceUrl" TEXT,
   "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- Ensure mediaType column exists for legacy installations
+ALTER TABLE public.statuses ADD COLUMN IF NOT EXISTS "mediaType" TEXT DEFAULT 'image';
 
 -- Enable RLS for statuses
 ALTER TABLE public.statuses ENABLE ROW LEVEL SECURITY;
