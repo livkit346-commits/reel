@@ -229,36 +229,8 @@ class _UpdatesPageState extends State<UpdatesPage> {
                                 maxDuration: const Duration(seconds: 30),
                               );
                               if (picked != null) {
-                                final file = File(picked.path);
-                                final sizeInBytes = await file.length();
-                                final sizeInMB = sizeInBytes / (1024 * 1024);
-
-                                if (sizeInMB > 15.0) {
-                                  if (mounted) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (context) => AlertDialog(
-                                        backgroundColor: Colors.grey[950],
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                        title: const Text('File Too Large', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                        content: const Text(
-                                          'Videos must be smaller than 15MB to save bandwidth.',
-                                          style: TextStyle(color: Colors.white70),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () => Navigator.pop(context),
-                                            child: const Text('OK', style: TextStyle(color: Color(0xFF00BFFF), fontWeight: FontWeight.bold)),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  }
-                                  return;
-                                }
-
                                 setModalState(() {
-                                  selectedMedia = file;
+                                  selectedMedia = File(picked.path);
                                   selectedMediaType = 'video';
                                   selectedVoice = null; // Clear other
                                 });
