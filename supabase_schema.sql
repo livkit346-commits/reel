@@ -285,3 +285,34 @@ CREATE POLICY "Public Access" ON storage.objects FOR SELECT USING (bucket_id = '
 CREATE POLICY "Authenticated Insert" ON storage.objects FOR INSERT WITH CHECK (bucket_id = 'media');
 CREATE POLICY "Authenticated Update" ON storage.objects FOR UPDATE USING (bucket_id = 'media');
 CREATE POLICY "Authenticated Delete" ON storage.objects FOR DELETE USING (bucket_id = 'media');
+
+-- Alter posts table to add reposts
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS reposts INTEGER DEFAULT 0 NOT NULL;
+
+-- Create reports table
+CREATE TABLE IF NOT EXISTS public.reports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "reporterId" UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  "postId" UUID,
+  "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.reports ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Reports viewable by everyone" ON public.reports;
+DROP POLICY IF EXISTS "Reports insertable by everyone" ON public.reports;
+CREATE POLICY "Reports viewable by everyone" ON public.reports FOR SELECT USING (true);
+CREATE POLICY "Reports insertable by everyone" ON public.reports FOR INSERT WITH CHECK (true);
+
+-- Create comments table
+CREATE TABLE IF NOT EXISTS public.comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "postId" UUID REFERENCES public.posts(id) ON DELETE CASCADE NOT NULL,
+  "userId" UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+  "userName" TEXT NOT NULL,
+  "text" TEXT NOT NULL,
+  "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Comments viewable by everyone" ON public.comments;
+DROP POLICY IF EXISTS "Comments insertable by everyone" ON public.comments;
+CREATE POLICY "Comments viewable by everyone" ON public.comments FOR SELECT USING (true);
+CREATE POLICY "Comments insertable by everyone" ON public.comments FOR INSERT WITH CHECK (true);

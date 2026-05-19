@@ -747,4 +747,74 @@ class SupabaseService {
       return false;
     }
   }
+
+  // Posts: Delete post
+  Future<void> deletePost(String postId) async {
+    try {
+      await client.from('posts').delete().eq('id', postId);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Posts: Report post
+  Future<void> reportPost(String postId) async {
+    final myId = currentUser?.id;
+    try {
+      await client.from('reports').insert({
+        'postId': postId,
+        'reporterId': myId,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Posts: Toggle Like
+  Future<void> toggleLikePost(String postId, int currentLikes, bool increment) async {
+    try {
+      final newLikes = increment ? currentLikes + 1 : currentLikes - 1;
+      await client.from('posts').update({'likes': newLikes >= 0 ? newLikes : 0}).eq('id', postId);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Comments: Add comment
+  Future<void> addComment(String postId, String text) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+    try {
+      final profile = await getUserProfile(myId);
+      final userName = profile?['name'] ?? 'User';
+      await client.from('comments').insert({
+        'postId': postId,
+        'userId': myId,
+        'userName': userName,
+        'text': text,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Comments: Get comments for post
+  Future<List<dynamic>> getComments(String postId) async {
+    try {
+      return await client.from('comments').select().eq('postId', postId).order('createdAt', ascending: true);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // Posts: Repost
+  Future<void> repostPost(String postId, int currentReposts) async {
+    try {
+      await client.from('posts').update({'reposts': currentReposts + 1}).eq('id', postId);
+    } catch (e) {
+      rethrow;
+    }
+  }
 }
