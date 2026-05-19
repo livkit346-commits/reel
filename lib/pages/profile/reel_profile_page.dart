@@ -485,7 +485,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
 
           final name = userProfile['name'] ?? 'User';
           final phone = userProfile['phone'] ?? 'No phone linked';
-          final bio = userProfile['bio'] ?? 'Flutter Developer & Designer. Building premium experiences on the Reel App! 🚀✨';
+          final bio = userProfile['bio'] ?? '';
           final photoUrl = userProfile['photoUrl'] as String?;
           final coverUrl = userProfile['coverUrl'] as String?;
           final userId = userProfile['id'] ?? 'unknown';

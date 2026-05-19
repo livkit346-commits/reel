@@ -41,20 +41,7 @@ class _EmailAuthViewState extends State<EmailAuthView> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 10),
-            // Sleek Premium Header
-            Center(
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: primaryColor.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: primaryColor.withOpacity(0.3), width: 1.5),
-                ),
-                child: Icon(Icons.blur_on, color: primaryColor, size: 48),
-              ),
-            ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 48),
             Center(
               child: Text(
                 _isSignUp ? 'Create secure account' : 'Welcome to Reel',

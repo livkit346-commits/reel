@@ -42,7 +42,10 @@ class UserAvatar extends StatelessWidget {
       backgroundColor: Colors.white10,
       backgroundImage: photoUrl != null && photoUrl.isNotEmpty
           ? NetworkImage(photoUrl)
-          : NetworkImage('https://i.pravatar.cc/150?u=$userId') as ImageProvider,
+          : null,
+      child: photoUrl != null && photoUrl.isNotEmpty
+          ? null
+          : Icon(Icons.person, color: Colors.white30, size: radius),
     );
 
     if (border != null) {
