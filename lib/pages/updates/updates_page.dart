@@ -77,35 +77,72 @@ class _UpdatesPageState extends State<UpdatesPage> {
   void _showMediaSourcePicker(BuildContext context, StateSetter setModalState, Function(File file, String type) onMediaSelected) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[950],
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      backgroundColor: Colors.transparent,
       builder: (context) {
-        return SafeArea(
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF121212),
+            borderRadius: BorderRadius.circular(24),
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ListTile(
-                leading: const Icon(Icons.image, color: Colors.purpleAccent),
-                title: const Text('Upload Photo', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                onTap: () async {
-                  Navigator.pop(context);
-                  final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 60);
-                  if (picked != null) {
-                    onMediaSelected(File(picked.path), 'image');
-                  }
-                },
+              const Text('Create', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  GestureDetector(
+                    onTap: () async {
+                      Navigator.pop(context);
+                      final picked = await _picker.pickVideo(source: ImageSource.gallery, maxDuration: const Duration(seconds: 30));
+                      if (picked != null) {
+                        onMediaSelected(File(picked.path), 'video');
+                      }
+                    },
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(18),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.video_library_rounded, color: Colors.white, size: 28),
+                        ),
+                        const SizedBox(height: 10),
+                        const Text('Upload Video', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: () async {
+                      Navigator.pop(context);
+                      final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 60);
+                      if (picked != null) {
+                        onMediaSelected(File(picked.path), 'image');
+                      }
+                    },
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(18),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.photo_library_rounded, color: Colors.white, size: 28),
+                        ),
+                        const SizedBox(height: 10),
+                        const Text('Upload Photo', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              ListTile(
-                leading: const Icon(Icons.videocam, color: Colors.blueAccent),
-                title: const Text('Upload Video', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                onTap: () async {
-                  Navigator.pop(context);
-                  final picked = await _picker.pickVideo(source: ImageSource.gallery, maxDuration: const Duration(seconds: 30));
-                  if (picked != null) {
-                    onMediaSelected(File(picked.path), 'video');
-                  }
-                },
-              ),
+              const SizedBox(height: 10),
             ],
           ),
         );
@@ -414,7 +451,11 @@ class _UpdatesPageState extends State<UpdatesPage> {
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
                           ),
                           child: uploadingStatusLocal
-                              ? const CircularProgressIndicator(color: Colors.white)
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+                                )
                               : const Text(
                                   'Share to Story',
                                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),

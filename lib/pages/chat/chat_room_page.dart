@@ -589,85 +589,62 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           // Chat input field
           SafeArea(
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: const Color(0xFF121212),
-                border: Border(
-                  top: BorderSide(color: Colors.white.withValues(alpha: 0.08), width: 1),
-                ),
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              color: const Color(0xFF121212),
               child: Row(
                 children: [
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      shape: BoxShape.circle,
-                    ),
-                    margin: const EdgeInsets.only(right: 6),
-                    child: IconButton(
-                      icon: const Icon(Icons.add_photo_alternate_rounded, color: Color(0xFF00BFFF), size: 22),
-                      onPressed: _isBlocked ? null : _sendImage,
+                  GestureDetector(
+                    onTap: _isBlocked ? null : _sendVideo,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8),
+                      child: Icon(Icons.camera_alt, color: Colors.white70, size: 28),
                     ),
                   ),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
-                      shape: BoxShape.circle,
-                    ),
-                    margin: const EdgeInsets.only(right: 10),
-                    child: IconButton(
-                      icon: const Icon(Icons.videocam_rounded, color: Color(0xFF00BFFF), size: 22),
-                      onPressed: _isBlocked ? null : _sendVideo,
+                  GestureDetector(
+                    onTap: _isBlocked ? null : _sendImage,
+                    child: const Padding(
+                      padding: EdgeInsets.only(left: 4, right: 12),
+                      child: Icon(Icons.image, color: Colors.white70, size: 26),
                     ),
                   ),
                   Expanded(
                     child: Container(
+                      padding: const EdgeInsets.only(left: 16, right: 4),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.06),
+                        color: Colors.white.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 1),
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: TextField(
-                        controller: _messageController,
-                        enabled: !_isBlocked,
-                        style: const TextStyle(color: Colors.white, fontSize: 15),
-                        maxLines: null,
-                        decoration: InputDecoration(
-                          hintText: _isBlocked ? 'Unblock contact to chat' : 'Message...',
-                          hintStyle: const TextStyle(color: Colors.white30, fontSize: 14),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  GestureDetector(
-                    onTap: _isBlocked ? null : _sendTextMessage,
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: _isBlocked
-                            ? null
-                            : const LinearGradient(
-                                colors: [Color(0xFF00BFFF), Color(0xFF4F5BD5)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _messageController,
+                              enabled: !_isBlocked,
+                              style: const TextStyle(color: Colors.white, fontSize: 15),
+                              maxLines: null,
+                              decoration: InputDecoration(
+                                hintText: _isBlocked ? 'Unblock to chat' : 'Send message...',
+                                hintStyle: const TextStyle(color: Colors.white54, fontSize: 15),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(vertical: 12),
                               ),
-                        color: _isBlocked ? Colors.grey[800] : null,
-                        boxShadow: [
-                          if (!_isBlocked)
-                            BoxShadow(
-                              color: const Color(0xFF00BFFF).withValues(alpha: 0.3),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
                             ),
+                          ),
+                          GestureDetector(
+                            onTap: _isBlocked ? null : _sendTextMessage,
+                            child: Container(
+                              margin: const EdgeInsets.only(left: 4, top: 4, bottom: 4, right: 2),
+                              padding: const EdgeInsets.all(8),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFFE2C55), // TikTok Pink Send Button
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 18),
+                            ),
+                          ),
                         ],
                       ),
-                      child: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
                     ),
                   ),
                 ],
