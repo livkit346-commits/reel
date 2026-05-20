@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -312,6 +313,85 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     }
   }
 
+  void _showDeleteOptions(BuildContext context, Map<String, dynamic> msg, bool isMe) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text('Delete message?', style: TextStyle(color: Colors.white)),
+        content: const Text('This action cannot be undone.', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('CANCEL', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              try {
+                await context.read<SupabaseService>().deleteMessageForMe(msg['id']);
+              } catch (_) {}
+            },
+            child: const Text('DELETE FOR ME', style: TextStyle(color: Colors.redAccent)),
+          ),
+          if (isMe)
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                try {
+                  await context.read<SupabaseService>().deleteMessageForEveryone(msg['id']);
+                } catch (_) {}
+              },
+              child: const Text('DELETE FOR EVERYONE', style: TextStyle(color: Colors.redAccent)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _showMessageOptions(BuildContext context, Map<String, dynamic> msg, bool isMe) {
+    final isDeleted = msg['isDeleted'] as bool? ?? false;
+    if (isDeleted) return; 
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF121212),
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (msg['text'] != null && msg['text'].toString().isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.copy, color: Colors.white),
+                  title: const Text('Copy Text', style: TextStyle(color: Colors.white)),
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: msg['text']));
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.redAccent),
+                title: const Text('Delete Message', style: TextStyle(color: Colors.redAccent)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showDeleteOptions(context, msg, isMe);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final supabase = context.read<SupabaseService>();
@@ -469,7 +549,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   }
                 }
 
-                final displayMessages = _localMessages;
+                final displayMessages = _localMessages.where((m) {
+                  final deletedForList = m['deletedFor'] as List<dynamic>? ?? [];
+                  return !deletedForList.contains(myId);
+                }).toList();
 
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (_scrollController.hasClients) {
@@ -507,39 +590,57 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       } catch (_) {}
                     }
 
-                    return Align(
-                      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: isMe ? const Color(0xFFFE2C55) : const Color(0xFF262626), // TikTok Red for sender
-                          borderRadius: BorderRadius.only(
-                            topLeft: const Radius.circular(20),
-                            topRight: const Radius.circular(20),
-                            bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
-                            bottomRight: isMe ? Radius.zero : const Radius.circular(20),
+                    final isDeleted = msg['isDeleted'] as bool? ?? false;
+
+                    return GestureDetector(
+                      onLongPress: () => _showMessageOptions(context, msg, isMe),
+                      child: Align(
+                        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isDeleted 
+                                ? Colors.transparent 
+                                : (isMe ? const Color(0xFFFE2C55) : const Color(0xFF262626)),
+                            border: isDeleted ? Border.all(color: Colors.white24, width: 1) : null,
+                            borderRadius: BorderRadius.only(
+                              topLeft: const Radius.circular(20),
+                              topRight: const Radius.circular(20),
+                              bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
+                              bottomRight: isMe ? Radius.zero : const Radius.circular(20),
+                            ),
                           ),
-                        ),
-                        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
-                        child: IntrinsicWidth(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (mediaUrl != null && mediaType != null) ...[
-                                CachedMediaView(url: mediaUrl, mediaType: mediaType),
-                                const SizedBox(height: 6),
-                              ],
-                              if (text != null && text.isNotEmpty)
-                                Align(
-                                  alignment: Alignment.topLeft,
-                                  child: Text(
-                                    text,
-                                    style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
-                                  ),
-                                ),
-                              const SizedBox(height: 4),
+                          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+                          child: IntrinsicWidth(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isDeleted)
+                                  const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.block, color: Colors.white30, size: 16),
+                                      SizedBox(width: 6),
+                                      Text('This message was deleted', style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic)),
+                                    ],
+                                  )
+                                else ...[
+                                  if (mediaUrl != null && mediaType != null) ...[
+                                    CachedMediaView(url: mediaUrl, mediaType: mediaType),
+                                    const SizedBox(height: 6),
+                                  ],
+                                  if (text != null && text.isNotEmpty)
+                                    Align(
+                                      alignment: Alignment.topLeft,
+                                      child: Text(
+                                        text,
+                                        style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
+                                      ),
+                                    ),
+                                ],
+                                const SizedBox(height: 4),
                               // Micro-timestamp and receipts double ticks (no Spacer to keep bubble size wrap content)
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.end,

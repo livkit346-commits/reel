@@ -580,6 +580,43 @@ class SupabaseService {
     }
   }
 
+  // Delete message for everyone (sender only)
+  Future<void> deleteMessageForEveryone(String messageId) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      await client.from('messages').update({
+        'isDeleted': true,
+        'text': null,
+        'mediaUrl': null,
+        'mediaType': null,
+      }).eq('id', messageId).eq('senderId', myId);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Delete message for me
+  Future<void> deleteMessageForMe(String messageId) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      // Fetch current message to get the array
+      final response = await client.from('messages').select('deletedFor').eq('id', messageId).single();
+      List<dynamic> currentDeletedFor = response['deletedFor'] ?? [];
+      if (!currentDeletedFor.contains(myId)) {
+        currentDeletedFor.add(myId);
+        await client.from('messages').update({
+          'deletedFor': currentDeletedFor,
+        }).eq('id', messageId);
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   // Fetch message history for a chat room
   Future<List<dynamic>> getChatMessages(String chatId) async {
     try {

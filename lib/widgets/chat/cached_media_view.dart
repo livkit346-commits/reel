@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:reel/services/local_storage_service.dart';
+import 'package:reel/pages/chat/chat_video_viewer_page.dart';
 
 class CachedMediaView extends StatefulWidget {
   final String url;
@@ -98,26 +99,36 @@ class _CachedMediaViewState extends State<CachedMediaView> {
               height: widget.height,
               fit: BoxFit.cover,
             )
-          : Stack(
-              alignment: Alignment.center,
-              children: [
-                // Video Preview Container
-                Container(
-                  width: widget.width ?? 200,
-                  height: widget.height ?? 200,
-                  color: Colors.white.withOpacity(0.1),
-                  child: const Icon(Icons.video_library_outlined, color: Colors.white54, size: 40),
-                ),
-                // Play Icon Button overlay
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: const BoxDecoration(
-                    color: Colors.black54,
-                    shape: BoxShape.circle,
+          : GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatVideoViewerPage(videoUrl: widget.url),
                   ),
-                  child: const Icon(Icons.play_arrow, color: Colors.white, size: 28),
-                ),
-              ],
+                );
+              },
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Video Preview Container
+                  Container(
+                    width: widget.width ?? 200,
+                    height: widget.height ?? 200,
+                    color: Colors.white.withOpacity(0.1),
+                    child: const Icon(Icons.video_library_outlined, color: Colors.white54, size: 40),
+                  ),
+                  // Play Icon Button overlay
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.play_arrow, color: Colors.white, size: 28),
+                  ),
+                ],
+              ),
             ),
     );
   }

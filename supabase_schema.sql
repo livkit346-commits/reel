@@ -144,6 +144,8 @@ CREATE TABLE IF NOT EXISTS public.messages (
 
 -- Enable RLS for messages
 ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS "mediaType" TEXT;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS "isDeleted" BOOLEAN DEFAULT FALSE NOT NULL;
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS "deletedFor" UUID[] DEFAULT '{}'::UUID[] NOT NULL;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Messages viewable by everyone" ON public.messages;
