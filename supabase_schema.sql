@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS public.messages (
 );
 
 -- Enable RLS for messages
+ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS "mediaType" TEXT;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Messages viewable by everyone" ON public.messages;

@@ -513,18 +513,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         margin: const EdgeInsets.only(bottom: 12),
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
-                          gradient: isMe
-                              ? const LinearGradient(
-                                  colors: [
-                                    Color(0xFF4F5BD5), // Direct Blue
-                                    Color(0xFF962FBF), // Direct Purple
-                                    Color(0xFFD62976), // Direct Pink
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                )
-                              : null,
-                          color: isMe ? null : const Color(0xFF262626),
+                          color: isMe ? const Color(0xFFFE2C55) : const Color(0xFF262626), // TikTok Red for sender
                           borderRadius: BorderRadius.only(
                             topLeft: const Radius.circular(20),
                             topRight: const Radius.circular(20),
