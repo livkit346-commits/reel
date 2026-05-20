@@ -1031,6 +1031,40 @@ class _StatusViewerPageState extends State<StatusViewerPage> {
             Text(userName, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
           ],
         ),
+        actions: [
+          if (isMe)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, color: Colors.white),
+              color: Colors.grey[900],
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              onSelected: (value) async {
+                if (value == 'delete') {
+                  final statusId = (widget.status['id'] ?? '').toString();
+                  try {
+                    await context.read<SupabaseService>().deleteStatus(statusId);
+                    if (mounted) {
+                      Navigator.pop(context, true); // Pop the viewer
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Status deleted')));
+                    }
+                  } catch (e) {
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to delete status')));
+                  }
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                      SizedBox(width: 8),
+                      Text('Delete Status', style: TextStyle(color: Colors.redAccent)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+        ],
       ),
       body: Column(
         children: [

@@ -283,6 +283,18 @@ class SupabaseService {
     }
   }
 
+  // Status: Delete status
+  Future<void> deleteStatus(String statusId) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      await client.from('statuses').delete().eq('id', statusId).eq('userId', myId);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   // Status View tracking
   Future<void> viewStatus(String statusId) async {
     final myId = currentUser?.id;
