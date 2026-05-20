@@ -584,10 +584,11 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                                     ),
                                     child: CircleAvatar(
                                       radius: 38,
-                                      backgroundColor: Colors.white10,
-                                      backgroundImage: photoUrl != null
+                                      backgroundColor: Colors.grey[900],
+                                      backgroundImage: photoUrl != null && photoUrl.isNotEmpty
                                           ? NetworkImage(photoUrl)
-                                          : NetworkImage('https://i.pravatar.cc/150?u=$userId') as ImageProvider,
+                                          : null,
+                                      child: (photoUrl == null || photoUrl.isEmpty) ? const Icon(Icons.person, size: 40, color: Colors.white30) : null,
                                     ),
                                   ),
                                   if (_isMe && _uploadingAvatar)

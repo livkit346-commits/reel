@@ -434,7 +434,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-              color: Colors.redAccent.withOpacity(0.1),
+              color: Colors.redAccent.withValues(alpha: 0.1),
               child: Row(
                 children: [
                   const Icon(Icons.block, color: Colors.redAccent, size: 16),
@@ -533,43 +533,45 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           ),
                         ),
                         constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (mediaUrl != null && mediaType != null) ...[
-                              CachedMediaView(url: mediaUrl, mediaType: mediaType),
-                              const SizedBox(height: 6),
-                            ],
-                            if (text != null && text.isNotEmpty)
-                              Align(
-                                alignment: Alignment.topLeft,
-                                child: Text(
-                                  text,
-                                  style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
-                                ),
-                              ),
-                            const SizedBox(height: 4),
-                            // Micro-timestamp and receipts double ticks (no Spacer to keep bubble size wrap content)
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  timeStr,
-                                  style: const TextStyle(color: Colors.white38, fontSize: 9),
-                                ),
-                                if (isMe) ...[
-                                  const SizedBox(width: 4),
-                                  Icon(
-                                    Icons.done_all,
-                                    size: 13,
-                                    color: received ? Colors.lightBlueAccent : Colors.white30,
-                                  ),
-                                ],
+                        child: IntrinsicWidth(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (mediaUrl != null && mediaType != null) ...[
+                                CachedMediaView(url: mediaUrl, mediaType: mediaType),
+                                const SizedBox(height: 6),
                               ],
-                            ),
-                          ],
+                              if (text != null && text.isNotEmpty)
+                                Align(
+                                  alignment: Alignment.topLeft,
+                                  child: Text(
+                                    text,
+                                    style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
+                                  ),
+                                ),
+                              const SizedBox(height: 4),
+                              // Micro-timestamp and receipts double ticks (no Spacer to keep bubble size wrap content)
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    timeStr,
+                                    style: const TextStyle(color: Colors.white38, fontSize: 9),
+                                  ),
+                                  if (isMe) ...[
+                                    const SizedBox(width: 4),
+                                    Icon(
+                                      Icons.done_all,
+                                      size: 13,
+                                      color: received ? Colors.lightBlueAccent : Colors.white30,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     );
@@ -591,14 +593,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               decoration: BoxDecoration(
                 color: const Color(0xFF121212),
                 border: Border(
-                  top: BorderSide(color: Colors.white.withOpacity(0.08), width: 1),
+                  top: BorderSide(color: Colors.white.withValues(alpha: 0.08), width: 1),
                 ),
               ),
               child: Row(
                 children: [
                   Container(
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
+                      color: Colors.white.withValues(alpha: 0.05),
                       shape: BoxShape.circle,
                     ),
                     margin: const EdgeInsets.only(right: 6),
@@ -609,7 +611,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   ),
                   Container(
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
+                      color: Colors.white.withValues(alpha: 0.05),
                       shape: BoxShape.circle,
                     ),
                     margin: const EdgeInsets.only(right: 10),
@@ -621,9 +623,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   Expanded(
                     child: Container(
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.06),
+                        color: Colors.white.withValues(alpha: 0.06),
                         borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: Colors.white.withOpacity(0.1), width: 1),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 1),
                       ),
                       padding: const EdgeInsets.symmetric(horizontal: 14),
                       child: TextField(
@@ -659,7 +661,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         boxShadow: [
                           if (!_isBlocked)
                             BoxShadow(
-                              color: const Color(0xFF00BFFF).withOpacity(0.3),
+                              color: const Color(0xFF00BFFF).withValues(alpha: 0.3),
                               blurRadius: 8,
                               offset: const Offset(0, 2),
                             ),

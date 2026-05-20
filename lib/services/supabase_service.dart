@@ -314,11 +314,12 @@ class SupabaseService {
   // Status: Retrieve active statuses
   Future<List<dynamic>> getActiveStatuses() async {
     try {
+      final oneDayAgo = DateTime.now().subtract(const Duration(hours: 24)).toIso8601String();
       final response = await client
           .from('statuses')
           .select()
-          .order('createdAt', ascending: false)
-          .limit(20);
+          .gt('createdAt', oneDayAgo)
+          .order('createdAt', ascending: false);
       return response;
     } catch (e) {
       return [];
@@ -340,12 +341,13 @@ class SupabaseService {
           .map((f) => (f['followingId'] ?? f['followingid'] ?? '').toString())
           .toList();
 
-      // 2. Fetch all active statuses
+      // 2. Fetch all active statuses in the last 24 hours
+      final oneDayAgo = DateTime.now().subtract(const Duration(hours: 24)).toIso8601String();
       final allStatuses = await client
           .from('statuses')
           .select()
-          .order('createdAt', ascending: false)
-          .limit(40);
+          .gt('createdAt', oneDayAgo)
+          .order('createdAt', ascending: false);
 
       // 3. Separate them into followed statuses, discovering statuses and filter out mock statuses
       final followedStatuses = [];

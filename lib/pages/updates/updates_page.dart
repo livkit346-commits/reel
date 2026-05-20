@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
+import 'package:video_player/video_player.dart';
 
 class UpdatesPage extends StatefulWidget {
   const UpdatesPage({super.key});
@@ -72,6 +73,46 @@ class _UpdatesPageState extends State<UpdatesPage> {
     }
   }
 
+  // Helper to choose media source
+  void _showMediaSourcePicker(BuildContext context, StateSetter setModalState, Function(File file, String type) onMediaSelected) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[950],
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.image, color: Colors.purpleAccent),
+                title: const Text('Upload Photo', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 60);
+                  if (picked != null) {
+                    onMediaSelected(File(picked.path), 'image');
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.videocam, color: Colors.blueAccent),
+                title: const Text('Upload Video', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final picked = await _picker.pickVideo(source: ImageSource.gallery, maxDuration: const Duration(seconds: 30));
+                  if (picked != null) {
+                    onMediaSelected(File(picked.path), 'video');
+                  }
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   // Upload a new status update
   void _createNewStatus() {
     final textController = TextEditingController();
@@ -110,21 +151,173 @@ class _UpdatesPageState extends State<UpdatesPage> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    const Text(
-                      'Add Status',
-                      style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Add to Story',
+                          style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: -0.5),
+                        ),
+                        if (selectedMedia != null || selectedVoice != null)
+                          TextButton(
+                            onPressed: () => setModalState(() {
+                              selectedMedia = null;
+                              selectedMediaType = null;
+                              selectedVoice = null;
+                            }),
+                            child: const Text('Reset', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 16),
-                    // 1. Text Status input field
+                    
+                    // TikTok style Media Composer Card
+                    if (selectedMedia == null && selectedVoice == null)
+                      GestureDetector(
+                        onTap: () {
+                          _showMediaSourcePicker(context, setModalState, (file, type) {
+                            setModalState(() {
+                              selectedMedia = file;
+                              selectedMediaType = type;
+                              selectedVoice = null;
+                            });
+                          });
+                        },
+                        child: Container(
+                          height: 180,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.02),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white12, width: 1.5),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF00BFFF).withOpacity(0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.add_a_photo_outlined, color: Color(0xFF00BFFF), size: 32),
+                              ),
+                              const SizedBox(height: 12),
+                              const Text(
+                                'Tap to add Photos or Videos',
+                                style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text('Up to 30 seconds', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      )
+                    else if (selectedMedia != null)
+                      Stack(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(20),
+                            child: selectedMediaType == 'video'
+                                ? Container(
+                                    height: 180,
+                                    width: double.infinity,
+                                    color: Colors.white.withOpacity(0.04),
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(16),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFFE2C55).withOpacity(0.1),
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(Icons.video_camera_back, color: Color(0xFFFE2C55), size: 36),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          selectedMedia!.path.split('/').last,
+                                          style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        const SizedBox(height: 4),
+                                        const Text('Video ready to share', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                                      ],
+                                    ),
+                                  )
+                                : Image.file(selectedMedia!, height: 180, width: double.infinity, fit: BoxFit.cover),
+                          ),
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: GestureDetector(
+                              onTap: () => setModalState(() {
+                                selectedMedia = null;
+                                selectedMediaType = null;
+                              }),
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                                child: const Icon(Icons.close, color: Colors.white, size: 18),
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else if (selectedVoice != null)
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.04),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF00BFFF),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.mic, color: Colors.white, size: 24),
+                            ),
+                            const SizedBox(width: 16),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Voice story attached',
+                                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                                  ),
+                                  SizedBox(height: 2),
+                                  Text('Ready to share', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                              onPressed: () => setModalState(() => selectedVoice = null),
+                            ),
+                          ],
+                        ),
+                      ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // Stylish Caption field
                     TextField(
                       controller: textController,
                       style: const TextStyle(color: Colors.white),
-                      maxLines: 3,
+                      maxLines: 2,
                       decoration: InputDecoration(
-                        hintText: 'Type status text...',
-                        hintStyle: const TextStyle(color: Colors.white38),
+                        hintText: 'Add a caption to your story...',
+                        hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
                         filled: true,
-                        fillColor: Colors.white.withOpacity(0.05),
+                        fillColor: Colors.white.withOpacity(0.03),
+                        contentPadding: const EdgeInsets.all(16),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(16),
                           borderSide: BorderSide.none,
@@ -132,197 +325,101 @@ class _UpdatesPageState extends State<UpdatesPage> {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    // 2. Optional media attachments preview
-                    if (selectedMedia != null)
-                      Stack(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(16),
-                            child: selectedMediaType == 'video'
-                                ? Container(
-                                    height: 160,
-                                    width: double.infinity,
-                                    color: Colors.white10,
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        const Icon(Icons.video_library, color: Color(0xFF00BFFF), size: 48),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Video Selected: ${selectedMedia!.path.split('/').last}',
-                                          style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                : Image.file(selectedMedia!, height: 160, width: double.infinity, fit: BoxFit.cover),
+
+                    // Quick Actions Row (Voice Story trigger)
+                    if (selectedMedia == null && selectedVoice == null)
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: ElevatedButton.icon(
+                          onPressed: () async {
+                            final tempDir = Directory.systemTemp;
+                            final voiceFile = File('${tempDir.path}/temp_voice.m4a');
+                            await voiceFile.writeAsString('reel_voice_mock_data');
+                            setModalState(() {
+                              selectedVoice = voiceFile;
+                              selectedMedia = null;
+                              selectedMediaType = null;
+                            });
+                          },
+                          icon: const Icon(Icons.mic, size: 16),
+                          label: const Text('Add Voice Story', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white10,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                           ),
-                          Positioned(
-                            top: 8,
-                            right: 8,
-                            child: IconButton(
-                              icon: const Icon(Icons.cancel, color: Colors.redAccent),
-                              onPressed: () => setModalState(() {
-                                selectedMedia = null;
-                                selectedMediaType = null;
-                              }),
-                            ),
-                          ),
-                        ],
-                      )
-                    else if (selectedVoice != null)
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.05),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.mic, color: Color(0xFF00BFFF)),
-                            const SizedBox(width: 12),
-                            const Expanded(
-                              child: Text(
-                                'Voice note attached',
-                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                              ),
-                            ),
-                            IconButton(
-                              icon: const Icon(Icons.delete, color: Colors.redAccent),
-                              onPressed: () => setModalState(() => selectedVoice = null),
-                            ),
-                          ],
                         ),
                       ),
-                    const SizedBox(height: 16),
-                    // 3. Media selection buttons
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () async {
-                              final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 60);
-                              if (picked != null) {
-                                setModalState(() {
-                                  selectedMedia = File(picked.path);
-                                  selectedMediaType = 'image';
-                                  selectedVoice = null; // Clear other
-                                });
-                              }
-                            },
-                            icon: const Icon(Icons.image, size: 18),
-                            label: const Text('Image', style: TextStyle(fontSize: 11)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white10,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () async {
-                              final picked = await _picker.pickVideo(
-                                source: ImageSource.gallery,
-                                maxDuration: const Duration(seconds: 30),
-                              );
-                              if (picked != null) {
-                                setModalState(() {
-                                  selectedMedia = File(picked.path);
-                                  selectedMediaType = 'video';
-                                  selectedVoice = null; // Clear other
-                                });
-                              }
-                            },
-                            icon: const Icon(Icons.videocam, size: 18),
-                            label: const Text('Video', style: TextStyle(fontSize: 11)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white10,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            onPressed: () async {
-                              // High-fidelity voice file simulation for CodeMagic compatibility
-                              final tempDir = Directory.systemTemp;
-                              final voiceFile = File('${tempDir.path}/temp_voice.m4a');
-                              await voiceFile.writeAsString('reel_voice_mock_data');
-                              setModalState(() {
-                                selectedVoice = voiceFile;
-                                selectedMedia = null; // Clear other
-                                selectedMediaType = null;
-                              });
-                            },
-                            icon: const Icon(Icons.mic, size: 18),
-                            label: const Text('Voice', style: TextStyle(fontSize: 11)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white10,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                    
                     const SizedBox(height: 24),
-                    // 4. Submit button
+                    
+                    // TikTok style "Share to Story" gradient button
                     SizedBox(
                       width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: uploadingStatusLocal
-                            ? null
-                            : () async {
-                                final text = textController.text.trim();
-                                if (text.isEmpty && selectedMedia == null && selectedVoice == null) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Please add text, image, or voice for status update.')),
-                                  );
-                                  return;
-                                }
-
-                                setModalState(() => uploadingStatusLocal = true);
-                                final supabase = context.read<SupabaseService>();
-                                try {
-                                  await supabase.createCustomStatus(
-                                    text: text.isNotEmpty ? text : null,
-                                    mediaFile: selectedMedia,
-                                    mediaType: selectedMediaType,
-                                    voiceFile: selectedVoice,
-                                  );
-                                  _loadStatuses();
-                                  if (context.mounted) {
-                                    Navigator.pop(context); // Close sheet
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Status update posted successfully!')),
-                                    );
-                                  }
-                                } catch (e) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Failed to post status: ${e.toString()}')),
-                                  );
-                                } finally {
-                                  setModalState(() => uploadingStatusLocal = false);
-                                }
-                              },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF00BFFF),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                      height: 50,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(25),
+                          gradient: const LinearGradient(
+                            colors: [
+                              Color(0xFFFE2C55), // TikTok Pink
+                              Color(0xFF25F4EE), // TikTok Aqua
+                            ],
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          ),
                         ),
-                        child: uploadingStatusLocal
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text(
-                                'Post Status Update',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                              ),
+                        child: ElevatedButton(
+                          onPressed: uploadingStatusLocal
+                              ? null
+                              : () async {
+                                  final text = textController.text.trim();
+                                  if (text.isEmpty && selectedMedia == null && selectedVoice == null) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Please add text, photo, or video for your story.')),
+                                    );
+                                    return;
+                                  }
+
+                                  setModalState(() => uploadingStatusLocal = true);
+                                  final supabase = context.read<SupabaseService>();
+                                  try {
+                                    await supabase.createCustomStatus(
+                                      text: text.isNotEmpty ? text : null,
+                                      mediaFile: selectedMedia,
+                                      mediaType: selectedMediaType,
+                                      voiceFile: selectedVoice,
+                                    );
+                                    _loadStatuses();
+                                    if (context.mounted) {
+                                      Navigator.pop(context); // Close sheet
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Story posted successfully!')),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Failed to post story: ${e.toString()}')),
+                                      );
+                                    }
+                                  } finally {
+                                    setModalState(() => uploadingStatusLocal = false);
+                                  }
+                                },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            shadowColor: Colors.transparent,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                          ),
+                          child: uploadingStatusLocal
+                              ? const CircularProgressIndicator(color: Colors.white)
+                              : const Text(
+                                  'Share to Story',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                                ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -426,85 +523,157 @@ class _UpdatesPageState extends State<UpdatesPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Padding(
-                padding: EdgeInsets.all(16.0),
+                padding: EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 12.0),
                 child: Text(
-                  'Status',
-                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                  'Stories',
+                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: -0.5),
                 ),
               ),
-              // My Status Upload Button
-              ListTile(
-                onTap: _uploadingStatus ? null : _createNewStatus,
-                leading: Stack(
+              // Horizontal TikTok-style Story Bubbles
+              SizedBox(
+                height: 110,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   children: [
-                    _uploadingStatus 
-                      ? const CircleAvatar(
-                          radius: 28,
-                          backgroundColor: Colors.white10,
-                          child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                        )
-                      : UserAvatar(
-                          userId: context.read<SupabaseService>().currentUser?.id ?? '',
-                          radius: 28,
+                    // TikTok "Add Story" My Status Bubble
+                    GestureDetector(
+                      onTap: _uploadingStatus ? null : _createNewStatus,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 16),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Stack(
+                              children: [
+                                _uploadingStatus
+                                    ? Container(
+                                        width: 64,
+                                        height: 64,
+                                        decoration: const BoxDecoration(
+                                          color: Colors.white10,
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Center(
+                                          child: SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00BFFF)),
+                                          ),
+                                        ),
+                                      )
+                                    : Container(
+                                        padding: const EdgeInsets.all(3),
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          border: Border.all(color: Colors.white24, width: 2),
+                                        ),
+                                        child: UserAvatar(
+                                          userId: context.read<SupabaseService>().currentUser?.id ?? '',
+                                          radius: 27,
+                                        ),
+                                      ),
+                                Positioned(
+                                  bottom: 0,
+                                  right: 0,
+                                  child: Container(
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF00BFFF),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    padding: const EdgeInsets.all(4),
+                                    child: const Icon(Icons.add, color: Colors.white, size: 14),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'My Story',
+                              style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
+                            ),
+                          ],
                         ),
-                    Positioned(
-                      bottom: 0,
-                      right: 0,
-                      child: CircleAvatar(
-                        radius: 10,
-                        backgroundColor: primaryColor,
-                        child: const Icon(Icons.add, color: Colors.white, size: 14),
                       ),
                     ),
+                    // Recent Statuses
+                    if (_loadingStatuses)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 20),
+                          child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00BFFF))),
+                        ),
+                      )
+                    else if (_statuses.isEmpty)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.only(left: 8),
+                          child: Text('No recent updates', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                        ),
+                      )
+                    else
+                      ..._statuses.map((status) {
+                        final userName = status['userName'] ?? status['username'] ?? 'User';
+                        final userId = status['userId'] ?? status['userid'] ?? '';
+
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => StatusViewerPage(status: status),
+                              ),
+                            ).then((_) => _loadStatuses());
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.only(right: 16),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: const BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Color(0xFFFE2C55), // TikTok Pink
+                                        Color(0xFF25F4EE), // TikTok Aqua
+                                      ],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    ),
+                                  ),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(2),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.black,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: UserAvatar(
+                                      userId: userId,
+                                      radius: 25,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                SizedBox(
+                                  width: 66,
+                                  child: Text(
+                                    userName,
+                                    style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
+                                    textAlign: TextAlign.center,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
                   ],
                 ),
-                title: const Text('My status', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                subtitle: const Text('Tap to add status update', style: TextStyle(color: Colors.white54)),
               ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Text(
-                  'Recent updates',
-                  style: TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.w600),
-                ),
-              ),
-              // Recent Status List
-              _loadingStatuses
-                  ? const Center(child: Padding(padding: EdgeInsets.all(20.0), child: CircularProgressIndicator()))
-                  : _statuses.isEmpty
-                      ? const Padding(
-                          padding: EdgeInsets.all(16.0),
-                          child: Text('No active statuses recently', style: TextStyle(color: Colors.white38)),
-                        )
-                      : ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _statuses.length,
-                          itemBuilder: (context, index) {
-                            final status = _statuses[index];
-                            final userName = status['userName'] ?? status['username'] ?? 'User';
-                            final imageUrl = status['imageUrl'] ?? status['imageurl'] ?? '';
-                            final userId = status['userId'] ?? status['userid'] ?? '';
-
-                            return ListTile(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => StatusViewerPage(status: status),
-                                  ),
-                                ).then((_) => _loadStatuses());
-                              },
-                              leading: UserAvatar(
-                                userId: userId,
-                                radius: 26,
-                                border: Border.all(color: const Color(0xFF00BFFF), width: 2),
-                              ),
-                              title: Text(userName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                              subtitle: const Text('Tap to view update', style: TextStyle(color: Colors.white54)),
-                            );
-                          },
-                        ),
               const Divider(color: Colors.white12, height: 40),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -557,7 +726,8 @@ class _UpdatesPageState extends State<UpdatesPage> {
                                   children: [
                                     CircleAvatar(
                                       radius: 30,
-                                      backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=channel_$chanId'),
+                                      backgroundColor: Colors.grey[800],
+                                      child: const Icon(Icons.people, size: 30, color: Colors.white54),
                                     ),
                                     const SizedBox(height: 12),
                                     Text(
@@ -616,11 +786,56 @@ class _StatusViewerPageState extends State<StatusViewerPage> {
   List<dynamic> _viewers = [];
   bool _isPlayingVoice = false;
 
+  // Video playback controller
+  VideoPlayerController? _videoController;
+  bool _videoInitialized = false;
+  bool _videoHasError = false;
+
   @override
   void initState() {
     super.initState();
     _markAsViewed();
     _loadViewers();
+    _initializeVideoIfNeeded();
+  }
+
+  @override
+  void dispose() {
+    _replyController.dispose();
+    _videoController?.dispose();
+    super.dispose();
+  }
+
+  void _initializeVideoIfNeeded() {
+    final imageUrl = (widget.status['imageUrl'] ?? widget.status['imageurl']) as String?;
+    final mediaType = (widget.status['mediaType'] ?? widget.status['mediatype'] ?? 'image') as String;
+
+    if (imageUrl != null && imageUrl.isNotEmpty && mediaType == 'video') {
+      try {
+        _videoController = VideoPlayerController.networkUrl(Uri.parse(imageUrl))
+          ..initialize().then((_) {
+            if (mounted) {
+              setState(() {
+                _videoInitialized = true;
+              });
+              _videoController?.play();
+              _videoController?.setLooping(true);
+            }
+          }).catchError((err) {
+            debugPrint('Error loading video status: $err');
+            if (mounted) {
+              setState(() {
+                _videoHasError = true;
+              });
+            }
+          });
+      } catch (e) {
+        debugPrint('Exception initializing video: $e');
+        setState(() {
+          _videoHasError = true;
+        });
+      }
+    }
   }
 
   Future<void> _markAsViewed() async {
@@ -787,39 +1002,51 @@ class _StatusViewerPageState extends State<StatusViewerPage> {
                   if (imageUrl != null && imageUrl.isNotEmpty)
                     Positioned.fill(
                       child: mediaType == 'video'
-                          ? Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                Container(
-                                  color: Colors.black,
-                                  width: double.infinity,
-                                  height: double.infinity,
-                                  child: const Center(
-                                    child: Icon(Icons.video_library, color: Colors.white24, size: 72),
-                                  ),
-                                ),
-                                Positioned(
-                                  child: Column(
-                                    mainAxisSize: MainAxisSize.min,
+                          ? _videoInitialized
+                              ? GestureDetector(
+                                  onTap: () {
+                                    if (_videoController != null) {
+                                      if (_videoController!.value.isPlaying) {
+                                        _videoController!.pause();
+                                      } else {
+                                        _videoController!.play();
+                                      }
+                                      setState(() {});
+                                    }
+                                  },
+                                  child: Stack(
+                                    alignment: Alignment.center,
                                     children: [
-                                      Container(
-                                        padding: const EdgeInsets.all(16),
-                                        decoration: const BoxDecoration(
-                                          color: Colors.black54,
-                                          shape: BoxShape.circle,
+                                      Positioned.fill(
+                                        child: Center(
+                                          child: AspectRatio(
+                                            aspectRatio: _videoController!.value.aspectRatio,
+                                            child: VideoPlayer(_videoController!),
+                                          ),
                                         ),
-                                        child: const Icon(Icons.play_arrow, color: Color(0xFF00BFFF), size: 48),
                                       ),
-                                      const SizedBox(height: 12),
-                                      const Text(
-                                        'Playing Video Update',
-                                        style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold),
-                                      ),
+                                      if (_videoController != null && !_videoController!.value.isPlaying)
+                                        Container(
+                                          padding: const EdgeInsets.all(16),
+                                          decoration: const BoxDecoration(
+                                            color: Colors.black45,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(Icons.play_arrow, color: Colors.white, size: 48),
+                                        ),
                                     ],
                                   ),
-                                ),
-                              ],
-                            )
+                                )
+                              : _videoHasError
+                                  ? const Center(
+                                      child: Text(
+                                        'Error playing video',
+                                        style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+                                      ),
+                                    )
+                                  : const Center(
+                                      child: CircularProgressIndicator(color: Color(0xFF00BFFF)),
+                                    )
                           : Image.network(imageUrl, fit: BoxFit.cover),
                     ),
                   // 2. High-contrast premium text overlay
