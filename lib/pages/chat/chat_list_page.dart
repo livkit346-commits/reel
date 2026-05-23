@@ -14,6 +14,17 @@ class ChatListPage extends StatefulWidget {
 
 class _ChatListPageState extends State<ChatListPage> {
   late Future<List<dynamic>> _chatsFuture;
+  final Set<String> _selectedChats = {};
+
+  void _toggleSelection(String chatId) {
+    setState(() {
+      if (_selectedChats.contains(chatId)) {
+        _selectedChats.remove(chatId);
+      } else {
+        _selectedChats.add(chatId);
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -82,17 +93,47 @@ class _ChatListPageState extends State<ChatListPage> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: _selectedChats.isNotEmpty ? Theme.of(context).primaryColor.withOpacity(0.2) : Colors.black,
         elevation: 0,
-        title: const Text(
-          'Reel Secure Chat',
-          style: TextStyle(
+        title: Text(
+          _selectedChats.isNotEmpty ? '${_selectedChats.length} Selected' : 'Reel Secure Chat',
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 22,
             fontWeight: FontWeight.bold,
           ),
         ),
-        actions: const [],
+        actions: _selectedChats.isNotEmpty
+            ? [
+                IconButton(
+                  icon: const Icon(Icons.push_pin_outlined, color: Colors.white),
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chats Pinned')));
+                    setState(() => _selectedChats.clear());
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.volume_off_outlined, color: Colors.white),
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chats Muted')));
+                    setState(() => _selectedChats.clear());
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  onPressed: () async {
+                    final supabase = context.read<SupabaseService>();
+                    for (final id in _selectedChats) {
+                       await supabase.client.from('chat_participants').delete().eq('chatId', id).eq('userId', supabase.currentUser!.id);
+                    }
+                    setState(() {
+                      _selectedChats.clear();
+                      _loadChats();
+                    });
+                  },
+                ),
+              ]
+            : const [],
       ),
       body: FutureBuilder<List<dynamic>>(
         future: _chatsFuture,
@@ -139,12 +180,21 @@ class _ChatListPageState extends State<ChatListPage> {
 
                 final hasUnread = chatMap['hasUnread'] as bool? ?? false;
 
+                final isSelected = _selectedChats.contains(chatId);
+
                 return ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  selected: isSelected,
+                  selectedTileColor: Colors.white.withOpacity(0.1),
+                  onLongPress: () => _toggleSelection(chatId),
                   leading: UserAvatar(
                     userId: otherUserId,
                     radius: 26,
                     onTap: () {
+                      if (_selectedChats.isNotEmpty) {
+                        _toggleSelection(chatId);
+                        return;
+                      }
                       Navigator.push(
                         context,
                         MaterialPageRoute(
@@ -172,7 +222,9 @@ class _ChatListPageState extends State<ChatListPage> {
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (hasUnread)
+                      if (isSelected)
+                        const Icon(Icons.check_circle, color: Color(0xFF00BFFF), size: 20)
+                      else if (hasUnread)
                         Container(
                           width: 10,
                           height: 10,
@@ -193,6 +245,10 @@ class _ChatListPageState extends State<ChatListPage> {
                     ],
                   ),
                   onTap: () {
+                    if (_selectedChats.isNotEmpty) {
+                      _toggleSelection(chatId);
+                      return;
+                    }
                     Navigator.push(
                       context,
                       MaterialPageRoute(

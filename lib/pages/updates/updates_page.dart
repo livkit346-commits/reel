@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:video_player/video_player.dart';
+import 'package:reel/pages/updates/add_story_screen.dart';
 
 class UpdatesPage extends StatefulWidget {
   const UpdatesPage({super.key});
@@ -74,80 +75,32 @@ class _UpdatesPageState extends State<UpdatesPage> {
   }
 
   // Helper to choose media source
-  void _showMediaSourcePicker(BuildContext context, StateSetter setModalState, Function(File file, String type) onMediaSelected) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          decoration: BoxDecoration(
-            color: const Color(0xFF121212),
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Create', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  GestureDetector(
-                    onTap: () async {
-                      Navigator.pop(context);
-                      final picked = await _picker.pickVideo(source: ImageSource.gallery, maxDuration: const Duration(seconds: 30));
-                      if (picked != null) {
-                        onMediaSelected(File(picked.path), 'video');
-                      }
-                    },
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(18),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.video_library_rounded, color: Colors.white, size: 28),
-                        ),
-                        const SizedBox(height: 10),
-                        const Text('Upload Video', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () async {
-                      Navigator.pop(context);
-                      final picked = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 60);
-                      if (picked != null) {
-                        onMediaSelected(File(picked.path), 'image');
-                      }
-                    },
-                    child: Column(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(18),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(Icons.photo_library_rounded, color: Colors.white, size: 28),
-                        ),
-                        const SizedBox(height: 10),
-                        const Text('Upload Photo', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-            ],
-          ),
-        );
-      },
+  void _showMediaSourcePicker(BuildContext context, StateSetter setModalState, Function(File file, String type) onMediaSelected) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const AddStoryScreen()),
     );
+    if (result != null && result is Map<String, dynamic>) {
+      final type = result['type'] as String;
+      if (type == 'text') {
+        Navigator.pop(context); // Close the BottomSheet
+        _showTextStoryDialog();
+      } else if (type == 'camera') {
+        final picked = await _picker.pickImage(source: ImageSource.camera);
+        if (picked != null) {
+          onMediaSelected(File(picked.path), 'image');
+        }
+      } else if (type == 'image' || type == 'video') {
+        final file = result['file'] as File?;
+        if (file != null) {
+          onMediaSelected(file, type);
+        }
+      }
+    }
+  }
+
+  void _showTextStoryDialog() {
+    _createNewStatus(); // For now, just open the same sheet without media
   }
 
   // Upload a new status update
@@ -849,7 +802,10 @@ class _StatusViewerPageState extends State<StatusViewerPage> {
 
   void _initializeVideoIfNeeded() {
     final imageUrl = (widget.status['imageUrl'] ?? widget.status['imageurl']) as String?;
-    final mediaType = (widget.status['mediaType'] ?? widget.status['mediatype'] ?? 'image') as String;
+    String mediaType = (widget.status['mediaType'] ?? widget.status['mediatype'] ?? 'image') as String;
+    if (imageUrl != null && imageUrl.toLowerCase().contains('.mp4')) {
+      mediaType = 'video';
+    }
 
     if (imageUrl != null && imageUrl.isNotEmpty && mediaType == 'video') {
       try {
@@ -1016,7 +972,10 @@ class _StatusViewerPageState extends State<StatusViewerPage> {
     final textContent = widget.status['text'] as String?;
     final voiceUrl = (widget.status['voiceUrl'] ?? widget.status['voiceurl']) as String?;
     final userName = widget.status['userName'] ?? widget.status['username'] ?? 'User';
-    final mediaType = (widget.status['mediaType'] ?? widget.status['mediatype'] ?? 'image') as String;
+    String mediaType = (widget.status['mediaType'] ?? widget.status['mediatype'] ?? 'image') as String;
+    if (imageUrl != null && imageUrl.toLowerCase().contains('.mp4')) {
+      mediaType = 'video';
+    }
     final posterId = statusUserId ?? '';
 
     return Scaffold(

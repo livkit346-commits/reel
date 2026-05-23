@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+import 'dart:io' as dart_io;
 
 class ChatVideoViewerPage extends StatefulWidget {
-  final String videoUrl;
+  final String videoPath;
 
-  const ChatVideoViewerPage({super.key, required this.videoUrl});
+  const ChatVideoViewerPage({super.key, required this.videoPath});
 
   @override
   State<ChatVideoViewerPage> createState() => _ChatVideoViewerPageState();
@@ -17,7 +18,7 @@ class _ChatVideoViewerPageState extends State<ChatVideoViewerPage> {
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
+    _controller = VideoPlayerController.file(dart_io.File(widget.videoPath))
       ..initialize().then((_) {
         if (mounted) {
           setState(() => _isInitialized = true);

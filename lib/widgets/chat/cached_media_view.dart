@@ -104,7 +104,7 @@ class _CachedMediaViewState extends State<CachedMediaView> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => ChatVideoViewerPage(videoUrl: widget.url),
+                    builder: (context) => ChatVideoViewerPage(videoPath: _cachedFile!.path),
                   ),
                 );
               },

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class SupabaseService {
@@ -251,6 +252,7 @@ class SupabaseService {
         voiceUrl = getMediaUrl('media', storagePath);
       }
 
+      try {
       await client.from('statuses').insert({
         'userId': myId,
         'userName': userName,
@@ -260,6 +262,16 @@ class SupabaseService {
         'voiceUrl': voiceUrl,
         'createdAt': DateTime.now().toIso8601String(),
       });
+    } catch (e) {
+      // Fallback for older database schema
+      debugPrint('Error inserting new status format: $e. Retrying with basic format...');
+      await client.from('statuses').insert({
+        'userId': myId,
+        'userName': userName,
+        'imageUrl': imageUrl,
+        'createdAt': DateTime.now().toIso8601String(),
+      });
+    }
     } catch (e) {
       rethrow;
     }
