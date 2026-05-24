@@ -9,6 +9,8 @@ import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/chat/cached_media_view.dart';
+import 'package:reel/pages/chat/forward_message_page.dart';
+import 'package:swipe_to/swipe_to.dart';
 
 class ChatRoomPage extends StatefulWidget {
   final String chatId;
@@ -38,6 +40,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   List<Map<String, dynamic>> _localMessages = [];
   bool _isLoadingLocal = true;
+
+  String? _selectedMessageId;
+  Map<String, dynamic>? _replyingToMessage;
 
   @override
   void initState() {
@@ -277,12 +282,17 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   Future<void> _sendMediaMessage(File file, String type) async {
     setState(() => _isSending = true);
     final supabase = context.read<SupabaseService>();
+    final replyId = _replyingToMessage?['id'];
+    setState(() {
+      _replyingToMessage = null;
+    });
     try {
       await supabase.sendMessage(
         chatId: widget.chatId,
         mediaFile: file,
         mediaType: type,
         disappearingDuration: _disappearingDuration,
+        replyToMessageId: replyId,
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -299,12 +309,17 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     _messageController.clear();
     final supabase = context.read<SupabaseService>();
+    final replyId = _replyingToMessage?['id'];
+    setState(() {
+      _replyingToMessage = null;
+    });
 
     try {
       await supabase.sendMessage(
         chatId: widget.chatId,
         text: text,
         disappearingDuration: _disappearingDuration,
+        replyToMessageId: replyId,
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -406,8 +421,83 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.grey[950],
+      appBar: _selectedMessageId != null
+          ? AppBar(
+              backgroundColor: const Color(0xFF00A884), // WhatsApp green selection color
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                onPressed: () {
+                  setState(() {
+                    _selectedMessageId = null;
+                  });
+                },
+              ),
+              title: const Text('1', style: TextStyle(color: Colors.white, fontSize: 18)),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.reply, color: Colors.white),
+                  onPressed: () {
+                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
+                    setState(() {
+                      _replyingToMessage = selectedMsg.isNotEmpty ? selectedMsg : null;
+                      _selectedMessageId = null;
+                    });
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.push_pin, color: Colors.white),
+                  onPressed: () async {
+                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
+                    if (selectedMsg.isEmpty) return;
+                    final isPinned = selectedMsg['is_pinned'] == true;
+                    try {
+                      await supabase.pinMessage(_selectedMessageId!, !isPinned);
+                      setState(() {
+                        _selectedMessageId = null;
+                      });
+                    } catch (_) {}
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.white),
+                  onPressed: () {
+                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
+                    if (selectedMsg.isEmpty) return;
+                    final isMe = selectedMsg['senderId'] == myId;
+                    setState(() { _selectedMessageId = null; });
+                    _showDeleteOptions(context, selectedMsg, isMe);
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.copy, color: Colors.white),
+                  onPressed: () {
+                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
+                    if (selectedMsg.isNotEmpty && selectedMsg['text'] != null) {
+                      Clipboard.setData(ClipboardData(text: selectedMsg['text']));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+                    }
+                    setState(() { _selectedMessageId = null; });
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.turn_right, color: Colors.white),
+                  onPressed: () {
+                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
+                    setState(() { _selectedMessageId = null; });
+                    if (selectedMsg.isNotEmpty) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ForwardMessagePage(messageToForward: selectedMsg),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ],
+            )
+          : AppBar(
+              backgroundColor: Colors.grey[950],
         titleSpacing: 0,
         title: GestureDetector(
           onTap: () {
@@ -592,80 +682,128 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
                     final isDeleted = msg['isDeleted'] as bool? ?? false;
 
-                    return GestureDetector(
-                      onLongPress: () => _showMessageOptions(context, msg, isMe),
-                      child: Align(
-                        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                    final isSelected = msg['id'] == _selectedMessageId;
+
+                    return SwipeTo(
+                      onRightSwipe: (details) {
+                        if (!isDeleted) {
+                          setState(() {
+                            _replyingToMessage = msg;
+                          });
+                        }
+                      },
+                      child: GestureDetector(
+                        onLongPress: () {
+                          if (!isDeleted) {
+                            setState(() {
+                              _selectedMessageId = msg['id'];
+                            });
+                          }
+                        },
+                        onTap: () {
+                          if (_selectedMessageId != null) {
+                            setState(() {
+                              _selectedMessageId = _selectedMessageId == msg['id'] ? null : msg['id'];
+                            });
+                          }
+                        },
                         child: Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: isDeleted 
-                                ? Colors.transparent 
-                                : (isMe ? const Color(0xFFFE2C55) : const Color(0xFF262626)),
-                            border: isDeleted ? Border.all(color: Colors.white24, width: 1) : null,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(20),
-                              topRight: const Radius.circular(20),
-                              bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
-                              bottomRight: isMe ? Radius.zero : const Radius.circular(20),
-                            ),
-                          ),
-                          constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
-                          child: IntrinsicWidth(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (isDeleted)
-                                  const Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.block, color: Colors.white30, size: 16),
-                                      SizedBox(width: 6),
-                                      Text('This message was deleted', style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic)),
-                                    ],
-                                  )
-                                else ...[
-                                  if (mediaUrl != null && mediaType != null) ...[
-                                    CachedMediaView(url: mediaUrl, mediaType: mediaType),
-                                    const SizedBox(height: 6),
-                                  ],
-                                  if (text != null && text.isNotEmpty)
-                                    Align(
-                                      alignment: Alignment.topLeft,
-                                      child: Text(
-                                        text,
-                                        style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
-                                      ),
-                                    ),
-                                ],
-                                const SizedBox(height: 4),
-                              // Micro-timestamp and receipts double ticks (no Spacer to keep bubble size wrap content)
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.end,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    timeStr,
-                                    style: const TextStyle(color: Colors.white38, fontSize: 9),
-                                  ),
-                                  if (isMe) ...[
-                                    const SizedBox(width: 4),
-                                    Icon(
-                                      Icons.done_all,
-                                      size: 13,
-                                      color: received ? Colors.lightBlueAccent : Colors.white30,
-                                    ),
-                                  ],
-                                ],
+                          color: isSelected ? const Color(0xFF00A884).withOpacity(0.3) : Colors.transparent,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                          child: Align(
+                            alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: isDeleted 
+                                    ? Colors.transparent 
+                                    : (isMe ? const Color(0xFFFE2C55) : const Color(0xFF262626)),
+                                border: isDeleted ? Border.all(color: Colors.white24, width: 1) : null,
+                                borderRadius: BorderRadius.only(
+                                  topLeft: const Radius.circular(20),
+                                  topRight: const Radius.circular(20),
+                                  bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
+                                  bottomRight: isMe ? Radius.zero : const Radius.circular(20),
+                                ),
                               ),
-                            ],
+                              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+                              child: IntrinsicWidth(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (msg['replyToMessageId'] != null)
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        margin: const EdgeInsets.only(bottom: 6),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black26,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: const Border(left: BorderSide(color: Color(0xFF00A884), width: 4)),
+                                        ),
+                                        child: const Text(
+                                          'Replied message',
+                                          style: TextStyle(color: Colors.white70, fontSize: 12),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    if (isDeleted)
+                                      const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.block, color: Colors.white30, size: 16),
+                                          SizedBox(width: 6),
+                                          Text('This message was deleted', style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic)),
+                                        ],
+                                      )
+                                    else ...[
+                                      if (mediaUrl != null && mediaType != null) ...[
+                                        CachedMediaView(url: mediaUrl, mediaType: mediaType),
+                                        const SizedBox(height: 6),
+                                      ],
+                                      if (text != null && text.isNotEmpty)
+                                        Align(
+                                          alignment: Alignment.topLeft,
+                                          child: Text(
+                                            text,
+                                            style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
+                                          ),
+                                        ),
+                                    ],
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (msg['is_pinned'] == true)
+                                          const Padding(
+                                            padding: EdgeInsets.only(right: 4),
+                                            child: Icon(Icons.push_pin, size: 12, color: Colors.white70),
+                                          ),
+                                        Text(
+                                          timeStr,
+                                          style: const TextStyle(color: Colors.white38, fontSize: 9),
+                                        ),
+                                        if (isMe) ...[
+                                          const SizedBox(width: 4),
+                                          Icon(
+                                            Icons.done_all,
+                                            size: 13,
+                                            color: received ? Colors.lightBlueAccent : Colors.white30,
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  );
+                    );
                 },
               );
               },
@@ -679,9 +817,49 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             ),
           // Chat input field
           SafeArea(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              color: const Color(0xFF121212),
+            child: Column(
+              children: [
+                if (_replyingToMessage != null)
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E1E),
+                      borderRadius: BorderRadius.circular(12),
+                      border: const Border(left: BorderSide(color: Color(0xFF00A884), width: 4)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Replying to message', style: TextStyle(color: Color(0xFF00A884), fontWeight: FontWeight.bold, fontSize: 13)),
+                              const SizedBox(height: 4),
+                              Text(
+                                _replyingToMessage!['text']?.toString() ?? 'Media message',
+                                style: const TextStyle(color: Colors.white70, fontSize: 13),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _replyingToMessage = null;
+                            });
+                          },
+                          child: const Icon(Icons.close, color: Colors.white54, size: 20),
+                        ),
+                      ],
+                    ),
+                  ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  color: const Color(0xFF121212),
               child: Row(
                 children: [
                   GestureDetector(
@@ -739,11 +917,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                     ),
                   ),
                 ],
+                  ),
+                ],
               ),
-            ),
+            ],
           ),
-        ],
-      ),
-    );
+        ),
+      ],
+    ),
+  );
   }
 }

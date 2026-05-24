@@ -45,6 +45,7 @@ dependencies:
   http: ^1.6.0
   crypto: ^3.0.7
   photo_manager: ^3.9.0
+  swipe_to: ^1.0.6
 
 dev_dependencies:
   flutter_test:

@@ -555,6 +555,7 @@ class SupabaseService {
     File? mediaFile,
     String? mediaType, // 'image', 'video'
     String disappearingDuration = 'off', // 'off', '24h', '48h'
+    String? replyToMessageId,
   }) async {
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
@@ -586,7 +587,20 @@ class SupabaseService {
         'mediaType': mediaType,
         'expiresAt': expiresAt?.toIso8601String(),
         'received': false,
+        if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
       });
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Pin or unpin a message
+  Future<void> pinMessage(String messageId, bool isPinned) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      await client.from('messages').update({'is_pinned': isPinned}).eq('id', messageId);
     } catch (e) {
       rethrow;
     }
