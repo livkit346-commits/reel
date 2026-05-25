@@ -924,7 +924,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           ),
         ],
       ),
-    ),
-  );
+    );
   }
 }
