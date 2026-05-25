@@ -860,70 +860,70 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   color: const Color(0xFF121212),
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: _isBlocked ? null : _sendVideo,
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8),
-                      child: Icon(Icons.camera_alt, color: Colors.white70, size: 28),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: _isBlocked ? null : _sendImage,
-                    child: const Padding(
-                      padding: EdgeInsets.only(left: 4, right: 12),
-                      child: Icon(Icons.image, color: Colors.white70, size: 26),
-                    ),
-                  ),
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.only(left: 16, right: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(24),
+                  child: Row(
+                    children: [
+                      GestureDetector(
+                        onTap: _isBlocked ? null : _sendVideo,
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 8),
+                          child: Icon(Icons.camera_alt, color: Colors.white70, size: 28),
+                        ),
                       ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _messageController,
-                              enabled: !_isBlocked,
-                              style: const TextStyle(color: Colors.white, fontSize: 15),
-                              maxLines: null,
-                              decoration: InputDecoration(
-                                hintText: _isBlocked ? 'Unblock to chat' : 'Send message...',
-                                hintStyle: const TextStyle(color: Colors.white54, fontSize: 15),
-                                border: InputBorder.none,
-                                isDense: true,
-                                contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                              ),
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: _isBlocked ? null : _sendTextMessage,
-                            child: Container(
-                              margin: const EdgeInsets.only(left: 4, top: 4, bottom: 4, right: 2),
-                              padding: const EdgeInsets.all(8),
-                              decoration: const BoxDecoration(
-                                color: Color(0xFFFE2C55), // TikTok Pink Send Button
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 18),
-                            ),
-                          ),
-                        ],
+                      GestureDetector(
+                        onTap: _isBlocked ? null : _sendImage,
+                        child: const Padding(
+                          padding: EdgeInsets.only(left: 4, right: 12),
+                          child: Icon(Icons.image, color: Colors.white70, size: 26),
+                        ),
                       ),
-                    ),
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.only(left: 16, right: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _messageController,
+                                  enabled: !_isBlocked,
+                                  style: const TextStyle(color: Colors.white, fontSize: 15),
+                                  maxLines: null,
+                                  decoration: InputDecoration(
+                                    hintText: _isBlocked ? 'Unblock to chat' : 'Send message...',
+                                    hintStyle: const TextStyle(color: Colors.white54, fontSize: 15),
+                                    border: InputBorder.none,
+                                    isDense: true,
+                                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                                  ),
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: _isBlocked ? null : _sendTextMessage,
+                                child: Container(
+                                  margin: const EdgeInsets.only(left: 4, top: 4, bottom: 4, right: 2),
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFFE2C55),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 18),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-                  ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
   }
