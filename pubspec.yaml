@@ -46,6 +46,8 @@ dependencies:
   crypto: ^3.0.7
   photo_manager: ^3.9.0
   swipe_to: ^1.0.6
+  story_view: ^0.16.6
+  video_editor: ^3.0.0
 
 dev_dependencies:
   flutter_test:

@@ -4,6 +4,8 @@ import 'package:reel/services/supabase_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:video_player/video_player.dart';
 import 'package:reel/pages/updates/add_story_screen.dart';
+import 'package:reel/widgets/status_ring_painter.dart';
+import 'package:reel/pages/updates/status_viewer_screen.dart';
 
 class UpdatesPage extends StatefulWidget {
   const UpdatesPage({super.key});
@@ -14,7 +16,7 @@ class UpdatesPage extends StatefulWidget {
 
 class _UpdatesPageState extends State<UpdatesPage> {
   
-  List<dynamic> _statuses = [];
+  List<Map<String, dynamic>> _userStatusGroups = [];
   List<dynamic> _channels = [];
   Map<String, bool> _subscribedChannels = {}; // Keep track of channel subscriptions
   bool _loadingStatuses = true;
@@ -36,9 +38,53 @@ class _UpdatesPageState extends State<UpdatesPage> {
     final supabase = context.read<SupabaseService>();
     try {
       final statuses = await supabase.getActiveStatuses();
+      
+      final myId = supabase.currentUser?.id;
+      final Map<String, List<dynamic>> groupedMap = {};
+      final Map<String, String> userNames = {};
+      
+      for (var status in statuses) {
+        final userId = status['userId'] ?? status['userid'];
+        if (userId == null) continue;
+        
+        userNames[userId] = status['userName'] ?? status['username'] ?? 'User';
+        
+        if (!groupedMap.containsKey(userId)) {
+          groupedMap[userId] = [];
+        }
+        groupedMap[userId]!.add(status);
+      }
+      
+      final List<Map<String, dynamic>> groupedList = [];
+      for (var entry in groupedMap.entries) {
+        final userId = entry.key;
+        final userStatuses = entry.value;
+        
+        // Sort user's statuses from oldest to newest (WhatsApp style play order)
+        userStatuses.sort((a, b) {
+          final dateA = DateTime.parse(a['createdAt']);
+          final dateB = DateTime.parse(b['createdAt']);
+          return dateA.compareTo(dateB);
+        });
+        
+        groupedList.add({
+          'userId': userId,
+          'userName': userNames[userId],
+          'statuses': userStatuses,
+          'latestUpdate': userStatuses.last['createdAt'], // For sorting users
+        });
+      }
+      
+      // Sort users by who has the most recent status (descending)
+      groupedList.sort((a, b) {
+        final dateA = DateTime.parse(a['latestUpdate']);
+        final dateB = DateTime.parse(b['latestUpdate']);
+        return dateB.compareTo(dateA);
+      });
+
       if (mounted) {
         setState(() {
-          _statuses = statuses;
+          _userStatusGroups = groupedList;
           _loadingStatuses = false;
         });
       }
@@ -253,7 +299,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
                           child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00BFFF))),
                         ),
                       )
-                    else if (_statuses.isEmpty)
+                    else if (_userStatusGroups.isEmpty)
                       const Center(
                         child: Padding(
                           padding: EdgeInsets.only(left: 8),
@@ -261,16 +307,19 @@ class _UpdatesPageState extends State<UpdatesPage> {
                         ),
                       )
                     else
-                      ..._statuses.map((status) {
-                        final userName = status['userName'] ?? status['username'] ?? 'User';
-                        final userId = status['userId'] ?? status['userid'] ?? '';
+                      ..._userStatusGroups.map((group) {
+                        final userName = group['userName'];
+                        final userId = group['userId'];
+                        final List<dynamic> userStatuses = group['statuses'];
 
                         return GestureDetector(
                           onTap: () {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => StatusViewerPage(status: status),
+                                builder: (context) => StatusViewerPage(
+                                  statuses: userStatuses.cast<Map<String, dynamic>>(),
+                                ),
                               ),
                             ).then((_) => _loadStatuses());
                           },
@@ -279,25 +328,15 @@ class _UpdatesPageState extends State<UpdatesPage> {
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Container(
-                                  padding: const EdgeInsets.all(3),
-                                  decoration: const BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        Color(0xFFFE2C55), // TikTok Pink
-                                        Color(0xFF25F4EE), // TikTok Aqua
-                                      ],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    ),
+                                CustomPaint(
+                                  painter: StatusRingPainter(
+                                    statusCount: userStatuses.length,
+                                    viewedCount: 0, // Assume 0 viewed for now unless we add viewed tracking
+                                    unviewedColor: const Color(0xFF00A884), // WhatsApp Green
+                                    viewedColor: Colors.grey,
                                   ),
                                   child: Container(
-                                    padding: const EdgeInsets.all(2),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.black,
-                                      shape: BoxShape.circle,
-                                    ),
+                                    padding: const EdgeInsets.all(5),
                                     child: UserAvatar(
                                       userId: userId,
                                       radius: 25,
@@ -415,438 +454,6 @@ class _UpdatesPageState extends State<UpdatesPage> {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// Fullscreen Status Viewer Widget
-class StatusViewerPage extends StatefulWidget {
-  final Map<String, dynamic> status;
-
-  const StatusViewerPage({super.key, required this.status});
-
-  @override
-  State<StatusViewerPage> createState() => _StatusViewerPageState();
-}
-
-class _StatusViewerPageState extends State<StatusViewerPage> {
-  final TextEditingController _replyController = TextEditingController();
-  List<dynamic> _viewers = [];
-  bool _isPlayingVoice = false;
-
-  // Video playback controller
-  VideoPlayerController? _videoController;
-  bool _videoInitialized = false;
-  bool _videoHasError = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _markAsViewed();
-    _loadViewers();
-    _initializeVideoIfNeeded();
-  }
-
-  @override
-  void dispose() {
-    _replyController.dispose();
-    _videoController?.dispose();
-    super.dispose();
-  }
-
-  void _initializeVideoIfNeeded() {
-    final imageUrl = (widget.status['imageUrl'] ?? widget.status['imageurl']) as String?;
-    String mediaType = (widget.status['mediaType'] ?? widget.status['mediatype'] ?? 'image') as String;
-    if (imageUrl != null && imageUrl.toLowerCase().contains('.mp4')) {
-      mediaType = 'video';
-    }
-
-    if (imageUrl != null && imageUrl.isNotEmpty && mediaType == 'video') {
-      try {
-        _videoController = VideoPlayerController.networkUrl(Uri.parse(imageUrl))
-          ..initialize().then((_) {
-            if (mounted) {
-              setState(() {
-                _videoInitialized = true;
-              });
-              _videoController?.play();
-              _videoController?.setLooping(true);
-            }
-          }).catchError((err) {
-            debugPrint('Error loading video status: $err');
-            if (mounted) {
-              setState(() {
-                _videoHasError = true;
-              });
-            }
-          });
-      } catch (e) {
-        debugPrint('Exception initializing video: $e');
-        setState(() {
-          _videoHasError = true;
-        });
-      }
-    }
-  }
-
-  Future<void> _markAsViewed() async {
-    final supabase = context.read<SupabaseService>();
-    final myId = supabase.currentUser?.id;
-    final statusUserId = widget.status['userId'] ?? widget.status['userid'];
-    if (myId != null && statusUserId != myId) {
-      await supabase.viewStatus((widget.status['id'] ?? '').toString());
-    }
-  }
-
-  Future<void> _loadViewers() async {
-    final supabase = context.read<SupabaseService>();
-    final myId = supabase.currentUser?.id;
-    final statusUserId = widget.status['userId'] ?? widget.status['userid'];
-    if (myId != null && statusUserId == myId) {
-      final viewers = await supabase.getStatusViews((widget.status['id'] ?? '').toString());
-      setState(() {
-        _viewers = viewers;
-      });
-    }
-  }
-
-  void _showViewersBottomSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.grey[950],
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                margin: const EdgeInsets.symmetric(vertical: 12),
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Text(
-                  '👁️ ${_viewers.length} Views',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
-                ),
-              ),
-              const Divider(color: Colors.white12),
-              Expanded(
-                child: _viewers.isEmpty
-                    ? const Center(
-                        child: Text('No views yet', style: TextStyle(color: Colors.white38)),
-                      )
-                    : ListView.builder(
-                        itemCount: _viewers.length,
-                        itemBuilder: (context, index) {
-                          final viewer = _viewers[index];
-                          final userDoc = viewer['users'] as Map<String, dynamic>? ?? {};
-                          final viewerName = userDoc['name'] ?? 'User';
-                          final viewerId = userDoc['id'] ?? '';
-
-                          return ListTile(
-                            leading: UserAvatar(userId: viewerId, radius: 18),
-                            title: Text(viewerName, style: const TextStyle(color: Colors.white)),
-                            subtitle: const Text('Viewed status', style: TextStyle(color: Colors.white38, fontSize: 12)),
-                          );
-                        },
-                      ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _sendPrivateReply() async {
-    final replyText = _replyController.text.trim();
-    if (replyText.isEmpty) return;
-
-    final supabase = context.read<SupabaseService>();
-    final otherUserId = (widget.status['userId'] ?? widget.status['userid']) as String;
-    final otherUserName = (widget.status['userName'] ?? widget.status['username'] ?? 'User') as String;
-
-    try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
-      );
-
-      final chatId = await supabase.createOrGetChat(otherUserId);
-      
-      // Send secure text message referring to status
-      final fullMsg = "Replied to status: \"$replyText\"";
-      await supabase.sendMessage(chatId: chatId, text: fullMsg);
-
-      if (mounted) {
-        Navigator.pop(context); // Pop spinner
-        _replyController.clear();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Private reply sent to $otherUserName!')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // Pop spinner
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            backgroundColor: Colors.grey[950],
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Text('Mutual Friends Only', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            content: Text(
-              'Snapchat Rules: Both you and $otherUserName must follow each other to send private message replies.',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK', style: TextStyle(color: Colors.indigoAccent, fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
-        );
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final myId = context.read<SupabaseService>().currentUser?.id;
-    final statusUserId = widget.status['userId'] ?? widget.status['userid'];
-    final isMe = statusUserId == myId;
-    final imageUrl = (widget.status['imageUrl'] ?? widget.status['imageurl']) as String?;
-    final textContent = widget.status['text'] as String?;
-    final voiceUrl = (widget.status['voiceUrl'] ?? widget.status['voiceurl']) as String?;
-    final userName = widget.status['userName'] ?? widget.status['username'] ?? 'User';
-    String mediaType = (widget.status['mediaType'] ?? widget.status['mediatype'] ?? 'image') as String;
-    if (imageUrl != null && imageUrl.toLowerCase().contains('.mp4')) {
-      mediaType = 'video';
-    }
-    final posterId = statusUserId ?? '';
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        title: Row(
-          children: [
-            UserAvatar(userId: posterId, radius: 18),
-            const SizedBox(width: 10),
-            Text(userName, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        actions: [
-          if (isMe)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: Colors.white),
-              color: Colors.grey[900],
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              onSelected: (value) async {
-                if (value == 'delete') {
-                  final statusId = (widget.status['id'] ?? '').toString();
-                  try {
-                    await context.read<SupabaseService>().deleteStatus(statusId);
-                    if (mounted) {
-                      Navigator.pop(context, true); // Pop the viewer
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Status deleted')));
-                    }
-                  } catch (e) {
-                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to delete status')));
-                  }
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                      SizedBox(width: 8),
-                      Text('Delete Status', style: TextStyle(color: Colors.redAccent)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Center(
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // 1. Background image or video if set
-                  if (imageUrl != null && imageUrl.isNotEmpty)
-                    Positioned.fill(
-                      child: mediaType == 'video'
-                          ? _videoInitialized
-                              ? GestureDetector(
-                                  onTap: () {
-                                    if (_videoController != null) {
-                                      if (_videoController!.value.isPlaying) {
-                                        _videoController!.pause();
-                                      } else {
-                                        _videoController!.play();
-                                      }
-                                      setState(() {});
-                                    }
-                                  },
-                                  child: Stack(
-                                    alignment: Alignment.center,
-                                    children: [
-                                      Positioned.fill(
-                                        child: Center(
-                                          child: AspectRatio(
-                                            aspectRatio: _videoController!.value.aspectRatio,
-                                            child: VideoPlayer(_videoController!),
-                                          ),
-                                        ),
-                                      ),
-                                      if (_videoController != null && !_videoController!.value.isPlaying)
-                                        Container(
-                                          padding: const EdgeInsets.all(16),
-                                          decoration: const BoxDecoration(
-                                            color: Colors.black45,
-                                            shape: BoxShape.circle,
-                                          ),
-                                          child: const Icon(Icons.play_arrow, color: Colors.white, size: 48),
-                                        ),
-                                    ],
-                                  ),
-                                )
-                              : _videoHasError
-                                  ? const Center(
-                                      child: Text(
-                                        'Error playing video',
-                                        style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
-                                      ),
-                                    )
-                                  : const Center(
-                                      child: CircularProgressIndicator(color: Color(0xFF00BFFF)),
-                                    )
-                          : Image.network(imageUrl, fit: BoxFit.cover),
-                    ),
-                  // 2. High-contrast premium text overlay
-                  if (textContent != null && textContent.isNotEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(24),
-                      color: imageUrl == null ? Colors.deepPurple[900] : Colors.black45,
-                      alignment: Alignment.center,
-                      child: Text(
-                        textContent,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          height: 1.4,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  // 3. Audio/Voice status message player
-                  if (voiceUrl != null && voiceUrl.isNotEmpty)
-                    Positioned(
-                      bottom: 40,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.black87,
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: Icon(
-                                _isPlayingVoice ? Icons.pause_circle_filled : Icons.play_circle_filled,
-                                color: const Color(0xFF00BFFF),
-                                size: 36,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _isPlayingVoice = !_isPlayingVoice;
-                                });
-                              },
-                            ),
-                            const SizedBox(width: 8),
-                            const Text(
-                              'Voice Update',
-                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(width: 12),
-                            Row(
-                              children: List.generate(5, (index) {
-                                return Container(
-                                  width: 3,
-                                  height: _isPlayingVoice ? (10 + (index * 4)) : 8,
-                                  margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                                  color: const Color(0xFF00BFFF),
-                                );
-                              }),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-          if (isMe)
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: ElevatedButton.icon(
-                  onPressed: _showViewersBottomSheet,
-                  icon: const Icon(Icons.remove_red_eye_outlined),
-                  label: Text('Viewed by ${_viewers.length} friends'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white10,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                  ),
-                ),
-              ),
-            )
-          else
-            SafeArea(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                color: Colors.grey[950],
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _replyController,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
-                          hintText: 'Reply to status privately...',
-                          hintStyle: TextStyle(color: Colors.white38),
-                          border: InputBorder.none,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.send, color: Color(0xFF00BFFF)),
-                      onPressed: _sendPrivateReply,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }
