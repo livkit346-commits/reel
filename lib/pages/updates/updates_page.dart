@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
-import 'package:video_player/video_player.dart';
 import 'package:reel/pages/updates/add_story_screen.dart';
 import 'package:reel/widgets/status_ring_painter.dart';
 import 'package:reel/pages/updates/status_viewer_screen.dart';
@@ -39,7 +38,6 @@ class _UpdatesPageState extends State<UpdatesPage> {
     try {
       final statuses = await supabase.getActiveStatuses();
       
-      final myId = supabase.currentUser?.id;
       final Map<String, List<dynamic>> groupedMap = {};
       final Map<String, String> userNames = {};
       

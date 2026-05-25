@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/explore/create_post_screen.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
-import 'package:reel/pages/updates/updates_page.dart';
+import 'package:reel/pages/updates/status_viewer_screen.dart';
 import 'package:reel/widgets/user_avatar.dart';
 
 class ExploreFeedPage extends StatefulWidget {
@@ -99,7 +99,9 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(
-                                          builder: (context) => StatusViewerPage(status: status),
+                                          builder: (context) => StatusViewerPage(
+                                            statuses: [Map<String, dynamic>.from(status)],
+                                          ),
                                         ),
                                       );
                                     },
