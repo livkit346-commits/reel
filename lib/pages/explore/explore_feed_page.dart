@@ -5,6 +5,7 @@ import 'package:reel/pages/explore/create_post_screen.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/pages/updates/status_viewer_screen.dart';
 import 'package:reel/widgets/user_avatar.dart';
+import 'package:reel/widgets/status_ring_painter.dart';
 
 class ExploreFeedPage extends StatefulWidget {
   const ExploreFeedPage({super.key});
@@ -70,8 +71,8 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
                         if (snapshot.connectionState == ConnectionState.waiting) {
                           return const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)));
                         }
-                        final statuses = snapshot.data ?? [];
-                        if (statuses.isEmpty) {
+                        final rawStatuses = snapshot.data ?? [];
+                        if (rawStatuses.isEmpty) {
                           return const Center(
                             child: Text(
                               'No recent active status updates',
@@ -80,15 +81,58 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
                           );
                         }
 
+                        // Group statuses by userId
+                        final Map<String, List<dynamic>> groupedMap = {};
+                        final Map<String, String> userNames = {};
+                        
+                        for (var status in rawStatuses) {
+                          final userId = (status['userId'] ?? status['userid'] ?? '').toString();
+                          if (userId.isEmpty) continue;
+                          
+                          userNames[userId] = status['userName'] ?? status['username'] ?? 'User';
+                          
+                          if (!groupedMap.containsKey(userId)) {
+                            groupedMap[userId] = [];
+                          }
+                          groupedMap[userId]!.add(status);
+                        }
+                        
+                        final List<Map<String, dynamic>> userStatusGroups = [];
+                        for (var entry in groupedMap.entries) {
+                          final userId = entry.key;
+                          final userStatuses = entry.value;
+                          
+                          // Sort user's statuses from oldest to newest (WhatsApp style play order)
+                          userStatuses.sort((a, b) {
+                            final dateA = DateTime.parse(a['createdAt'] ?? a['createdat'] ?? '');
+                            final dateB = DateTime.parse(b['createdAt'] ?? b['createdat'] ?? '');
+                            return dateA.compareTo(dateB);
+                          });
+                          
+                          userStatusGroups.add({
+                            'userId': userId,
+                            'userName': userNames[userId],
+                            'statuses': userStatuses,
+                            'latestUpdate': userStatuses.last['createdAt'] ?? userStatuses.last['createdat'],
+                          });
+                        }
+                        
+                        // Sort user status groups by who has the most recent status (descending)
+                        userStatusGroups.sort((a, b) {
+                          final dateA = DateTime.parse(a['latestUpdate'] ?? '');
+                          final dateB = DateTime.parse(b['latestUpdate'] ?? '');
+                          return dateB.compareTo(dateA);
+                        });
+
                         return ListView.builder(
                           scrollDirection: Axis.horizontal,
-                          itemCount: statuses.length,
+                          itemCount: userStatusGroups.length,
                           padding: const EdgeInsets.symmetric(horizontal: 12),
                           itemBuilder: (context, index) {
-                            final status = statuses[index];
-                            final userName = status['userName'] ?? status['username'] ?? 'User';
-                            final imageUrl = status['imageUrl'] ?? status['imageurl'] ?? '';
-                            final userId = status['userId'] ?? status['userid'] ?? '';
+                            final group = userStatusGroups[index];
+                            final userName = group['userName'];
+                            final userId = group['userId'];
+                            final List<dynamic> userStatuses = group['statuses'];
 
                             return Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -100,15 +144,25 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
                                         context,
                                         MaterialPageRoute(
                                           builder: (context) => StatusViewerPage(
-                                            statuses: [Map<String, dynamic>.from(status)],
+                                            statuses: userStatuses.cast<Map<String, dynamic>>(),
                                           ),
                                         ),
                                       );
                                     },
-                                    child: UserAvatar(
-                                      userId: userId,
-                                      radius: 26,
-                                      border: Border.all(color: const Color(0xFF00BFFF), width: 2),
+                                    child: CustomPaint(
+                                      painter: StatusRingPainter(
+                                        statusCount: userStatuses.length,
+                                        viewedCount: 0,
+                                        unviewedColor: const Color(0xFF00BFFF), // Premium Cyan theme
+                                        viewedColor: Colors.grey,
+                                      ),
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        child: UserAvatar(
+                                          userId: userId,
+                                          radius: 24,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(height: 4),

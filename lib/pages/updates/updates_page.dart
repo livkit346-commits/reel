@@ -16,6 +16,7 @@ class UpdatesPage extends StatefulWidget {
 class _UpdatesPageState extends State<UpdatesPage> {
   
   List<Map<String, dynamic>> _userStatusGroups = [];
+  List<dynamic> _myStatuses = [];
   List<dynamic> _channels = [];
   Map<String, bool> _subscribedChannels = {}; // Keep track of channel subscriptions
   bool _loadingStatuses = true;
@@ -54,6 +55,9 @@ class _UpdatesPageState extends State<UpdatesPage> {
       }
       
       final List<Map<String, dynamic>> groupedList = [];
+      List<dynamic> myStatuses = [];
+      final myId = supabase.currentUser?.id;
+
       for (var entry in groupedMap.entries) {
         final userId = entry.key;
         final userStatuses = entry.value;
@@ -65,6 +69,11 @@ class _UpdatesPageState extends State<UpdatesPage> {
           return dateA.compareTo(dateB);
         });
         
+        if (userId == myId) {
+          myStatuses = userStatuses;
+          continue;
+        }
+
         groupedList.add({
           'userId': userId,
           'userName': userNames[userId],
@@ -83,6 +92,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
       if (mounted) {
         setState(() {
           _userStatusGroups = groupedList;
+          _myStatuses = myStatuses;
           _loadingStatuses = false;
         });
       }
@@ -231,7 +241,22 @@ class _UpdatesPageState extends State<UpdatesPage> {
                   children: [
                     // TikTok "Add Story" My Status Bubble
                     GestureDetector(
-                      onTap: _uploadingStatus ? null : _openStoryPicker,
+                      onTap: _uploadingStatus
+                          ? null
+                          : () {
+                              if (_myStatuses.isNotEmpty) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => StatusViewerPage(
+                                      statuses: _myStatuses.cast<Map<String, dynamic>>(),
+                                    ),
+                                  ),
+                                ).then((_) => _loadStatuses());
+                              } else {
+                                _openStoryPicker();
+                              }
+                            },
                       child: Padding(
                         padding: const EdgeInsets.only(right: 16),
                         child: Column(
@@ -255,27 +280,46 @@ class _UpdatesPageState extends State<UpdatesPage> {
                                           ),
                                         ),
                                       )
-                                    : Container(
-                                        padding: const EdgeInsets.all(3),
-                                        decoration: BoxDecoration(
-                                          shape: BoxShape.circle,
-                                          border: Border.all(color: Colors.white24, width: 2),
-                                        ),
-                                        child: UserAvatar(
-                                          userId: context.read<SupabaseService>().currentUser?.id ?? '',
-                                          radius: 27,
-                                        ),
-                                      ),
+                                    : (_myStatuses.isNotEmpty
+                                        ? CustomPaint(
+                                            painter: StatusRingPainter(
+                                              statusCount: _myStatuses.length,
+                                              viewedCount: 0,
+                                              unviewedColor: const Color(0xFF00A884), // WhatsApp Green
+                                              viewedColor: Colors.grey,
+                                            ),
+                                            child: Container(
+                                              padding: const EdgeInsets.all(5),
+                                              child: UserAvatar(
+                                                userId: context.read<SupabaseService>().currentUser?.id ?? '',
+                                                radius: 25,
+                                              ),
+                                            ),
+                                          )
+                                        : Container(
+                                            padding: const EdgeInsets.all(3),
+                                            decoration: BoxDecoration(
+                                              shape: BoxShape.circle,
+                                              border: Border.all(color: Colors.white24, width: 2),
+                                            ),
+                                            child: UserAvatar(
+                                              userId: context.read<SupabaseService>().currentUser?.id ?? '',
+                                              radius: 27,
+                                            ),
+                                          )),
                                 Positioned(
                                   bottom: 0,
                                   right: 0,
-                                  child: Container(
-                                    decoration: const BoxDecoration(
-                                      color: Color(0xFF00BFFF),
-                                      shape: BoxShape.circle,
+                                  child: GestureDetector(
+                                    onTap: _uploadingStatus ? null : _openStoryPicker,
+                                    child: Container(
+                                      decoration: const BoxDecoration(
+                                        color: Color(0xFF00BFFF),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      padding: const EdgeInsets.all(4),
+                                      child: const Icon(Icons.add, color: Colors.white, size: 14),
                                     ),
-                                    padding: const EdgeInsets.all(4),
-                                    child: const Icon(Icons.add, color: Colors.white, size: 14),
                                   ),
                                 ),
                               ],
