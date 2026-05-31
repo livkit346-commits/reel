@@ -30,6 +30,8 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
   bool _videoHasError = false;
   bool _mediaLoading = false;
   File? _localMediaFile;
+  double? _trimStart;
+  double? _trimEnd;
 
   final TextEditingController _replyController = TextEditingController();
   List<dynamic> _viewers = [];
@@ -68,11 +70,24 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
     _videoHasError = false;
     _mediaLoading = false;
     _localMediaFile = null;
+    _trimStart = null;
+    _trimEnd = null;
 
     final status = widget.statuses[index];
     final imageUrl = (status['imageUrl'] ?? status['imageurl']) as String?;
     String mediaType = (status['mediaType'] ?? status['mediatype'] ?? 'image') as String;
     
+    // Parse trim start/end from query parameters
+    if (imageUrl != null) {
+      try {
+        final uri = Uri.parse(imageUrl);
+        final startParam = uri.queryParameters['trimStart'];
+        final endParam = uri.queryParameters['trimEnd'];
+        if (startParam != null) _trimStart = double.tryParse(startParam);
+        if (endParam != null) _trimEnd = double.tryParse(endParam);
+      } catch (_) {}
+    }
+
     if (imageUrl != null && imageUrl.toLowerCase().contains('.mp4')) {
       mediaType = 'video';
     }
@@ -151,8 +166,34 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
             setState(() {
               _videoInitialized = true;
             });
+            
+            // Seek to trimStart immediately if available
+            if (_trimStart != null) {
+              _videoController?.seekTo(Duration(milliseconds: (_trimStart! * 1000).toInt()));
+            }
+
             _videoController?.play();
-            _animController.duration = _videoController?.value.duration ?? const Duration(seconds: 15);
+            
+            // Loop playback within trimmed duration limits
+            _videoController?.addListener(() {
+              if (_videoController != null && _videoController!.value.isPlaying && _trimEnd != null && _trimStart != null) {
+                final currentPosMs = _videoController!.value.position.inMilliseconds;
+                final endMs = (_trimEnd! * 1000).toInt();
+                if (currentPosMs >= endMs) {
+                  _videoController?.seekTo(Duration(milliseconds: (_trimStart! * 1000).toInt()));
+                }
+              }
+            });
+
+            // Calculate progress bar duration using trimmed range
+            final Duration trimDuration;
+            if (_trimStart != null && _trimEnd != null) {
+              trimDuration = Duration(milliseconds: ((_trimEnd! - _trimStart!) * 1000).toInt());
+            } else {
+              trimDuration = _videoController?.value.duration ?? const Duration(seconds: 15);
+            }
+
+            _animController.duration = trimDuration;
             _animController.forward();
           }
         }).catchError((err) {

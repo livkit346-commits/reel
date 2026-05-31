@@ -136,30 +136,6 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
 
   void _onAssetSelected(AssetEntity asset) async {
     final String type = asset.type == AssetType.video ? 'video' : 'image';
-    
-    // WhatsApp style limit
-    if (type == 'video' && asset.videoDuration > const Duration(seconds: 31)) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: Colors.grey[950],
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: const Text('Video Too Long', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          content: const Text(
-            'WhatsApp limits statuses to 30 seconds. Please select a shorter video.',
-            style: TextStyle(color: Colors.white70),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK', style: TextStyle(color: const Color(0xFF00BFFF))),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
     final File? file = await asset.file;
     if (file != null) {
       _navigateToPreview(file, type);

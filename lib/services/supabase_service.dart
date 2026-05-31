@@ -232,6 +232,8 @@ class SupabaseService {
     File? mediaFile,
     String? mediaType, // 'image' or 'video'
     File? voiceFile,
+    double? trimStart,
+    double? trimEnd,
   }) async {
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
@@ -248,6 +250,11 @@ class SupabaseService {
         final storagePath = 'statuses/$myId/$fileName';
         await client.storage.from('media').upload(storagePath, mediaFile);
         imageUrl = getMediaUrl('media', storagePath);
+
+        // Store video trimming metadata inside the media URL parameters
+        if (isVideo && trimStart != null && trimEnd != null) {
+          imageUrl = '$imageUrl?trimStart=$trimStart&trimEnd=$trimEnd';
+        }
       }
 
       String? voiceUrl;

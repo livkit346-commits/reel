@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:reel/services/supabase_service.dart';
 
 class StoryPreviewScreen extends StatefulWidget {
@@ -24,6 +26,20 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
   bool _isInitialized = false;
   bool _isUploading = false;
 
+  // Video Trimming variables
+  double _trimStart = 0.0;
+  double _trimEnd = 100.0; // Max 1:40 (100 seconds)
+  double _videoDuration = 0.0;
+
+  // Image Editing variables
+  String _editMode = 'none'; // 'none', 'draw', 'text'
+  final List<Stroke> _strokes = [];
+  List<Offset> _currentPoints = [];
+  Color _selectedColor = const Color(0xFF00BFFF); // Default Cyan theme
+  final double _strokeWidth = 5.0;
+  final List<TextOverlay> _textOverlays = [];
+  Size _imageRenderSize = Size.zero;
+
   @override
   void initState() {
     super.initState();
@@ -31,9 +47,30 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
       _videoController = VideoPlayerController.file(widget.mediaFile!)
         ..initialize().then((_) {
           if (mounted) {
-            setState(() => _isInitialized = true);
+            setState(() {
+              _isInitialized = true;
+              _videoDuration = _videoController!.value.duration.inSeconds.toDouble();
+              _trimStart = 0.0;
+              // Default to 1:40 minutes or total duration, whichever is shorter
+              _trimEnd = _videoDuration > 100.0 ? 100.0 : _videoDuration;
+            });
             _videoController?.play();
             _videoController?.setLooping(true);
+
+            // Playback constraints listener to loop only in the trimmed range
+            _videoController?.addListener(() {
+              if (_videoController != null && _videoController!.value.isPlaying) {
+                final currentPosMs = _videoController!.value.position.inMilliseconds;
+                final startMs = (_trimStart * 1000).toInt();
+                final endMs = (_trimEnd * 1000).toInt();
+
+                if (currentPosMs < startMs) {
+                  _videoController?.seekTo(Duration(milliseconds: startMs));
+                } else if (currentPosMs >= endMs) {
+                  _videoController?.seekTo(Duration(milliseconds: startMs));
+                }
+              }
+            });
           }
         });
     }
@@ -44,6 +81,129 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
     _videoController?.dispose();
     _textController.dispose();
     super.dispose();
+  }
+
+  String _formatSeconds(double seconds) {
+    final int min = (seconds / 60).floor();
+    final int sec = (seconds % 60).floor();
+    return '${min.toString().padLeft(2, '0')}:${sec.toString().padLeft(2, '0')}';
+  }
+
+  void _addTextOverlayDialog() {
+    final textController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[950],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Add Text Overlay', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: textController,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(
+            hintText: 'Enter text...',
+            hintStyle: TextStyle(color: Colors.white38),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final txt = textController.text.trim();
+              if (txt.isNotEmpty) {
+                setState(() {
+                  _textOverlays.add(TextOverlay(
+                    text: txt,
+                    position: const Offset(80, 200), // default position
+                    color: _selectedColor,
+                  ));
+                });
+                Navigator.pop(context);
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00BFFF)),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Draw the custom edited strokes and text onto a high-res Canvas and output a new file
+  Future<File> _renderEditedImage() async {
+    if (_strokes.isEmpty && _textOverlays.isEmpty) {
+      return widget.mediaFile!;
+    }
+
+    final bytes = await widget.mediaFile!.readAsBytes();
+    final codec = await ui.instantiateImageCodec(bytes);
+    final frame = await codec.getNextFrame();
+    final originalImage = frame.image;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    final width = originalImage.width.toDouble();
+    final height = originalImage.height.toDouble();
+
+    // 1. Draw original background image
+    canvas.drawImage(originalImage, Offset.zero, Paint());
+
+    // 2. Compute scaling factors from screen coords to final asset size
+    final double screenWidth = _imageRenderSize.width > 0 ? _imageRenderSize.width : MediaQuery.of(context).size.width;
+    final double screenHeight = _imageRenderSize.height > 0 ? _imageRenderSize.height : MediaQuery.of(context).size.height;
+    
+    final double scaleX = width / screenWidth;
+    final double scaleY = height / screenHeight;
+
+    canvas.scale(scaleX, scaleY);
+
+    // 3. Draw drawings
+    final paint = Paint()
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    for (var stroke in _strokes) {
+      paint.color = stroke.color;
+      paint.strokeWidth = stroke.strokeWidth;
+      for (int i = 0; i < stroke.points.length - 1; i++) {
+        canvas.drawLine(stroke.points[i], stroke.points[i + 1], paint);
+      }
+    }
+
+    // 4. Draw text overlays
+    for (var overlay in _textOverlays) {
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: overlay.text,
+          style: TextStyle(
+            color: overlay.color,
+            fontSize: overlay.fontSize,
+            fontWeight: FontWeight.bold,
+            backgroundColor: Colors.black54,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, overlay.position);
+    }
+
+    final picture = recorder.endRecording();
+    final img = await picture.toImage(width.toInt(), height.toInt());
+    final byteData = await img.toByteData(format: ui.ImageByteFormat.png);
+    final buffer = byteData!.buffer.asUint8List();
+
+    final tempDir = await getTemporaryDirectory();
+    final editedFile = File('${tempDir.path}/edited_status_${DateTime.now().millisecondsSinceEpoch}.png');
+    await editedFile.writeAsBytes(buffer);
+
+    return editedFile;
   }
 
   Future<void> _shareStory() async {
@@ -59,10 +219,17 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
     final supabase = context.read<SupabaseService>();
 
     try {
+      File? finalMediaFile = widget.mediaFile;
+      if (widget.mediaType == 'image' && widget.mediaFile != null) {
+        finalMediaFile = await _renderEditedImage();
+      }
+
       await supabase.createCustomStatus(
         text: text.isNotEmpty ? text : null,
-        mediaFile: widget.mediaFile,
+        mediaFile: finalMediaFile,
         mediaType: widget.mediaType == 'text' ? null : widget.mediaType,
+        trimStart: widget.mediaType == 'video' ? _trimStart : null,
+        trimEnd: widget.mediaType == 'video' ? _trimEnd : null,
       );
 
       if (mounted) {
@@ -72,7 +239,7 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context, true); // Return true to indicate success
+        Navigator.pop(context, true);
       }
     } catch (e) {
       if (mounted) {
@@ -113,8 +280,36 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // 1. Content Area
+          // 1. Content Area (Supports interactive gestures for drawing and text positioning)
           GestureDetector(
+            onPanStart: (details) {
+              if (widget.mediaType == 'image' && _editMode == 'draw') {
+                setState(() {
+                  _currentPoints = [details.localPosition];
+                });
+              }
+            },
+            onPanUpdate: (details) {
+              if (widget.mediaType == 'image') {
+                if (_editMode == 'draw') {
+                  setState(() {
+                    _currentPoints.add(details.localPosition);
+                  });
+                } else if (_editMode == 'text' && _textOverlays.isNotEmpty) {
+                  setState(() {
+                    _textOverlays.last.position = _textOverlays.last.position + details.delta;
+                  });
+                }
+              }
+            },
+            onPanEnd: (details) {
+              if (widget.mediaType == 'image' && _editMode == 'draw') {
+                setState(() {
+                  _strokes.add(Stroke(List.from(_currentPoints), _selectedColor, _strokeWidth));
+                  _currentPoints = [];
+                });
+              }
+            },
             onTap: () {
               if (_videoController != null) {
                 if (_videoController!.value.isPlaying) {
@@ -128,7 +323,7 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
             child: isText
                 ? Container(
                     decoration: const BoxDecoration(
-                      color: Color(0xFF311B92), // Matches Colors.deepPurple[900]
+                      color: Color(0xFF311B92),
                     ),
                     padding: const EdgeInsets.symmetric(horizontal: 24),
                     alignment: Alignment.center,
@@ -161,9 +356,41 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
                             child: CircularProgressIndicator(color: Colors.white),
                           )
                     : widget.mediaFile != null
-                        ? Image.file(
-                            widget.mediaFile!,
-                            fit: BoxFit.contain,
+                        ? LayoutBuilder(
+                            builder: (context, constraints) {
+                              // Compute rendered container bounds for absolute brush path scaling
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted) {
+                                  final newSize = Size(constraints.maxWidth, constraints.maxHeight);
+                                  if (_imageRenderSize != newSize) {
+                                    setState(() {
+                                      _imageRenderSize = newSize;
+                                    });
+                                  }
+                                }
+                              });
+
+                              return Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Image.file(
+                                    widget.mediaFile!,
+                                    fit: BoxFit.contain,
+                                  ),
+                                  Positioned.fill(
+                                    child: CustomPaint(
+                                      painter: CanvasPainter(
+                                        strokes: _strokes,
+                                        currentPoints: _currentPoints,
+                                        currentColor: _selectedColor,
+                                        currentWidth: _strokeWidth,
+                                        textOverlays: _textOverlays,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
                           )
                         : Container(color: Colors.black),
           ),
@@ -183,7 +410,137 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
               ),
             ),
 
-          // 3. Caption field and Share Button (Only for image/video)
+          // 3. Premium Video Trimming Slider (WhatsApp style)
+          if (widget.mediaType == 'video' && _isInitialized)
+            Positioned(
+              top: kToolbarHeight + MediaQuery.of(context).padding.top + 8,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Trim Video (Max 1:40)',
+                          style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                        Text(
+                          '${_formatSeconds(_trimStart)} - ${_formatSeconds(_trimEnd)} (${_formatSeconds(_trimEnd - _trimStart)})',
+                          style: const TextStyle(color: Color(0xFF00BFFF), fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    RangeSlider(
+                      values: RangeValues(_trimStart, _trimEnd),
+                      min: 0.0,
+                      max: _videoDuration > 0.0 ? _videoDuration : 1.0,
+                      activeColor: const Color(0xFF00BFFF),
+                      inactiveColor: Colors.white24,
+                      onChanged: (RangeValues values) {
+                        // Enforce maximum status cut of 100 seconds (1:40 mins)
+                        if (values.end - values.start <= 100.0) {
+                          setState(() {
+                            _trimStart = values.start;
+                            _trimEnd = values.end;
+                          });
+                          _videoController?.seekTo(Duration(milliseconds: (_trimStart * 1000).toInt()));
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // 4. Premium Image Editing Toolbar (Draw, Text, Colors, Clear)
+          if (widget.mediaType == 'image')
+            Positioned(
+              top: kToolbarHeight + MediaQuery.of(context).padding.top + 8,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                      icon: Icon(
+                        Icons.edit,
+                        color: _editMode == 'draw' ? const Color(0xFF00BFFF) : Colors.white,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _editMode = _editMode == 'draw' ? 'none' : 'draw';
+                        });
+                      },
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.text_fields,
+                        color: _editMode == 'text' ? const Color(0xFF00BFFF) : Colors.white,
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _editMode = 'text';
+                        });
+                        _addTextOverlayDialog();
+                      },
+                    ),
+                    ...[
+                      const Color(0xFF00BFFF),
+                      const Color(0xFF00A884),
+                      const Color(0xFFFFD700),
+                      const Color(0xFFEF5350),
+                      const Color(0xFFFFFFFF),
+                    ].map((col) => GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _selectedColor = col;
+                            });
+                          },
+                          child: Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: col,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: _selectedColor == col ? Colors.white : Colors.transparent,
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                        )),
+                    IconButton(
+                      icon: const Icon(Icons.delete_sweep, color: Colors.redAccent),
+                      onPressed: () {
+                        setState(() {
+                          _strokes.clear();
+                          _textOverlays.clear();
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // 5. Caption field and Share Button (Only for image/video)
           if (!isText)
             Positioned(
               bottom: MediaQuery.of(context).viewInsets.bottom + 24,
@@ -220,7 +577,7 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
               ),
             ),
 
-          // 4. Send button overlay for text-only story (Positioned at bottom center/right)
+          // 6. Send button overlay for text-only story
           if (isText)
             Positioned(
               bottom: MediaQuery.of(context).viewInsets.bottom + 24,
@@ -236,7 +593,7 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
               ),
             ),
 
-          // 5. Uploading loader overlay
+          // 7. Uploading loader overlay
           if (_isUploading)
             Container(
               color: Colors.black87,
@@ -262,4 +619,85 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
       ),
     );
   }
+}
+
+// ----------------------------------------------------
+// Auxiliary Custom Painter and Data Model Classes
+// ----------------------------------------------------
+
+class Stroke {
+  final List<Offset> points;
+  final Color color;
+  final double strokeWidth;
+  Stroke(this.points, this.color, this.strokeWidth);
+}
+
+class TextOverlay {
+  String text;
+  Offset position;
+  Color color;
+  double fontSize;
+  TextOverlay({required this.text, required this.position, required this.color, this.fontSize = 24.0});
+}
+
+class CanvasPainter extends CustomPainter {
+  final List<Stroke> strokes;
+  final List<Offset> currentPoints;
+  final Color currentColor;
+  final double currentWidth;
+  final List<TextOverlay> textOverlays;
+
+  CanvasPainter({
+    required this.strokes,
+    required this.currentPoints,
+    required this.currentColor,
+    required this.currentWidth,
+    required this.textOverlays,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    // Draw established strokes
+    for (var stroke in strokes) {
+      paint.color = stroke.color;
+      paint.strokeWidth = stroke.strokeWidth;
+      for (int i = 0; i < stroke.points.length - 1; i++) {
+        canvas.drawLine(stroke.points[i], stroke.points[i + 1], paint);
+      }
+    }
+
+    // Draw active drawing path
+    if (currentPoints.isNotEmpty) {
+      paint.color = currentColor;
+      paint.strokeWidth = currentWidth;
+      for (int i = 0; i < currentPoints.length - 1; i++) {
+        canvas.drawLine(currentPoints[i], currentPoints[i + 1], paint);
+      }
+    }
+
+    // Draw text overlays
+    for (var overlay in textOverlays) {
+      final textPainter = TextPainter(
+        text: TextSpan(
+          text: overlay.text,
+          style: TextStyle(
+            color: overlay.color,
+            fontSize: overlay.fontSize,
+            fontWeight: FontWeight.bold,
+            backgroundColor: Colors.black54,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, overlay.position);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CanvasPainter oldDelegate) => true;
 }
