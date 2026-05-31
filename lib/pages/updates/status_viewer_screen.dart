@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:video_player/video_player.dart';
 
@@ -26,6 +28,8 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
   bool _isVideo = false;
   bool _videoInitialized = false;
   bool _videoHasError = false;
+  bool _mediaLoading = false;
+  File? _localMediaFile;
 
   final TextEditingController _replyController = TextEditingController();
   List<dynamic> _viewers = [];
@@ -62,6 +66,8 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
     _videoController = null;
     _videoInitialized = false;
     _videoHasError = false;
+    _mediaLoading = false;
+    _localMediaFile = null;
 
     final status = widget.statuses[index];
     final imageUrl = (status['imageUrl'] ?? status['imageurl']) as String?;
@@ -73,8 +79,73 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
 
     _isVideo = mediaType == 'video';
 
-    if (_isVideo && imageUrl != null && imageUrl.isNotEmpty) {
-      _videoController = VideoPlayerController.networkUrl(Uri.parse(imageUrl))
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      _loadStatusMedia(imageUrl);
+    } else {
+      // It's a text status
+      _animController.duration = const Duration(seconds: 5);
+      _animController.forward();
+    }
+
+    _markAsViewed(status);
+    _loadViewers(status);
+    setState(() {});
+  }
+
+  Future<void> _loadStatusMedia(String imageUrl) async {
+    setState(() {
+      _mediaLoading = true;
+      _localMediaFile = null;
+    });
+
+    try {
+      // 1. Try to get it from local cache first (instant)
+      final localFile = await LocalStorageService().getLocalIfCached(imageUrl);
+      if (localFile != null) {
+        if (mounted) {
+          setState(() {
+            _localMediaFile = localFile;
+            _mediaLoading = false;
+          });
+          _initializeMedia();
+        }
+        _prefetchNextStatus();
+        return;
+      }
+
+      // 2. If not cached, download and cache it (while showing loading state)
+      final downloadedFile = await LocalStorageService().getCachedFile(imageUrl, ttl: const Duration(hours: 24));
+      if (mounted) {
+        setState(() {
+          _localMediaFile = downloadedFile;
+          _mediaLoading = false;
+        });
+        _initializeMedia();
+      }
+      _prefetchNextStatus();
+    } catch (e) {
+      debugPrint('Error loading status media: $e');
+      if (mounted) {
+        setState(() {
+          _mediaLoading = false;
+          _videoHasError = _isVideo;
+        });
+        
+        // Show error message and proceed automatically
+        if (!_isVideo) {
+          _animController.duration = const Duration(seconds: 5);
+          _animController.forward();
+        } else {
+          _animController.duration = const Duration(seconds: 3);
+          _animController.forward();
+        }
+      }
+    }
+  }
+
+  void _initializeMedia() {
+    if (_isVideo && _localMediaFile != null) {
+      _videoController = VideoPlayerController.file(_localMediaFile!)
         ..initialize().then((_) {
           if (mounted) {
             setState(() {
@@ -85,24 +156,34 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
             _animController.forward();
           }
         }).catchError((err) {
-          debugPrint('Error loading video status: $err');
+          debugPrint('Error initializing local video status: $err');
           if (mounted) {
             setState(() {
               _videoHasError = true;
             });
-            _animController.duration = const Duration(seconds: 3); // short duration if error
+            _animController.duration = const Duration(seconds: 3);
             _animController.forward();
           }
         });
     } else {
-      // It's an image or text
-      _animController.duration = const Duration(seconds: 5);
-      _animController.forward();
+      // It's an image
+      if (mounted) {
+        _animController.duration = const Duration(seconds: 5);
+        _animController.forward();
+      }
     }
+  }
 
-    _markAsViewed(status);
-    _loadViewers(status);
-    setState(() {});
+  void _prefetchNextStatus() {
+    final nextIndex = currentIndex + 1;
+    if (nextIndex < widget.statuses.length) {
+      final nextStatus = widget.statuses[nextIndex];
+      final nextUrl = (nextStatus['imageUrl'] ?? nextStatus['imageurl']) as String?;
+      if (nextUrl != null && nextUrl.isNotEmpty) {
+        // Prefetch next media in the background to make taps instant
+        LocalStorageService().getCachedFile(nextUrl, ttl: const Duration(hours: 24)).catchError((_) => File(''));
+      }
+    }
   }
 
   void _nextStatus() {
@@ -230,6 +311,27 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
   }
 
   Widget _buildMediaLayer(String? imageUrl, String? textContent) {
+    if (_mediaLoading) {
+      return Stack(
+        fit: StackFit.expand,
+        children: [
+          if (imageUrl != null && imageUrl.isNotEmpty)
+            Opacity(
+              opacity: 0.3,
+              child: Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+              ),
+            ),
+          const Center(
+            child: CircularProgressIndicator(
+              color: Color(0xFF00BFFF),
+            ),
+          ),
+        ],
+      );
+    }
+
     if (_isVideo) {
       if (_videoInitialized && _videoController != null) {
         return Center(
@@ -244,26 +346,27 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
         return const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF)));
       }
     } else if (imageUrl != null && imageUrl.isNotEmpty) {
-      return Image.network(
-        imageUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          debugPrint('Image load error: $error');
-          return const Center(
-            child: Text('Failed to load image.', style: TextStyle(color: Colors.white54)),
-          );
-        },
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) return child;
-          return Center(
-            child: CircularProgressIndicator(
-              value: loadingProgress.expectedTotalBytes != null
-                  ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
-                  : null,
-            ),
-          );
-        },
-      );
+      if (_localMediaFile != null) {
+        return Image.file(
+          _localMediaFile!,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return const Center(
+              child: Text('Failed to load cached image.', style: TextStyle(color: Colors.white54)),
+            );
+          },
+        );
+      } else {
+        return Image.network(
+          imageUrl,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return const Center(
+              child: Text('Failed to load image.', style: TextStyle(color: Colors.white54)),
+            );
+          },
+        );
+      }
     } else if (textContent != null && textContent.isNotEmpty) {
       return Container(
         color: Colors.deepPurple[900],

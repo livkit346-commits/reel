@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:reel/services/local_storage_service.dart';
 
 class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
@@ -200,9 +201,14 @@ class SupabaseService {
   Future<List<dynamic>> getExploreFeed() async {
     try {
       final response = await client.from('posts').select().order('createdAt', ascending: false).limit(25);
+      await LocalStorageService().cacheJson('explore_feed', response);
       return response;
     } catch (e) {
-      rethrow;
+      final cached = await LocalStorageService().getCachedJson('explore_feed');
+      if (cached != null && cached is List) {
+        return cached;
+      }
+      return [];
     }
   }
 
@@ -344,8 +350,13 @@ class SupabaseService {
           .select()
           .gt('createdAt', oneDayAgo)
           .order('createdAt', ascending: false);
+      await LocalStorageService().cacheJson('active_statuses', response);
       return response;
     } catch (e) {
+      final cached = await LocalStorageService().getCachedJson('active_statuses');
+      if (cached != null && cached is List) {
+        return cached;
+      }
       return [];
     }
   }
@@ -395,9 +406,14 @@ class SupabaseService {
         }
       }
 
-      // Return followed first, followed by discovery statuses
-      return [...followedStatuses, ...discoveryStatuses];
+      final result = [...followedStatuses, ...discoveryStatuses];
+      await LocalStorageService().cacheJson('explore_statuses', result);
+      return result;
     } catch (e) {
+      final cached = await LocalStorageService().getCachedJson('explore_statuses');
+      if (cached != null && cached is List) {
+        return cached;
+      }
       return getActiveStatuses();
     }
   }

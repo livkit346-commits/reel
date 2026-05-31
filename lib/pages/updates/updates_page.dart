@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/pages/updates/add_story_screen.dart';
 import 'package:reel/widgets/status_ring_painter.dart';
@@ -32,6 +33,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
   void _loadAllUpdates() {
     _loadStatuses();
     _loadChannels();
+    LocalStorageService().runLocalCleanup(); // WhatsApp-style automatic background cleanup of expired files
   }
 
   Future<void> _loadStatuses() async {

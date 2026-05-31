@@ -72,23 +72,46 @@ class LocalStorageService {
     return null;
   }
 
-  // Clears all cache files that are older than their TTL
+  // Clears all cache files that are older than 24 hours (since status updates expire in 24 hours)
   Future<void> runLocalCleanup() async {
-    final cacheDir = await _mediaCacheDir;
-    if (!await cacheDir.exists()) return;
+    try {
+      final cacheDir = await _mediaCacheDir;
+      if (!await cacheDir.exists()) return;
 
-    final now = DateTime.now();
-    await for (final file in cacheDir.list()) {
-      if (file is File) {
-        final lastModified = await file.lastModified();
-        final difference = now.difference(lastModified);
-        
-        // Statuses TTL is 24 hours. Chat Media is 48 hours.
-        // We delete anything older than 48 hours to be safe.
-        if (difference > const Duration(hours: 48)) {
-          await file.delete();
+      final now = DateTime.now();
+      await for (final file in cacheDir.list()) {
+        if (file is File) {
+          final lastModified = await file.lastModified();
+          final difference = now.difference(lastModified);
+          
+          // Delete anything older than 24 hours to automatically purge expired statuses and save storage space
+          if (difference > const Duration(hours: 24)) {
+            await file.delete();
+          }
         }
       }
-    }
+    } catch (_) {}
+  }
+
+  // Cache JSON string locally for offline viewability
+  Future<void> cacheJson(String key, dynamic data) async {
+    try {
+      final path = await _localPath;
+      final file = File('$path/json_cache_$key.json');
+      await file.writeAsString(jsonEncode(data));
+    } catch (_) {}
+  }
+
+  // Retrieve cached JSON for offline fallback
+  Future<dynamic> getCachedJson(String key) async {
+    try {
+      final path = await _localPath;
+      final file = File('$path/json_cache_$key.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        return jsonDecode(content);
+      }
+    } catch (_) {}
+    return null;
   }
 }
