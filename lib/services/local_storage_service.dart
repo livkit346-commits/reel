@@ -23,11 +23,12 @@ class LocalStorageService {
     return dir;
   }
 
-  // Generates a unique filename for a URL
+  // Generates a unique filename for a URL, ignoring dynamic query parameters (e.g. tokens, trim settings, cache busters)
   String _generateFileName(String url) {
-    final bytes = utf8.encode(url);
+    final baseUrl = url.split('?').first;
+    final bytes = utf8.encode(baseUrl);
     final digest = sha256.convert(bytes);
-    final extension = url.split('?').first.split('.').last;
+    final extension = baseUrl.split('.').last;
     // Fallback if extension is too long or contains slashes
     final safeExtension = (extension.length > 4 || extension.contains('/')) ? 'bin' : extension;
     return '${digest.toString()}.$safeExtension';
@@ -40,14 +41,19 @@ class LocalStorageService {
     final file = File('${cacheDir.path}/$fileName');
 
     if (await file.exists()) {
-      final lastModified = await file.lastModified();
-      final difference = DateTime.now().difference(lastModified);
-      if (difference < ttl) {
-        // Return valid cached file
+      try {
+        final lastModified = (await file.lastModified()).toUtc();
+        final difference = DateTime.now().toUtc().difference(lastModified);
+        if (difference < ttl) {
+          // Return valid cached file
+          return file;
+        } else {
+          // Expired local file, delete it
+          await file.delete();
+        }
+      } catch (_) {
+        // Fallback: If metadata parsing fails, safely return the cached file instead of re-downloading
         return file;
-      } else {
-        // Expired local file, delete it
-        await file.delete();
       }
     }
 
@@ -72,22 +78,24 @@ class LocalStorageService {
     return null;
   }
 
-  // Clears all cache files that are older than 24 hours (since status updates expire in 24 hours)
+  // Clears all cache files that are older than 24 hours (since status updates expire in 24 hours) using timezone-robust UTC
   Future<void> runLocalCleanup() async {
     try {
       final cacheDir = await _mediaCacheDir;
       if (!await cacheDir.exists()) return;
 
-      final now = DateTime.now();
+      final now = DateTime.now().toUtc();
       await for (final file in cacheDir.list()) {
         if (file is File) {
-          final lastModified = await file.lastModified();
-          final difference = now.difference(lastModified);
-          
-          // Delete anything older than 24 hours to automatically purge expired statuses and save storage space
-          if (difference > const Duration(hours: 24)) {
-            await file.delete();
-          }
+          try {
+            final lastModified = (await file.lastModified()).toUtc();
+            final difference = now.difference(lastModified);
+            
+            // Delete anything older than 24 hours to automatically purge expired statuses and save storage space
+            if (difference > const Duration(hours: 24)) {
+              await file.delete();
+            }
+          } catch (_) {}
         }
       }
     } catch (_) {}
