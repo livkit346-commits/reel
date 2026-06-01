@@ -275,6 +275,11 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
 
   // Handle taps on the screen
   void _onTapDown(TapDownDetails details) {
+    _animController.stop();
+    _videoController?.pause();
+  }
+
+  void _onTapUp(TapUpDetails details) {
     final double screenWidth = MediaQuery.of(context).size.width;
     final double dx = details.globalPosition.dx;
     if (dx < screenWidth / 3) {
@@ -292,6 +297,96 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
   void _onLongPressEnd(LongPressEndDetails details) {
     _animController.forward();
     _videoController?.play();
+  }
+
+  void _showViewersBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[950],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.remove_red_eye, color: Colors.white70, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Viewed by ${_viewers.length}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Divider(color: Colors.white10),
+              if (_viewers.isEmpty)
+                const Expanded(
+                  child: Center(
+                    child: Text(
+                      'No views yet.',
+                      style: TextStyle(color: Colors.white30, fontSize: 14),
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _viewers.length,
+                    itemBuilder: (context, index) {
+                      final viewer = _viewers[index] as Map<String, dynamic>;
+                      final user = viewer['users'] as Map<String, dynamic>?;
+                      final viewerName = user?['name'] as String? ?? 'User';
+                      final viewerId = user?['id'] as String? ?? '';
+                      final viewedAt = viewer['createdAt'] as String? ?? '';
+
+                      String formattedTime = '';
+                      if (viewedAt.isNotEmpty) {
+                        try {
+                          final parsedDate = DateTime.tryParse(viewedAt)?.toLocal();
+                          if (parsedDate != null) {
+                            final hour = parsedDate.hour.toString().padLeft(2, '0');
+                            final minute = parsedDate.minute.toString().padLeft(2, '0');
+                            formattedTime = 'at $hour:$minute';
+                          }
+                        } catch (_) {}
+                      }
+
+                      return ListTile(
+                        leading: UserAvatar(
+                          userId: viewerId,
+                          radius: 20,
+                        ),
+                        title: Text(
+                          viewerName,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: Text(
+                          'Viewed $formattedTime',
+                          style: const TextStyle(color: Colors.white30, fontSize: 12),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    ).then((_) {
+      // Resume playback when the bottom sheet is dismissed
+      _animController.forward();
+      _videoController?.play();
+    });
   }
 
   @override
@@ -312,6 +407,7 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
       backgroundColor: Colors.black,
       body: GestureDetector(
         onTapDown: _onTapDown,
+        onTapUp: _onTapUp,
         onLongPressStart: _onLongPressStart,
         onLongPressEnd: _onLongPressEnd,
         child: Stack(
@@ -489,7 +585,7 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
       onPressed: () {
         _animController.stop();
         _videoController?.pause();
-        // show viewers bottom sheet
+        _showViewersBottomSheet();
       },
       icon: const Icon(Icons.remove_red_eye_outlined),
       label: Text('Viewed by ${_viewers.length} friends'),
