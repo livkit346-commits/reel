@@ -115,6 +115,10 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
         page: 0,
         size: 500, // Increased to load more latest videos/images
       );
+      
+      // Sort in memory by creation date descending (latest/newest first)
+      entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+
       setState(() {
         _assets = entities;
         _isLoading = false;
