@@ -20,6 +20,12 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   PermissionState _permissionState = PermissionState.notDetermined;
   final ImagePicker _picker = ImagePicker();
 
+  // Pagination support for loading all photos/videos incrementally
+  int _currentPage = 0;
+  bool _hasMore = true;
+  bool _isLoadingMore = false;
+  AssetPathEntity? _recentAlbum;
+
   @override
   void initState() {
     super.initState();
@@ -98,35 +104,97 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   }
 
   Future<void> _loadAssets() async {
-    setState(() => _isLoading = true);
-    RequestType type = RequestType.common;
+    setState(() {
+      _isLoading = true;
+      _currentPage = 0;
+      _hasMore = true;
+      _isLoadingMore = false;
+      _assets = [];
+    });
+
+    RequestType type = RequestType.all;
     if (_currentTabIndex == 1) type = RequestType.image;
     if (_currentTabIndex == 2) type = RequestType.video;
 
-    final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
-      type: type,
-      onlyAll: true,
-    );
-
-    if (paths.isNotEmpty) {
-      // Fetch the Recents album correctly
-      final recentAlbum = paths.firstWhere((p) => p.isAll, orElse: () => paths.first);
-      final List<AssetEntity> entities = await recentAlbum.getAssetListPaged(
-        page: 0,
-        size: 500, // Increased to load more latest videos/images
+    try {
+      final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
+        type: type,
+        onlyAll: true,
       );
-      
-      // Sort in memory by creation date descending (latest/newest first)
+
+      if (paths.isNotEmpty) {
+        // Fetch the Recents album correctly
+        final recentAlbum = paths.firstWhere((p) => p.isAll, orElse: () => paths.first);
+        _recentAlbum = recentAlbum;
+
+        final List<AssetEntity> entities = await recentAlbum.getAssetListPaged(
+          page: 0,
+          size: 80,
+        );
+        
+        // Sort in memory by creation date descending (latest/newest first)
+        entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+
+        setState(() {
+          _assets = entities;
+          _isLoading = false;
+          if (entities.length < 80) {
+            _hasMore = false;
+          }
+        });
+      } else {
+        setState(() {
+          _recentAlbum = null;
+          _assets = [];
+          _isLoading = false;
+          _hasMore = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+        _hasMore = false;
+      });
+    }
+  }
+
+  Future<void> _loadMoreAssets() async {
+    if (_isLoadingMore || !_hasMore || _recentAlbum == null) return;
+
+    setState(() {
+      _isLoadingMore = true;
+    });
+
+    try {
+      final nextPage = _currentPage + 1;
+      final List<AssetEntity> entities = await _recentAlbum!.getAssetListPaged(
+        page: nextPage,
+        size: 80,
+      );
+
+      if (entities.isEmpty) {
+        setState(() {
+          _hasMore = false;
+          _isLoadingMore = false;
+        });
+        return;
+      }
+
+      // Sort the new page items
       entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
 
       setState(() {
-        _assets = entities;
-        _isLoading = false;
+        _assets.addAll(entities);
+        _assets.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+        _currentPage = nextPage;
+        _isLoadingMore = false;
+        if (entities.length < 80) {
+          _hasMore = false;
+        }
       });
-    } else {
+    } catch (e) {
       setState(() {
-        _assets = [];
-        _isLoading = false;
+        _isLoadingMore = false;
       });
     }
   }
@@ -311,47 +379,63 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
     }
 
     return Expanded(
-      child: GridView.builder(
-        padding: const EdgeInsets.only(top: 2),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          crossAxisSpacing: 2,
-          mainAxisSpacing: 2,
-        ),
-        itemCount: _assets.length,
-        itemBuilder: (context, index) {
-          final asset = _assets[index];
-          return GestureDetector(
-            onTap: () => _onAssetSelected(asset),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                FutureBuilder<Uint8List?>(
-                  future: asset.thumbnailDataWithSize(const ThumbnailSize.square(200)),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) return Container(color: Colors.grey[900]);
-                    if (snapshot.data == null) return Container(color: Colors.grey[900]);
-                    return Image.memory(snapshot.data!, fit: BoxFit.cover);
-                  },
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (ScrollNotification scrollInfo) {
+          if (scrollInfo.metrics.pixels >= scrollInfo.metrics.maxScrollExtent - 200) {
+            _loadMoreAssets();
+          }
+          return false;
+        },
+        child: GridView.builder(
+          padding: const EdgeInsets.only(top: 2),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: 2,
+            mainAxisSpacing: 2,
+          ),
+          itemCount: _assets.length + (_isLoadingMore ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index == _assets.length) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                 ),
-                if (asset.type == AssetType.video)
-                  Positioned(
-                    bottom: 4,
-                    right: 6,
-                    child: Text(
-                      _formatDuration(Duration(seconds: asset.duration)),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+              );
+            }
+            final asset = _assets[index];
+            return GestureDetector(
+              onTap: () => _onAssetSelected(asset),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  FutureBuilder<Uint8List?>(
+                    future: asset.thumbnailDataWithSize(const ThumbnailSize.square(200)),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) return Container(color: Colors.grey[900]);
+                      if (snapshot.data == null) return Container(color: Colors.grey[900]);
+                      return Image.memory(snapshot.data!, fit: BoxFit.cover);
+                    },
+                  ),
+                  if (asset.type == AssetType.video)
+                    Positioned(
+                      bottom: 4,
+                      right: 6,
+                      child: Text(
+                        _formatDuration(Duration(seconds: asset.duration)),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                        ),
                       ),
                     ),
-                  ),
-              ],
-            ),
-          );
-        },
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }

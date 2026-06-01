@@ -62,6 +62,11 @@ CREATE POLICY "Posts are viewable by everyone" ON public.posts
 CREATE POLICY "Users can create posts" ON public.posts
   FOR INSERT WITH CHECK (auth.uid() = "userId");
 
+-- Allow anyone to update posts (like toggle count updates)
+DROP POLICY IF EXISTS "Posts updatable by everyone" ON public.posts;
+CREATE POLICY "Posts updatable by everyone" ON public.posts
+  FOR UPDATE USING (true);
+
 
 -- Create statuses table
 CREATE TABLE IF NOT EXISTS public.statuses (

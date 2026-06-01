@@ -11,6 +11,10 @@ class SupabaseService {
 
   final SupabaseClient client = Supabase.instance.client;
 
+  // In-session liked posts cache to persist hearts across scroll/navigation
+  final Set<String> _likedPostIds = {};
+  Set<String> get likedPostIds => _likedPostIds;
+
   // Cloudflare R2 / CDN Integration Configuration
   static const bool _useCdn = false; // Set to true when R2 is connected
   static const String _cdnBaseUrl = 'https://cdn.reelapp.com';
@@ -282,6 +286,7 @@ class SupabaseService {
         'userId': myId,
         'userName': userName,
         'imageUrl': imageUrl,
+        'text': text,
         'createdAt': DateTime.now().toIso8601String(),
       });
     }
@@ -572,7 +577,7 @@ class SupabaseService {
   }
 
   // Send a message
-  Future<void> sendMessage({
+  Future<Map<String, dynamic>> sendMessage({
     required String chatId,
     String? text,
     File? mediaFile,
@@ -602,7 +607,7 @@ class SupabaseService {
         expiresAt = DateTime.now().add(const Duration(hours: 48));
       }
 
-      await client.from('messages').insert({
+      final response = await client.from('messages').insert({
         'chatId': chatId,
         'senderId': myId,
         'text': text,
@@ -611,7 +616,8 @@ class SupabaseService {
         'expiresAt': expiresAt?.toIso8601String(),
         'received': false,
         if (replyToMessageId != null) 'replyToMessageId': replyToMessageId,
-      });
+      }).select().single();
+      return response;
     } catch (e) {
       rethrow;
     }
@@ -876,6 +882,11 @@ class SupabaseService {
     try {
       final newLikes = increment ? currentLikes + 1 : currentLikes - 1;
       await client.from('posts').update({'likes': newLikes >= 0 ? newLikes : 0}).eq('id', postId);
+      if (increment) {
+        _likedPostIds.add(postId);
+      } else {
+        _likedPostIds.remove(postId);
+      }
     } catch (e) {
       rethrow;
     }

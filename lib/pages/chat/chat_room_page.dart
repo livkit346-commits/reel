@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -10,7 +11,10 @@ import 'package:reel/services/supabase_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/chat/cached_media_view.dart';
 import 'package:reel/pages/chat/forward_message_page.dart';
+import 'package:reel/pages/chat/chat_video_viewer_page.dart';
 import 'package:swipe_to/swipe_to.dart';
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class ChatRoomPage extends StatefulWidget {
   final String chatId;
@@ -44,12 +48,209 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   String? _selectedMessageId;
   Map<String, dynamic>? _replyingToMessage;
 
+  Timer? _offlineRetryTimer;
+  bool _wasOffline = false;
+  final Set<String> _sendingMessageIds = {};
+
+  // Audio Recording states
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  bool _isRecording = false;
+  String _recordingDurationStr = '00:00';
+  Timer? _recordingTimer;
+  DateTime? _recordingStartTime;
+
   @override
   void initState() {
     super.initState();
     _loadChatSettings();
     _checkFollowingStatus();
-    _loadLocalMessages();
+    _loadLocalMessages().then((_) {
+      _retryPendingMessages();
+    });
+
+    _messageController.addListener(() {
+      if (mounted) setState(() {});
+    });
+
+    _offlineRetryTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      _retryPendingMessages();
+    });
+  }
+
+  @override
+  void dispose() {
+    _offlineRetryTimer?.cancel();
+    _recordingTimer?.cancel();
+    _audioRecorder.dispose();
+    _messageController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _startRecording() async {
+    try {
+      if (await _audioRecorder.hasPermission()) {
+        final directory = await getTemporaryDirectory();
+        final path = '${directory.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+        await _audioRecorder.start(
+          const RecordConfig(encoder: AudioEncoder.aacLc),
+          path: path,
+        );
+
+        _recordingStartTime = DateTime.now();
+        _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (_recordingStartTime != null) {
+            final elapsed = DateTime.now().difference(_recordingStartTime!);
+            final minutes = elapsed.inMinutes.toString().padLeft(2, '0');
+            final seconds = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
+            if (mounted) {
+              setState(() {
+                _recordingDurationStr = '$minutes:$seconds';
+              });
+            }
+          }
+        });
+
+        if (mounted) {
+          setState(() {
+            _isRecording = true;
+            _recordingDurationStr = '00:00';
+          });
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Microphone permission is required to record audio messages.')),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error starting audio recording: $e');
+    }
+  }
+
+  Future<void> _cancelRecording() async {
+    try {
+      _recordingTimer?.cancel();
+      final path = await _audioRecorder.stop();
+      if (path != null) {
+        final file = File(path);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+          _recordingDurationStr = '00:00';
+        });
+      }
+    } catch (e) {
+      debugPrint('Error cancelling audio recording: $e');
+    }
+  }
+
+  Future<void> _stopAndSendRecording() async {
+    try {
+      _recordingTimer?.cancel();
+      final path = await _audioRecorder.stop();
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+          _recordingDurationStr = '00:00';
+        });
+      }
+
+      if (path != null) {
+        final file = File(path);
+        if (await file.exists()) {
+          _sendMediaMessage(file, 'audio');
+        }
+      }
+    } catch (e) {
+      debugPrint('Error stopping and sending audio recording: $e');
+    }
+  }
+
+  Future<void> _attemptSendPendingMessage(Map<String, dynamic> pendingMsg) async {
+    final tempId = pendingMsg['id'];
+    if (_sendingMessageIds.contains(tempId)) return;
+    _sendingMessageIds.add(tempId);
+
+    final supabase = context.read<SupabaseService>();
+    try {
+      Map<String, dynamic> result;
+      if (pendingMsg['mediaFilePath'] != null) {
+        final file = File(pendingMsg['mediaFilePath']);
+        if (!await file.exists()) {
+          _sendingMessageIds.remove(tempId);
+          return;
+        }
+        result = await supabase.sendMessage(
+          chatId: widget.chatId,
+          mediaFile: file,
+          mediaType: pendingMsg['mediaType'],
+          disappearingDuration: _disappearingDuration,
+          replyToMessageId: pendingMsg['replyToMessageId'],
+        );
+      } else {
+        result = await supabase.sendMessage(
+          chatId: widget.chatId,
+          text: pendingMsg['text'],
+          disappearingDuration: _disappearingDuration,
+          replyToMessageId: pendingMsg['replyToMessageId'],
+        );
+      }
+
+      final index = _localMessages.indexWhere((m) => m['id'] == tempId);
+      if (index != -1) {
+        setState(() {
+          _localMessages[index] = {
+            ...result,
+            'isPending': false,
+          };
+        });
+        await _saveLocalMessages();
+      }
+
+      if (_wasOffline) {
+        _wasOffline = false;
+        _syncIncomingMessages();
+      }
+    } catch (e) {
+      debugPrint('Failed to send pending message $tempId: $e');
+      _wasOffline = true;
+    } finally {
+      _sendingMessageIds.remove(tempId);
+    }
+  }
+
+  Future<void> _retryPendingMessages() async {
+    final pending = _localMessages.where((m) => m['isPending'] == true).toList();
+    if (pending.isEmpty && _wasOffline) {
+      _wasOffline = false;
+      _syncIncomingMessages();
+      return;
+    }
+    for (final msg in pending) {
+      _attemptSendPendingMessage(msg);
+    }
+  }
+
+  Future<void> _syncIncomingMessages() async {
+    final supabase = context.read<SupabaseService>();
+    try {
+      final serverMessages = await supabase.getChatMessages(widget.chatId);
+      if (serverMessages.isNotEmpty) {
+        final typedMessages = serverMessages.map((e) => Map<String, dynamic>.from(e)).toList();
+        setState(() {
+          _mergeMessages(typedMessages);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error manual syncing incoming messages: $e');
+    }
   }
 
   Future<void> _loadLocalMessages() async {
@@ -280,27 +481,35 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   }
 
   Future<void> _sendMediaMessage(File file, String type) async {
-    setState(() => _isSending = true);
     final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (myId == null) return;
+
     final replyId = _replyingToMessage?['id'];
     setState(() {
       _replyingToMessage = null;
     });
-    try {
-      await supabase.sendMessage(
-        chatId: widget.chatId,
-        mediaFile: file,
-        mediaType: type,
-        disappearingDuration: _disappearingDuration,
-        replyToMessageId: replyId,
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to send media')),
-      );
-    } finally {
-      setState(() => _isSending = false);
-    }
+
+    final tempId = 'pending_${myId}_${DateTime.now().millisecondsSinceEpoch}';
+    final tempMsg = {
+      'id': tempId,
+      'chatId': widget.chatId,
+      'senderId': myId,
+      'mediaFilePath': file.path,
+      'mediaType': type,
+      'createdAt': DateTime.now().toIso8601String(),
+      'received': false,
+      'isPending': true,
+      if (replyId != null) 'replyToMessageId': replyId,
+    };
+
+    setState(() {
+      _localMessages.add(tempMsg);
+    });
+    await _saveLocalMessages();
+
+    // Trigger background attempt
+    _attemptSendPendingMessage(tempMsg);
   }
 
   Future<void> _sendTextMessage() async {
@@ -309,23 +518,33 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     _messageController.clear();
     final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (myId == null) return;
+
     final replyId = _replyingToMessage?['id'];
     setState(() {
       _replyingToMessage = null;
     });
 
-    try {
-      await supabase.sendMessage(
-        chatId: widget.chatId,
-        text: text,
-        disappearingDuration: _disappearingDuration,
-        replyToMessageId: replyId,
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to send message')),
-      );
-    }
+    final tempId = 'pending_${myId}_${DateTime.now().millisecondsSinceEpoch}';
+    final tempMsg = {
+      'id': tempId,
+      'chatId': widget.chatId,
+      'senderId': myId,
+      'text': text,
+      'createdAt': DateTime.now().toIso8601String(),
+      'received': false,
+      'isPending': true,
+      if (replyId != null) 'replyToMessageId': replyId,
+    };
+
+    setState(() {
+      _localMessages.add(tempMsg);
+    });
+    await _saveLocalMessages();
+
+    // Trigger background attempt
+    _attemptSendPendingMessage(tempMsg);
   }
 
   void _showDeleteOptions(BuildContext context, Map<String, dynamic> msg, bool isMe) {
@@ -759,8 +978,54 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                         ],
                                       )
                                     else ...[
-                                      if (mediaUrl != null && mediaType != null) ...[
-                                        CachedMediaView(url: mediaUrl, mediaType: mediaType),
+                                      if ((mediaUrl != null || msg['mediaFilePath'] != null) && mediaType != null) ...[
+                                        if (mediaType == 'audio')
+                                          AudioMessagePlayer(
+                                            url: mediaUrl,
+                                            localFilePath: msg['mediaFilePath'],
+                                          )
+                                        else if (msg['isPending'] == true && msg['mediaFilePath'] != null)
+                                          ClipRRect(
+                                            borderRadius: BorderRadius.circular(16),
+                                            child: mediaType == 'image'
+                                                ? Image.file(
+                                                    File(msg['mediaFilePath']),
+                                                    width: 200,
+                                                    height: 200,
+                                                    fit: BoxFit.cover,
+                                                  )
+                                                : GestureDetector(
+                                                    onTap: () {
+                                                      Navigator.push(
+                                                        context,
+                                                        MaterialPageRoute(
+                                                          builder: (context) => ChatVideoViewerPage(videoPath: msg['mediaFilePath']),
+                                                        ),
+                                                      );
+                                                    },
+                                                    child: Stack(
+                                                      alignment: Alignment.center,
+                                                      children: [
+                                                        Container(
+                                                          width: 200,
+                                                          height: 200,
+                                                          color: Colors.white.withOpacity(0.1),
+                                                          child: const Icon(Icons.video_library_outlined, color: Colors.white54, size: 40),
+                                                        ),
+                                                        Container(
+                                                          padding: const EdgeInsets.all(8),
+                                                          decoration: const BoxDecoration(
+                                                            color: Colors.black54,
+                                                            shape: BoxShape.circle,
+                                                          ),
+                                                          child: const Icon(Icons.play_arrow, color: Colors.white, size: 28),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                          )
+                                        else
+                                          CachedMediaView(url: mediaUrl!, mediaType: mediaType),
                                         const SizedBox(height: 6),
                                       ],
                                       if (text != null && text.isNotEmpty)
@@ -789,9 +1054,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                         if (isMe) ...[
                                           const SizedBox(width: 4),
                                           Icon(
-                                            Icons.done_all,
+                                            msg['isPending'] == true ? Icons.access_time : Icons.done_all,
                                             size: 13,
-                                            color: received ? Colors.lightBlueAccent : Colors.white30,
+                                            color: msg['isPending'] == true ? Colors.white38 : (received ? Colors.lightBlueAccent : Colors.white30),
                                           ),
                                         ],
                                       ],
@@ -860,61 +1125,284 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   color: const Color(0xFF121212),
+                  child: _isRecording
+                      ? Row(
+                          children: [
+                            const SizedBox(width: 8),
+                            const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 16),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Recording... $_recordingDurationStr',
+                              style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+                            ),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: _cancelRecording,
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: const BoxDecoration(
+                                  color: Colors.white10,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            GestureDetector(
+                              onTap: _stopAndSendRecording,
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFFFE2C55),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.send, color: Colors.white, size: 20),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                          ],
+                        )
+                      : Row(
+                          children: [
+                            GestureDetector(
+                              onTap: _isBlocked ? null : _sendVideo,
+                              child: const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 8),
+                                child: Icon(Icons.camera_alt, color: Colors.white70, size: 28),
+                              ),
+                            ),
+                            GestureDetector(
+                              onTap: _isBlocked ? null : _sendImage,
+                              child: const Padding(
+                                padding: EdgeInsets.only(left: 4, right: 12),
+                                child: Icon(Icons.image, color: Colors.white70, size: 26),
+                              ),
+                            ),
+                            Expanded(
+                              child: Container(
+                                padding: const EdgeInsets.only(left: 16, right: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(24),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _messageController,
+                                        enabled: !_isBlocked,
+                                        style: const TextStyle(color: Colors.white, fontSize: 15),
+                                        maxLines: null,
+                                        decoration: InputDecoration(
+                                          hintText: _isBlocked ? 'Unblock to chat' : 'Send message...',
+                                          hintStyle: const TextStyle(color: Colors.white54, fontSize: 15),
+                                          border: InputBorder.none,
+                                          isDense: true,
+                                          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                                        ),
+                                      ),
+                                    ),
+                                    _messageController.text.trim().isNotEmpty
+                                        ? GestureDetector(
+                                            onTap: _isBlocked ? null : _sendTextMessage,
+                                            child: Container(
+                                              margin: const EdgeInsets.only(left: 4, top: 4, bottom: 4, right: 2),
+                                              padding: const EdgeInsets.all(8),
+                                              decoration: const BoxDecoration(
+                                                color: Color(0xFFFE2C55),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 18),
+                                            ),
+                                          )
+                                        : GestureDetector(
+                                            onTap: _isBlocked ? null : _startRecording,
+                                            child: Container(
+                                              margin: const EdgeInsets.only(left: 4, top: 4, bottom: 4, right: 2),
+                                              padding: const EdgeInsets.all(8),
+                                              decoration: const BoxDecoration(
+                                                color: Color(0xFFFE2C55),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(Icons.mic, color: Colors.white, size: 18),
+                                            ),
+                                          ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AudioMessagePlayer extends StatefulWidget {
+  final String? url;
+  final String? localFilePath;
+
+  const AudioMessagePlayer({
+    super.key,
+    this.url,
+    this.localFilePath,
+  });
+
+  @override
+  State<AudioMessagePlayer> createState() => _AudioMessagePlayerState();
+}
+
+class _AudioMessagePlayerState extends State<AudioMessagePlayer> {
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isPlaying = false;
+  Duration _duration = Duration.zero;
+  Duration _position = Duration.zero;
+  StreamSubscription? _durationSub;
+  StreamSubscription? _positionSub;
+  StreamSubscription? _playerStateSub;
+  StreamSubscription? _completeSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _initAudio();
+  }
+
+  Future<void> _initAudio() async {
+    try {
+      if (widget.localFilePath != null) {
+        await _audioPlayer.setSource(DeviceFileSource(widget.localFilePath!));
+      } else if (widget.url != null) {
+        await _audioPlayer.setSource(UrlSource(widget.url!));
+      }
+
+      _durationSub = _audioPlayer.onDurationChanged.listen((d) {
+        if (mounted) setState(() => _duration = d);
+      });
+
+      _positionSub = _audioPlayer.onPositionChanged.listen((p) {
+        if (mounted) setState(() => _position = p);
+      });
+
+      _playerStateSub = _audioPlayer.onPlayerStateChanged.listen((state) {
+        if (mounted) {
+          setState(() {
+            _isPlaying = state == PlayerState.playing;
+          });
+        }
+      });
+
+      _completeSub = _audioPlayer.onPlayerComplete.listen((_) {
+        if (mounted) {
+          setState(() {
+            _position = Duration.zero;
+            _isPlaying = false;
+          });
+        }
+      });
+    } catch (e) {
+      debugPrint('Error initializing audio player: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _durationSub?.cancel();
+    _positionSub?.cancel();
+    _playerStateSub?.cancel();
+    _completeSub?.cancel();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.toString();
+    final seconds = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  Future<void> _togglePlay() async {
+    try {
+      if (_isPlaying) {
+        await _audioPlayer.pause();
+      } else {
+        if (widget.localFilePath != null) {
+          await _audioPlayer.play(DeviceFileSource(widget.localFilePath!));
+        } else if (widget.url != null) {
+          await _audioPlayer.play(UrlSource(widget.url!));
+        }
+      }
+    } catch (e) {
+      debugPrint('Error toggling playback: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final maxVal = _duration.inMilliseconds.toDouble();
+    final currentVal = _position.inMilliseconds.toDouble().clamp(0.0, maxVal);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: _togglePlay,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _isPlaying ? Icons.pause : Icons.play_arrow,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                    activeTrackColor: Colors.white,
+                    inactiveTrackColor: Colors.white30,
+                    thumbColor: Colors.white,
+                  ),
+                  child: Slider(
+                    value: currentVal,
+                    min: 0.0,
+                    max: maxVal > 0.0 ? maxVal : 1.0,
+                    onChanged: (val) async {
+                      final pos = Duration(milliseconds: val.toInt());
+                      await _audioPlayer.seek(pos);
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      GestureDetector(
-                        onTap: _isBlocked ? null : _sendVideo,
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 8),
-                          child: Icon(Icons.camera_alt, color: Colors.white70, size: 28),
-                        ),
+                      Text(
+                        _formatDuration(_position),
+                        style: const TextStyle(color: Colors.white70, fontSize: 10),
                       ),
-                      GestureDetector(
-                        onTap: _isBlocked ? null : _sendImage,
-                        child: const Padding(
-                          padding: EdgeInsets.only(left: 4, right: 12),
-                          child: Icon(Icons.image, color: Colors.white70, size: 26),
-                        ),
-                      ),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.only(left: 16, right: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: _messageController,
-                                  enabled: !_isBlocked,
-                                  style: const TextStyle(color: Colors.white, fontSize: 15),
-                                  maxLines: null,
-                                  decoration: InputDecoration(
-                                    hintText: _isBlocked ? 'Unblock to chat' : 'Send message...',
-                                    hintStyle: const TextStyle(color: Colors.white54, fontSize: 15),
-                                    border: InputBorder.none,
-                                    isDense: true,
-                                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                                  ),
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: _isBlocked ? null : _sendTextMessage,
-                                child: Container(
-                                  margin: const EdgeInsets.only(left: 4, top: 4, bottom: 4, right: 2),
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFFE2C55),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(Icons.arrow_upward_rounded, color: Colors.white, size: 18),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                      Text(
+                        _formatDuration(_duration),
+                        style: const TextStyle(color: Colors.white70, fontSize: 10),
                       ),
                     ],
                   ),

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/explore/create_post_screen.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
+import 'package:reel/pages/explore/full_screen_image_viewer.dart';
 import 'package:reel/pages/updates/status_viewer_screen.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/status_ring_painter.dart';
@@ -238,6 +239,8 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     super.initState();
     _likesCount = widget.post['likes'] ?? 0;
     _repostsCount = widget.post['reposts'] ?? 0;
+    // Check if the current post is in the liked posts cache
+    _isLiked = context.read<SupabaseService>().likedPostIds.contains(widget.post['id']);
     _loadCommentsCount();
   }
 
@@ -253,12 +256,14 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
   }
 
   Future<void> _toggleLike() async {
+    final oldLikesCount = widget.post['likes'] ?? 0;
     setState(() {
       _isLiked = !_isLiked;
       _likesCount = _isLiked ? _likesCount + 1 : (_likesCount > 0 ? _likesCount - 1 : 0);
+      widget.post['likes'] = _likesCount;
     });
     try {
-      await context.read<SupabaseService>().toggleLikePost(widget.post['id'], widget.post['likes'] ?? 0, _isLiked);
+      await context.read<SupabaseService>().toggleLikePost(widget.post['id'], oldLikesCount, _isLiked);
     } catch (_) {}
   }
 
@@ -331,6 +336,14 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                               final cUser = comment['userName'] ?? 'User';
                               final cText = comment['text'] ?? '';
                               final cUserId = comment['userId'] ?? '';
+                              final cCreatedAtStr = (comment['createdAt'] ?? comment['createdat']) as String?;
+                              String cTimeStr = '';
+                              if (cCreatedAtStr != null) {
+                                try {
+                                  final parsed = DateTime.parse(cCreatedAtStr).toLocal();
+                                  cTimeStr = '${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}';
+                                } catch (_) {}
+                              }
                               return Padding(
                                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                                 child: Row(
@@ -342,9 +355,20 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          Text(
-                                            cUser,
-                                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                          Row(
+                                            children: [
+                                              Text(
+                                                cUser,
+                                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                              ),
+                                              if (cTimeStr.isNotEmpty) ...[
+                                                const SizedBox(width: 6),
+                                                Text(
+                                                  '• $cTimeStr',
+                                                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                                                ),
+                                              ],
+                                            ],
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
@@ -537,15 +561,38 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                   style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
                 ),
                 if (imageUrl != null)
-                  Container(
-                    margin: const EdgeInsets.only(top: 12),
-                    height: 200,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      image: DecorationImage(
-                        image: NetworkImage(imageUrl),
-                        fit: BoxFit.cover,
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => FullScreenImageViewer(
+                            imageUrl: imageUrl,
+                            tag: 'explore_post_${widget.post['id']}',
+                          ),
+                        ),
+                      );
+                    },
+                    child: Hero(
+                      tag: 'explore_post_${widget.post['id']}',
+                      child: Container(
+                        margin: const EdgeInsets.only(top: 12),
+                        width: double.infinity,
+                        constraints: const BoxConstraints(
+                          maxHeight: 360,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          color: const Color(0xFF161616),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Image.network(
+                            imageUrl,
+                            fit: BoxFit.cover,
+                            alignment: Alignment.center,
+                          ),
+                        ),
                       ),
                     ),
                   ),
