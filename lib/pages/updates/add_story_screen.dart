@@ -24,7 +24,10 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   int _currentPage = 0;
   bool _hasMore = true;
   bool _isLoadingMore = false;
-  AssetPathEntity? _recentAlbum;
+  
+  // Real album selection configuration
+  List<AssetPathEntity> _albums = [];
+  AssetPathEntity? _selectedAlbum;
 
   @override
   void initState() {
@@ -123,11 +126,17 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
       );
 
       if (paths.isNotEmpty) {
-        // Fetch the Recents album correctly
-        final recentAlbum = paths.firstWhere((p) => p.isAll, orElse: () => paths.first);
-        _recentAlbum = recentAlbum;
+        setState(() {
+          _albums = paths;
+          // Maintain selected album, or find the virtual "Recent" / "All" album as default
+          _selectedAlbum = paths.firstWhere(
+            (p) => p.id == _selectedAlbum?.id,
+            orElse: () => paths.firstWhere((p) => p.isAll, orElse: () => paths.first),
+          );
+        });
 
-        final List<AssetEntity> entities = await recentAlbum.getAssetListPaged(
+        // Use the selected album to paginate
+        final List<AssetEntity> entities = await _selectedAlbum!.getAssetListPaged(
           page: 0,
           size: 80,
         );
@@ -144,7 +153,8 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
         });
       } else {
         setState(() {
-          _recentAlbum = null;
+          _albums = [];
+          _selectedAlbum = null;
           _assets = [];
           _isLoading = false;
           _hasMore = false;
@@ -159,7 +169,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   }
 
   Future<void> _loadMoreAssets() async {
-    if (_isLoadingMore || !_hasMore || _recentAlbum == null) return;
+    if (_isLoadingMore || !_hasMore || _selectedAlbum == null) return;
 
     setState(() {
       _isLoadingMore = true;
@@ -167,7 +177,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
 
     try {
       final nextPage = _currentPage + 1;
-      final List<AssetEntity> entities = await _recentAlbum!.getAssetListPaged(
+      final List<AssetEntity> entities = await _selectedAlbum!.getAssetListPaged(
         page: nextPage,
         size: 80,
       );
@@ -204,6 +214,78 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
     String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
     String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
     return "$twoDigitMinutes:$twoDigitSeconds";
+  }
+
+  void _showAlbumSelectionSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[950],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 16),
+              const Text(
+                'Select Folder',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _albums.length,
+                  itemBuilder: (context, index) {
+                    final album = _albums[index];
+                    final isSelected = album.id == _selectedAlbum?.id;
+                    return FutureBuilder<int>(
+                      future: album.assetCountAsync,
+                      builder: (context, snapshot) {
+                        final count = snapshot.data ?? 0;
+                        return ListTile(
+                          leading: Icon(
+                            album.isAll ? Icons.photo_library : Icons.folder,
+                            color: isSelected ? const Color(0xFF00BFFF) : Colors.white70,
+                          ),
+                          title: Text(
+                            album.name,
+                            style: TextStyle(
+                              color: isSelected ? const Color(0xFF00BFFF) : Colors.white,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '$count items',
+                            style: const TextStyle(color: Colors.white30, fontSize: 12),
+                          ),
+                          trailing: isSelected
+                              ? const Icon(Icons.check_circle, color: Color(0xFF00BFFF))
+                              : null,
+                          onTap: () {
+                            Navigator.pop(context);
+                            setState(() {
+                              _selectedAlbum = album;
+                            });
+                            _loadAssets();
+                          },
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _onAssetSelected(AssetEntity asset) async {
@@ -517,11 +599,21 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Row(
-                  children: [
-                    Text('Recents', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
-                    Icon(Icons.keyboard_arrow_down, color: Colors.white),
-                  ],
+                GestureDetector(
+                  onTap: _showAlbumSelectionSheet,
+                  child: Row(
+                    children: [
+                      Text(
+                        _selectedAlbum?.name ?? 'Recents',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+                    ],
+                  ),
                 ),
                 if (hasPermission)
                   Container(
