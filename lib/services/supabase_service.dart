@@ -539,7 +539,7 @@ class SupabaseService {
     }
   }
 
-  // Get active chats list for the current user
+  // Get active chats list for the current user with latest-message sorting and offline cache support
   Future<List<dynamic>> getActiveChats() async {
     final myId = currentUser?.id;
     if (myId == null) return [];
@@ -568,10 +568,52 @@ class SupabaseService {
             .neq('senderId', myId)
             .eq('received', false);
         chat['hasUnread'] = unreadCountResponse.isNotEmpty;
+
+        // Fetch single latest message details for preview and sorting
+        try {
+          final latestMsg = await client
+              .from('messages')
+              .select('text, mediaType, createdAt')
+              .eq('chatId', cid)
+              .order('createdAt', ascending: false)
+              .limit(1)
+              .maybeSingle();
+
+          if (latestMsg != null) {
+            chat['latestMessageText'] = latestMsg['text'];
+            chat['latestMessageTime'] = latestMsg['createdAt'];
+            chat['latestMessageType'] = latestMsg['mediaType'];
+          } else {
+            chat['latestMessageText'] = null;
+            chat['latestMessageTime'] = '1970-01-01T00:00:00Z';
+            chat['latestMessageType'] = null;
+          }
+        } catch (_) {
+          chat['latestMessageText'] = null;
+          chat['latestMessageTime'] = '1970-01-01T00:00:00Z';
+          chat['latestMessageType'] = null;
+        }
       }
+
+      // Sort chats descending by the latest message's timestamp
+      chatsList.sort((a, b) {
+        final timeA = DateTime.tryParse(a['latestMessageTime'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final timeB = DateTime.tryParse(b['latestMessageTime'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return timeB.compareTo(timeA);
+      });
+
+      // Cache the sorted active chats list locally for offline load fallback
+      await LocalStorageService().cacheJson('active_chats_$myId', chatsList);
 
       return chatsList;
     } catch (e) {
+      // Offline fallback: load cached active chats from local storage
+      try {
+        final cached = await LocalStorageService().getCachedJson('active_chats_$myId');
+        if (cached != null) {
+          return cached as List<dynamic>;
+        }
+      } catch (_) {}
       return [];
     }
   }

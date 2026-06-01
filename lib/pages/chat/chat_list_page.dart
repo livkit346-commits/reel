@@ -39,6 +39,31 @@ class _ChatListPageState extends State<ChatListPage> {
     });
   }
 
+  String _formatMessageTime(String? timeStr) {
+    if (timeStr == null || timeStr.isEmpty) return '';
+    try {
+      final dateTime = DateTime.tryParse(timeStr)?.toLocal();
+      if (dateTime == null) return '';
+
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final yesterday = today.subtract(const Duration(days: 1));
+      final dateToCheck = DateTime(dateTime.year, dateTime.month, dateTime.day);
+
+      if (dateToCheck == today) {
+        final hour = dateTime.hour.toString().padLeft(2, '0');
+        final minute = dateTime.minute.toString().padLeft(2, '0');
+        return '$hour:$minute';
+      } else if (dateToCheck == yesterday) {
+        return 'Yesterday';
+      } else {
+        return '${dateTime.year}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.day.toString().padLeft(2, '0')}';
+      }
+    } catch (_) {
+      return '';
+    }
+  }
+
   Future<void> _startChat(String otherUserId, String otherUserName) async {
     final supabase = context.read<SupabaseService>();
     try {
@@ -212,16 +237,35 @@ class _ChatListPageState extends State<ChatListPage> {
                     ),
                   ),
                   subtitle: Text(
-                    hasUnread ? 'New secure message received!' : 'Tap to view encrypted ephemeral messages',
+                    hasUnread
+                        ? 'New secure message received!'
+                        : (chatMap['latestMessageText'] != null && chatMap['latestMessageText'].toString().isNotEmpty
+                            ? chatMap['latestMessageText'].toString()
+                            : (chatMap['latestMessageType'] == 'image'
+                                ? '📷 Photo'
+                                : (chatMap['latestMessageType'] == 'video'
+                                    ? '🎥 Video'
+                                    : (chatMap['latestMessageType'] == 'audio'
+                                        ? '🎤 Voice Message'
+                                        : 'Tap to view encrypted ephemeral messages')))),
                     style: TextStyle(
                       color: hasUnread ? const Color(0xFF00BFFF) : Colors.white38,
                       fontSize: 13,
                       fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (chatMap['latestMessageTime'] != null && chatMap['latestMessageTime'] != '1970-01-01T00:00:00Z') ...[
+                        Text(
+                          _formatMessageTime(chatMap['latestMessageTime']?.toString()),
+                          style: const TextStyle(color: Colors.white30, fontSize: 11),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
                       if (isSelected)
                         const Icon(Icons.check_circle, color: Color(0xFF00BFFF), size: 20)
                       else if (hasUnread)
