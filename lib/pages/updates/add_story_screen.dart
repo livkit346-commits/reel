@@ -119,7 +119,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
     try {
       final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
         type: type,
-        onlyAll: true,
+        onlyAll: false,
       );
 
       if (paths.isNotEmpty) {

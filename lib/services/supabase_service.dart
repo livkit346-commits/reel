@@ -270,26 +270,53 @@ class SupabaseService {
       }
 
       try {
-      await client.from('statuses').insert({
-        'userId': myId,
-        'userName': userName,
-        'imageUrl': imageUrl,
-        'mediaType': mediaType ?? 'image',
-        'text': text,
-        'voiceUrl': voiceUrl,
-        'createdAt': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      // Fallback for older database schema
-      debugPrint('Error inserting new status format: $e. Retrying with basic format...');
-      await client.from('statuses').insert({
-        'userId': myId,
-        'userName': userName,
-        'imageUrl': imageUrl,
-        'text': text,
-        'createdAt': DateTime.now().toIso8601String(),
-      });
-    }
+        // 1. Try camelCase full format (supporting mediaType, voiceUrl, etc.)
+        await client.from('statuses').insert({
+          'userId': myId,
+          'userName': userName,
+          'imageUrl': imageUrl,
+          'mediaType': mediaType ?? 'image',
+          'text': text,
+          'voiceUrl': voiceUrl,
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+      } catch (e1) {
+        debugPrint('First status insert failed: $e1. Trying lowercase full format...');
+        try {
+          // 2. Try lowercase full format
+          await client.from('statuses').insert({
+            'userid': myId,
+            'username': userName,
+            'imageurl': imageUrl,
+            'mediatype': mediaType ?? 'image',
+            'text': text,
+            'voiceurl': voiceUrl,
+            'createdat': DateTime.now().toIso8601String(),
+          });
+        } catch (e2) {
+          debugPrint('Second status insert failed: $e2. Trying camelCase basic format...');
+          try {
+            // 3. Try camelCase basic format
+            await client.from('statuses').insert({
+              'userId': myId,
+              'userName': userName,
+              'imageUrl': imageUrl,
+              'text': text,
+              'createdAt': DateTime.now().toIso8601String(),
+            });
+          } catch (e3) {
+            debugPrint('Third status insert failed: $e3. Trying lowercase basic format...');
+            // 4. Try lowercase basic format as final fallback
+            await client.from('statuses').insert({
+              'userid': myId,
+              'username': userName,
+              'imageurl': imageUrl,
+              'text': text,
+              'createdat': DateTime.now().toIso8601String(),
+            });
+          }
+        }
+      }
     } catch (e) {
       rethrow;
     }
