@@ -45,5 +45,9 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Reel requires location access to discover and connect with other users nearby within 50 meters.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Reel requires location access to discover and connect with other users nearby within 50 meters.</string>
 </dict>
 </plist>

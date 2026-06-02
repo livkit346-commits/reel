@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:reel/services/local_storage_service.dart';
@@ -530,14 +531,134 @@ class SupabaseService {
     }
   }
 
-  // Discovery: Get nearby users
-  Future<List<dynamic>> getNearbyUsers() async {
+  // Discovery: Update location sharing toggle and coordinates
+  Future<void> updateLocationSharing(bool enabled, {double? lat, double? lng}) async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+
+    final data = {
+      'shareLocation': enabled,
+      if (lat != null) 'latitude': lat,
+      if (lng != null) 'longitude': lng,
+    };
+
     try {
-      final response = await client.from('users').select().limit(10);
-      return response;
-    } catch (e) {
-      rethrow;
+      // 1. Try camelCase shareLocation
+      await client.from('users').update(data).eq('id', myId);
+    } catch (e1) {
+      debugPrint('updateLocationSharing camelCase failed: $e1. Trying lowercase...');
+      try {
+        // 2. Try lowercase sharelocation
+        final lowercaseData = {
+          'sharelocation': enabled,
+          if (lat != null) 'latitude': lat,
+          if (lng != null) 'longitude': lng,
+        };
+        await client.from('users').update(lowercaseData).eq('id', myId);
+      } catch (e2) {
+        debugPrint('updateLocationSharing lowercase failed: $e2');
+        // If neither toggle column exists, at least try updating coordinates if they exist
+        try {
+          final coordData = {
+            if (lat != null) 'latitude': lat,
+            if (lng != null) 'longitude': lng,
+          };
+          await client.from('users').update(coordData).eq('id', myId);
+        } catch (_) {}
+      }
     }
+  }
+
+  // Discovery: Check if current user has location sharing enabled
+  Future<bool> isLocationSharingEnabled() async {
+    final myId = currentUser?.id;
+    if (myId == null) return false;
+
+    try {
+      // 1. Try camelCase shareLocation
+      final response = await client
+          .from('users')
+          .select('shareLocation')
+          .eq('id', myId)
+          .single();
+      return response['shareLocation'] as bool? ?? false;
+    } catch (e1) {
+      try {
+        // 2. Try lowercase sharelocation
+        final response = await client
+            .from('users')
+            .select('sharelocation')
+            .eq('id', myId)
+            .single();
+        return response['sharelocation'] as bool? ?? false;
+      } catch (_) {
+        return false;
+      }
+    }
+  }
+
+  // Discovery: Get nearby users sharing location within 50 meters
+  Future<List<dynamic>> getNearbyUsers(double currentLat, double currentLng) async {
+    try {
+      // 1. Try fetching with camelCase shareLocation
+      final response = await client
+          .from('users')
+          .select()
+          .eq('shareLocation', true);
+      return _filterUsersByDistance(response, currentLat, currentLng);
+    } catch (e1) {
+      debugPrint('getNearbyUsers camelCase failed: $e1. Trying lowercase...');
+      try {
+        // 2. Try fetching with lowercase sharelocation
+        final response = await client
+            .from('users')
+            .select()
+            .eq('sharelocation', true);
+        return _filterUsersByDistance(response, currentLat, currentLng);
+      } catch (e2) {
+        debugPrint('getNearbyUsers lowercase failed: $e2. Fetching basic active users...');
+        try {
+          // 3. Fallback: Fetch basic users and filter by distance (ignoring shareLocation flag if not migrated)
+          final response = await client
+              .from('users')
+              .select()
+              .limit(50);
+          return _filterUsersByDistance(response, currentLat, currentLng);
+        } catch (_) {
+          return [];
+        }
+      }
+    }
+  }
+
+  List<dynamic> _filterUsersByDistance(List<dynamic> users, double currentLat, double currentLng) {
+    final List<dynamic> nearby = [];
+    final myId = currentUser?.id;
+    for (var user in users) {
+      if (user['id'] == myId) continue;
+
+      final double? userLat = double.tryParse((user['latitude'] ?? '').toString());
+      final double? userLng = double.tryParse((user['longitude'] ?? '').toString());
+
+      // Skip default 0.0 values (no real location)
+      if (userLat != null && userLng != null && (userLat != 0.0 || userLng != 0.0)) {
+        final distance = _calculateDistance(currentLat, currentLng, userLat, userLng);
+        if (distance <= 50) { // 50 meters
+          user['distance'] = distance;
+          nearby.add(user);
+        }
+      }
+    }
+    return nearby;
+  }
+
+  double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
+    var p = 0.017453292519943295; // Math.PI / 180
+    var c = cos;
+    var a = 0.5 - c((lat2 - lat1) * p)/2 + 
+          c(lat1 * p) * c(lat2 * p) * 
+          (1 - c((lon2 - lon1) * p))/2;
+    return 12742 * asin(sqrt(a)) * 1000; // Distance in meters
   }
 
   // Discovery: Search by name or phone

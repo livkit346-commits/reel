@@ -4,6 +4,7 @@ import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
+import 'package:geolocator/geolocator.dart';
 
 class AddFriendsPage extends StatefulWidget {
   const AddFriendsPage({super.key});
@@ -20,10 +21,151 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
   bool _searching = false;
   bool _loading = true;
 
+  // Nearby Discovery & Location States
+  bool _locationSharingEnabled = false;
+  bool _loadingLocationSetting = true;
+  Position? _currentPosition;
+  List<dynamic> _nearbyUsers = [];
+  bool _fetchingNearby = false;
+
+  // Quick Add Recommendations
+  List<dynamic> _quickAddList = [];
+  bool _loadingQuickAdd = true;
+
   @override
   void initState() {
     super.initState();
     _loadSnapchatSocials();
+  }
+
+  Future<void> _initLocation() async {
+    final supabase = context.read<SupabaseService>();
+    try {
+      final enabled = await supabase.isLocationSharingEnabled();
+      if (mounted) {
+        setState(() {
+          _locationSharingEnabled = enabled;
+          _loadingLocationSetting = false;
+        });
+      }
+      if (enabled) {
+        await _fetchLocationAndNearbyUsers();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loadingLocationSetting = false);
+      }
+    }
+  }
+
+  Future<Position?> _determinePosition() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      return Future.error('Location services are disabled.');
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        return Future.error('Location permissions are denied');
+      }
+    }
+    
+    if (permission == LocationPermission.deniedForever) {
+      return Future.error('Location permissions are permanently denied.');
+    } 
+
+    return await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+  }
+
+  Future<void> _fetchLocationAndNearbyUsers() async {
+    if (!_locationSharingEnabled) return;
+    setState(() => _fetchingNearby = true);
+    final supabase = context.read<SupabaseService>();
+    try {
+      final position = await _determinePosition();
+      if (position != null) {
+        if (mounted) {
+          setState(() {
+            _currentPosition = position;
+          });
+        }
+        await supabase.updateLocationSharing(
+          true,
+          lat: position.latitude,
+          lng: position.longitude,
+        );
+        final nearby = await supabase.getNearbyUsers(
+          position.latitude,
+          position.longitude,
+        );
+        if (mounted) {
+          setState(() {
+            _nearbyUsers = nearby;
+            _fetchingNearby = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error getting location/nearby users: $e');
+      if (mounted) {
+        setState(() => _fetchingNearby = false);
+      }
+    }
+  }
+
+  Future<void> _toggleLocationSharing(bool enabled) async {
+    final supabase = context.read<SupabaseService>();
+    setState(() {
+      _locationSharingEnabled = enabled;
+      if (!enabled) {
+        _nearbyUsers = [];
+        _currentPosition = null;
+      }
+    });
+
+    try {
+      if (enabled) {
+        await _fetchLocationAndNearbyUsers();
+      } else {
+        await supabase.updateLocationSharing(false, lat: 0.0, lng: 0.0);
+      }
+    } catch (e) {
+      debugPrint('Error toggling location sharing: $e');
+    }
+  }
+
+  Future<void> _loadQuickAdd() async {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (myId == null) return;
+
+    try {
+      final response = await supabase.client
+          .from('users')
+          .select()
+          .neq('id', myId)
+          .limit(30);
+
+      if (mounted) {
+        setState(() {
+          _quickAddList = (response as List).where((u) {
+            return !_myFollowing.contains(u['id']);
+          }).toList();
+          _loadingQuickAdd = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loadingQuickAdd = false);
+      }
+    }
   }
 
   Future<void> _loadSnapchatSocials() async {
@@ -61,6 +203,10 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
           _loading = false;
         });
       }
+
+      // Trigger location initialisation and quick add
+      _loadQuickAdd();
+      _initLocation();
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -165,10 +311,235 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
     }
   }
 
+  Widget _buildLocationSharingCard() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.white.withOpacity(0.05),
+            Colors.white.withOpacity(0.02),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: _locationSharingEnabled
+              ? Colors.cyanAccent.withOpacity(0.2)
+              : Colors.white.withOpacity(0.05),
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: _locationSharingEnabled
+                      ? Colors.cyanAccent.withOpacity(0.15)
+                      : Colors.white.withOpacity(0.05),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.location_on,
+                  color: _locationSharingEnabled ? Colors.cyanAccent : Colors.white38,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Nearby Discovery (50m)',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Reciprocal location sharing',
+                      style: TextStyle(
+                        color: Colors.white38,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_loadingLocationSetting)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.cyanAccent),
+                )
+              else
+                Switch(
+                  value: _locationSharingEnabled,
+                  activeColor: Colors.cyanAccent,
+                  activeTrackColor: Colors.cyanAccent.withOpacity(0.3),
+                  inactiveThumbColor: Colors.white54,
+                  inactiveTrackColor: Colors.white12,
+                  onChanged: (val) => _toggleLocationSharing(val),
+                ),
+            ],
+          ),
+          if (!_locationSharingEnabled) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.lock_outline, color: Colors.white30, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Turn on Location Sharing to find and be found by active users within 50 meters.',
+                      style: TextStyle(
+                        color: Colors.white38,
+                        fontSize: 11,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 16),
+            const Divider(color: Colors.white10, height: 1),
+            const SizedBox(height: 12),
+            if (_fetchingNearby)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Column(
+                    children: [
+                      CircularProgressIndicator(strokeWidth: 2, color: Colors.cyanAccent),
+                      SizedBox(height: 8),
+                      Text(
+                        'Scanning for active users within 50m...',
+                        style: TextStyle(color: Colors.white38, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else if (_nearbyUsers.isEmpty)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Column(
+                    children: [
+                      Icon(Icons.radar, color: Colors.white24, size: 36),
+                      SizedBox(height: 8),
+                      Text(
+                        'No active users within 50 meters right now.',
+                        style: TextStyle(color: Colors.white38, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              SizedBox(
+                height: 125,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _nearbyUsers.length,
+                  itemBuilder: (context, index) {
+                    final user = _nearbyUsers[index];
+                    final name = user['name'] ?? 'User';
+                    final distance = user['distance'] as double?;
+                    final isAdded = _myFollowing.contains(user['id']);
+
+                    return Container(
+                      width: 110,
+                      margin: const EdgeInsets.only(right: 12),
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.04),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white.withOpacity(0.05), width: 0.8),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          UserAvatar(
+                            userId: user['id'],
+                            radius: 20,
+                            border: Border.all(color: Colors.cyanAccent, width: 1.5),
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ReelProfilePage(userId: user['id']),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                          ),
+                          if (distance != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              '${distance.toStringAsFixed(1)}m away',
+                              style: const TextStyle(color: Colors.cyanAccent, fontSize: 10, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                          const SizedBox(height: 4),
+                          SizedBox(
+                            height: 22,
+                            child: ElevatedButton(
+                              onPressed: () {
+                                if (isAdded) {
+                                  _removeFriend(user['id']);
+                                } else {
+                                  _addFriend(user['id']);
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isAdded ? Colors.white12 : Colors.indigoAccent,
+                                padding: const EdgeInsets.symmetric(horizontal: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              child: Text(
+                                isAdded ? 'Added' : '+ Add',
+                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final primaryColor = Theme.of(context).primaryColor;
-
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -222,111 +593,8 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                     ),
                     const SizedBox(height: 12),
 
-                    // "NEARBY DISCOVERY (50M)" HORIZONTAL LIST
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Row(
-                        children: [
-                          Icon(Icons.location_on, color: Colors.cyanAccent, size: 16),
-                          SizedBox(width: 6),
-                          Text(
-                            'NEARBY DISCOVERY (50M)',
-                            style: TextStyle(color: Colors.cyanAccent, fontSize: 12, fontWeight: FontWeight.w900, letterSpacing: 0.8),
-                          ),
-                        ],
-                      ),
-                    ),
-                    SizedBox(
-                      height: 125,
-                      child: FutureBuilder<List<dynamic>>(
-                        future: context.read<SupabaseService>().getNearbyUsers(),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
-                            return const Center(child: CircularProgressIndicator());
-                          }
-
-                          final allUsers = snapshot.data!;
-                          final myId = context.read<SupabaseService>().currentUser?.id;
-                          final nearby = allUsers.where((u) => u['id'] != myId).toList();
-
-                          if (nearby.isEmpty) {
-                            return const Center(
-                              child: Text('No active users nearby.', style: TextStyle(color: Colors.white38, fontSize: 13)),
-                            );
-                          }
-
-                          return ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            itemCount: nearby.length,
-                            itemBuilder: (context, index) {
-                              final user = nearby[index];
-                              final name = user['name'] ?? 'User';
-                              final photoUrl = user['photoUrl'] as String?;
-                              final isAdded = _myFollowing.contains(user['id']);
-
-                              return Container(
-                                width: 110,
-                                margin: const EdgeInsets.symmetric(horizontal: 6),
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.04),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: Colors.white.withOpacity(0.05), width: 0.8),
-                                ),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    UserAvatar(
-                                      userId: user['id'],
-                                      radius: 20,
-                                      border: Border.all(color: Colors.cyanAccent, width: 1.5),
-                                      onTap: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (context) => ReelProfilePage(userId: user['id']),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      name,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    SizedBox(
-                                      height: 22,
-                                      child: ElevatedButton(
-                                        onPressed: () {
-                                          if (isAdded) {
-                                            _removeFriend(user['id']);
-                                          } else {
-                                            _addFriend(user['id']);
-                                          }
-                                        },
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: isAdded ? Colors.white12 : Colors.indigoAccent,
-                                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                        ),
-                                        child: Text(
-                                          isAdded ? 'Added' : '+ Add',
-                                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          );
-                        },
-                      ),
-                    ),
+                    // NEARBY DISCOVERY CARD
+                    _buildLocationSharingCard(),
                     const SizedBox(height: 12),
 
                     // SEARCH RESULTS SECTION
@@ -409,7 +677,7 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                       const SizedBox(height: 24),
                     ],
 
-                    // "QUICK ADD" SECTION (Snapchat style: nearby discover & suggestions)
+                    // "QUICK ADD" SECTION
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       child: Text(
@@ -417,58 +685,48 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                         style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.8),
                       ),
                     ),
-                    FutureBuilder<List<dynamic>>(
-                      future: context.read<SupabaseService>().getNearbyUsers(),
-                      builder: (context, snapshot) {
-                        if (!snapshot.hasData) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
+                    if (_loadingQuickAdd)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(16.0),
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.indigoAccent),
+                        ),
+                      )
+                    else if (_quickAddList.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12),
+                        child: Text(
+                          'No suggestions currently. Find friends using search above!',
+                          style: TextStyle(color: Colors.white38, fontSize: 13),
+                        ),
+                      )
+                    else
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.04),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _quickAddList.length,
+                          itemBuilder: (context, index) {
+                            final user = _quickAddList[index];
+                            final name = user['name'] ?? 'Suggested';
+                            final username = '@${name.toLowerCase().replaceAll(' ', '')}';
 
-                        final users = snapshot.data!;
-                        // Filter out self and people we already followed
-                        final myId = context.read<SupabaseService>().currentUser?.id;
-                        final quickAddUsers = users.where((u) {
-                          return u['id'] != myId && !_myFollowing.contains(u['id']);
-                        }).toList();
-
-                        if (quickAddUsers.isEmpty) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 12),
-                            child: Text(
-                              'No suggestions currently. Find friends using search above!',
-                              style: TextStyle(color: Colors.white38, fontSize: 13),
-                            ),
-                          );
-                        }
-
-                        return Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 16),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.04),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: quickAddUsers.length,
-                            itemBuilder: (context, index) {
-                              final user = quickAddUsers[index];
-                              final name = user['name'] ?? 'Suggested';
-                              final username = '@${name.toLowerCase().replaceAll(' ', '')}';
-
-                              return _buildSnapchatCard(
-                                userId: user['id'],
-                                name: name,
-                                username: username,
-                                subtext: 'Recently Active Nearby',
-                                isAdded: false,
-                                onActionPressed: () => _addFriend(user['id']),
-                              );
-                            },
-                          ),
-                        );
-                      },
-                    ),
+                            return _buildSnapchatCard(
+                              userId: user['id'],
+                              name: name,
+                              username: username,
+                              subtext: 'Recently Active',
+                              isAdded: false,
+                              onActionPressed: () => _addFriend(user['id']),
+                            );
+                          },
+                        ),
+                      ),
                     const SizedBox(height: 24),
                   ],
                 ),
