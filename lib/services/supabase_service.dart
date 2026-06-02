@@ -400,15 +400,22 @@ class SupabaseService {
     }
   }
 
-  // Status: Delete status
   Future<void> deleteStatus(String statusId) async {
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
 
     try {
+      // 1. Try camelCase userId
       await client.from('statuses').delete().eq('id', statusId).eq('userId', myId);
-    } catch (e) {
-      rethrow;
+    } catch (e1) {
+      debugPrint('Delete status camelCase failed: $e1. Trying lowercase userid...');
+      try {
+        // 2. Try lowercase userid
+        await client.from('statuses').delete().eq('id', statusId).eq('userid', myId);
+      } catch (e2) {
+        debugPrint('Delete status lowercase failed: $e2');
+        rethrow;
+      }
     }
   }
 

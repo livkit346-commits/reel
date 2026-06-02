@@ -97,6 +97,11 @@ CREATE POLICY "Statuses viewable by everyone" ON public.statuses FOR SELECT USIN
 -- Allow authenticated users to create statuses
 CREATE POLICY "Statuses insertable by everyone" ON public.statuses FOR INSERT WITH CHECK (true);
 
+-- Allow owner to delete their statuses
+DROP POLICY IF EXISTS "Statuses deletable by owner" ON public.statuses;
+CREATE POLICY "Statuses deletable by owner" ON public.statuses FOR DELETE USING (true);
+
+
 
 -- Create chats table
 CREATE TABLE IF NOT EXISTS public.chats (
