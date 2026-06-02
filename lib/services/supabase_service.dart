@@ -259,6 +259,9 @@ class SupabaseService {
         if (isVideo && trimStart != null && trimEnd != null) {
           imageUrl = '$imageUrl?trimStart=$trimStart&trimEnd=$trimEnd';
         }
+
+        // Pre-cache the uploaded media locally so we don't have to download it when opening the viewer
+        await LocalStorageService().cacheLocalFileForUrl(imageUrl, mediaFile);
       }
 
       String? voiceUrl;
@@ -267,6 +270,9 @@ class SupabaseService {
         final storagePath = 'statuses/$myId/$fileName';
         await client.storage.from('media').upload(storagePath, voiceFile);
         voiceUrl = getMediaUrl('media', storagePath);
+
+        // Pre-cache the uploaded voice file locally
+        await LocalStorageService().cacheLocalFileForUrl(voiceUrl, voiceFile);
       }
 
       try {

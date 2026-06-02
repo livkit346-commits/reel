@@ -78,6 +78,20 @@ class LocalStorageService {
     return null;
   }
 
+  // Cache a local file directly for a given URL to prevent re-downloading it (e.g. after uploading it)
+  Future<void> cacheLocalFileForUrl(String url, File localFile) async {
+    try {
+      final cacheDir = await _mediaCacheDir;
+      final fileName = _generateFileName(url);
+      final cacheFile = File('${cacheDir.path}/$fileName');
+      if (await localFile.exists()) {
+        await localFile.copy(cacheFile.path);
+        // Set last modified to now so it is fresh in TTL
+        await cacheFile.setLastModified(DateTime.now());
+      }
+    } catch (_) {}
+  }
+
   // Clears all cache files that are older than 24 hours (since status updates expire in 24 hours) using timezone-robust UTC
   Future<void> runLocalCleanup() async {
     try {
