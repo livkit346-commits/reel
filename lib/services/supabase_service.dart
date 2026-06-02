@@ -270,7 +270,7 @@ class SupabaseService {
       }
 
       try {
-        // 1. Try camelCase full format (supporting mediaType, voiceUrl, etc.)
+        // 1. Try camelCase full format (supporting mediaType, voiceUrl, text, etc.)
         await client.from('statuses').insert({
           'userId': myId,
           'userName': userName,
@@ -280,43 +280,103 @@ class SupabaseService {
           'voiceUrl': voiceUrl,
           'createdAt': DateTime.now().toIso8601String(),
         });
+        return;
       } catch (e1) {
-        debugPrint('First status insert failed: $e1. Trying lowercase full format...');
-        try {
-          // 2. Try lowercase full format
-          await client.from('statuses').insert({
-            'userid': myId,
-            'username': userName,
-            'imageurl': imageUrl,
-            'mediatype': mediaType ?? 'image',
-            'text': text,
-            'voiceurl': voiceUrl,
-            'createdat': DateTime.now().toIso8601String(),
-          });
-        } catch (e2) {
-          debugPrint('Second status insert failed: $e2. Trying camelCase basic format...');
-          try {
-            // 3. Try camelCase basic format
-            await client.from('statuses').insert({
-              'userId': myId,
-              'userName': userName,
-              'imageUrl': imageUrl,
-              'text': text,
-              'createdAt': DateTime.now().toIso8601String(),
-            });
-          } catch (e3) {
-            debugPrint('Third status insert failed: $e3. Trying lowercase basic format...');
-            // 4. Try lowercase basic format as final fallback
-            await client.from('statuses').insert({
-              'userid': myId,
-              'username': userName,
-              'imageurl': imageUrl,
-              'text': text,
-              'createdat': DateTime.now().toIso8601String(),
-            });
-          }
-        }
+        debugPrint('Insert fallback 1 (camelCase full) failed: $e1. Trying lowercase full...');
       }
+
+      try {
+        // 2. Try lowercase full format
+        await client.from('statuses').insert({
+          'userid': myId,
+          'username': userName,
+          'imageurl': imageUrl,
+          'mediatype': mediaType ?? 'image',
+          'text': text,
+          'voiceurl': voiceUrl,
+          'createdat': DateTime.now().toIso8601String(),
+        });
+        return;
+      } catch (e2) {
+        debugPrint('Insert fallback 2 (lowercase full) failed: $e2. Trying camelCase intermediate...');
+      }
+
+      try {
+        // 3. Try camelCase intermediate format (with mediaType but without text/voiceUrl)
+        await client.from('statuses').insert({
+          'userId': myId,
+          'userName': userName,
+          'imageUrl': imageUrl,
+          'mediaType': mediaType ?? 'image',
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+        return;
+      } catch (e3) {
+        debugPrint('Insert fallback 3 (camelCase intermediate) failed: $e3. Trying lowercase intermediate...');
+      }
+
+      try {
+        // 4. Try lowercase intermediate format (with mediatype but without text/voiceurl)
+        await client.from('statuses').insert({
+          'userid': myId,
+          'username': userName,
+          'imageurl': imageUrl,
+          'mediatype': mediaType ?? 'image',
+          'createdat': DateTime.now().toIso8601String(),
+        });
+        return;
+      } catch (e4) {
+        debugPrint('Insert fallback 4 (lowercase intermediate) failed: $e4. Trying camelCase basic...');
+      }
+
+      try {
+        // 5. Try camelCase basic format (with text, but without mediaType/voiceUrl)
+        await client.from('statuses').insert({
+          'userId': myId,
+          'userName': userName,
+          'imageUrl': imageUrl,
+          'text': text,
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+        return;
+      } catch (e5) {
+        debugPrint('Insert fallback 5 (camelCase basic) failed: $e5. Trying lowercase basic...');
+      }
+
+      try {
+        // 6. Try lowercase basic format (with text, but without mediatype/voiceurl)
+        await client.from('statuses').insert({
+          'userid': myId,
+          'username': userName,
+          'imageurl': imageUrl,
+          'text': text,
+          'createdat': DateTime.now().toIso8601String(),
+        });
+        return;
+      } catch (e6) {
+        debugPrint('Insert fallback 6 (lowercase basic) failed: $e6. Trying camelCase minimal...');
+      }
+
+      try {
+        // 7. Try camelCase minimal format (without mediaType/voiceUrl/text)
+        await client.from('statuses').insert({
+          'userId': myId,
+          'userName': userName,
+          'imageUrl': imageUrl,
+          'createdAt': DateTime.now().toIso8601String(),
+        });
+        return;
+      } catch (e7) {
+        debugPrint('Insert fallback 7 (camelCase minimal) failed: $e7. Trying lowercase minimal as final fallback...');
+      }
+
+      // 8. Try lowercase minimal format as final absolute fallback
+      await client.from('statuses').insert({
+        'userid': myId,
+        'username': userName,
+        'imageurl': imageUrl,
+        'createdat': DateTime.now().toIso8601String(),
+      });
     } catch (e) {
       rethrow;
     }
