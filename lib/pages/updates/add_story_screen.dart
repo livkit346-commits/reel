@@ -115,51 +115,72 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
       _assets = [];
     });
 
-    RequestType type = RequestType.all;
-    if (_currentTabIndex == 1) type = RequestType.image;
-    if (_currentTabIndex == 2) type = RequestType.video;
-
     try {
-      final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
-        type: type,
-        onlyAll: true,
-      );
+      List<AssetEntity> entities = [];
 
-      if (paths.isNotEmpty) {
-        setState(() {
-          _albums = paths;
-          // Maintain selected album, or find the virtual "Recent" / "All" album as default
-          _selectedAlbum = paths.firstWhere(
-            (p) => p.id == _selectedAlbum?.id,
-            orElse: () => paths.firstWhere((p) => p.isAll, orElse: () => paths.first),
-          );
-        });
-
-        // Use the selected album to paginate
-        final List<AssetEntity> entities = await _selectedAlbum!.getAssetListPaged(
-          page: 0,
-          size: 80,
+      if (_currentTabIndex == 0) {
+        // Fetch both images and videos master albums separately to bypass device-specific merge bugs
+        final List<AssetPathEntity> imagePaths = await PhotoManager.getAssetPathList(
+          type: RequestType.image,
+          onlyAll: true,
         );
-        
-        // Sort in memory by creation date descending (latest/newest first)
+        final List<AssetPathEntity> videoPaths = await PhotoManager.getAssetPathList(
+          type: RequestType.video,
+          onlyAll: true,
+        );
+
+        List<AssetEntity> imageEntities = [];
+        if (imagePaths.isNotEmpty) {
+          imageEntities = await imagePaths.first.getAssetListPaged(
+            page: 0,
+            size: 60,
+          );
+        }
+
+        List<AssetEntity> videoEntities = [];
+        if (videoPaths.isNotEmpty) {
+          videoEntities = await videoPaths.first.getAssetListPaged(
+            page: 0,
+            size: 60,
+          );
+        }
+
+        entities = [...imageEntities, ...videoEntities];
         entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+        entities = entities.take(80).toList();
 
         setState(() {
-          _assets = entities;
-          _isLoading = false;
-          if (entities.length < 80) {
-            _hasMore = false;
-          }
+          _albums = imagePaths;
+          _selectedAlbum = imagePaths.isNotEmpty ? imagePaths.first : null;
         });
       } else {
-        setState(() {
-          _albums = [];
-          _selectedAlbum = null;
-          _assets = [];
-          _isLoading = false;
-          _hasMore = false;
-        });
+        RequestType type = _currentTabIndex == 1 ? RequestType.image : RequestType.video;
+        final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
+          type: type,
+          onlyAll: true,
+        );
+
+        if (paths.isNotEmpty) {
+          setState(() {
+            _albums = paths;
+            _selectedAlbum = paths.first;
+          });
+
+          entities = await _selectedAlbum!.getAssetListPaged(
+            page: 0,
+            size: 80,
+          );
+          entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+        }
       }
+
+      setState(() {
+        _assets = entities;
+        _isLoading = false;
+        if (entities.length < 80) {
+          _hasMore = false;
+        }
+      });
     } catch (e) {
       setState(() {
         _isLoading = false;
@@ -169,7 +190,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   }
 
   Future<void> _loadMoreAssets() async {
-    if (_isLoadingMore || !_hasMore || _selectedAlbum == null) return;
+    if (_isLoadingMore || !_hasMore) return;
 
     setState(() {
       _isLoadingMore = true;
@@ -177,10 +198,43 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
 
     try {
       final nextPage = _currentPage + 1;
-      final List<AssetEntity> entities = await _selectedAlbum!.getAssetListPaged(
-        page: nextPage,
-        size: 80,
-      );
+      List<AssetEntity> entities = [];
+
+      if (_currentTabIndex == 0) {
+        // Load next page of images and videos separately
+        final List<AssetPathEntity> imagePaths = await PhotoManager.getAssetPathList(
+          type: RequestType.image,
+          onlyAll: true,
+        );
+        final List<AssetPathEntity> videoPaths = await PhotoManager.getAssetPathList(
+          type: RequestType.video,
+          onlyAll: true,
+        );
+
+        List<AssetEntity> imageEntities = [];
+        if (imagePaths.isNotEmpty) {
+          imageEntities = await imagePaths.first.getAssetListPaged(
+            page: nextPage,
+            size: 60,
+          );
+        }
+
+        List<AssetEntity> videoEntities = [];
+        if (videoPaths.isNotEmpty) {
+          videoEntities = await videoPaths.first.getAssetListPaged(
+            page: nextPage,
+            size: 60,
+          );
+        }
+
+        entities = [...imageEntities, ...videoEntities];
+      } else {
+        if (_selectedAlbum == null) return;
+        entities = await _selectedAlbum!.getAssetListPaged(
+          page: nextPage,
+          size: 80,
+        );
+      }
 
       if (entities.isEmpty) {
         setState(() {
@@ -190,7 +244,6 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
         return;
       }
 
-      // Sort the new page items
       entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
 
       setState(() {

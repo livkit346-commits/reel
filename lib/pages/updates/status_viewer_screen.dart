@@ -486,7 +486,7 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
       if (_localMediaFile != null) {
         return Image.file(
           _localMediaFile!,
-          fit: BoxFit.cover,
+          fit: BoxFit.contain,
           errorBuilder: (context, error, stackTrace) {
             return const Center(
               child: Text('Failed to load cached image.', style: TextStyle(color: Colors.white54)),
@@ -496,7 +496,7 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
       } else {
         return Image.network(
           imageUrl,
-          fit: BoxFit.cover,
+          fit: BoxFit.contain,
           errorBuilder: (context, error, stackTrace) {
             return const Center(
               child: Text('Failed to load image.', style: TextStyle(color: Colors.white54)),
