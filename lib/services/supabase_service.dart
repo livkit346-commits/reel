@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:reel/services/local_storage_service.dart';
+import 'package:http/http.dart' as http;
 
 class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
@@ -81,6 +82,66 @@ class SupabaseService {
         'lastSeen': DateTime.now().toIso8601String(),
       });
     } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Upload any file directly to Cloudflare R2 via our Supabase Edge Function
+  Future<String> uploadToR2(File file) async {
+    try {
+      final filename = file.path.split('/').last;
+      
+      // Determine contentType
+      String contentType = 'application/octet-stream';
+      final ext = filename.split('.').last.toLowerCase();
+      if (ext == 'jpg' || ext == 'jpeg') {
+        contentType = 'image/jpeg';
+      } else if (ext == 'png') {
+        contentType = 'image/png';
+      } else if (ext == 'mp4') {
+        contentType = 'video/mp4';
+      } else if (ext == 'm4a' || ext == 'mp3' || ext == 'wav') {
+        contentType = 'audio/mpeg';
+      }
+
+      // 1. Invoke Supabase Edge Function to get presigned URL
+      final response = await client.functions.invoke(
+        'r2-presign',
+        body: {
+          'filename': filename,
+          'contentType': contentType,
+        },
+      );
+
+      if (response.status != 200) {
+        throw Exception('Edge function returned status ${response.status}: ${response.data}');
+      }
+
+      final data = response.data;
+      if (data == null || data['uploadUrl'] == null) {
+        throw Exception('Invalid response from edge function: $data');
+      }
+
+      final String uploadUrl = data['uploadUrl'];
+      final String publicUrl = data['publicUrl'] ?? '';
+
+      // 2. Perform direct HTTP PUT request to Cloudflare R2
+      final fileBytes = await file.readAsBytes();
+      final uploadResponse = await http.put(
+        Uri.parse(uploadUrl),
+        headers: {
+          'Content-Type': contentType,
+        },
+        body: fileBytes,
+      );
+
+      if (uploadResponse.statusCode != 200) {
+        throw Exception('Cloudflare R2 upload failed with code ${uploadResponse.statusCode}');
+      }
+
+      return publicUrl;
+    } catch (e) {
+      debugPrint('uploadToR2 error: $e');
       rethrow;
     }
   }
@@ -189,11 +250,15 @@ class SupabaseService {
 
       String? imageUrl;
       if (imageFile != null) {
-        final fileName = 'post_${DateTime.now().millisecondsSinceEpoch}.jpg';
-        final storagePath = 'posts/$myId/$fileName';
-
-        await client.storage.from('media').upload(storagePath, imageFile);
-        imageUrl = getMediaUrl('media', storagePath);
+        try {
+          imageUrl = await uploadToR2(imageFile);
+        } catch (r2Error) {
+          debugPrint('Post R2 upload failed, falling back to Supabase: $r2Error');
+          final fileName = 'post_${DateTime.now().millisecondsSinceEpoch}.jpg';
+          final storagePath = 'posts/$myId/$fileName';
+          await client.storage.from('media').upload(storagePath, imageFile);
+          imageUrl = getMediaUrl('media', storagePath);
+        }
       }
 
       await createPost(myId, userName, text, imageUrl);
@@ -251,10 +316,15 @@ class SupabaseService {
       if (mediaFile != null) {
         final isVideo = mediaType == 'video';
         final extension = isVideo ? 'mp4' : 'jpg';
-        final fileName = 'status_${DateTime.now().millisecondsSinceEpoch}.$extension';
-        final storagePath = 'statuses/$myId/$fileName';
-        await client.storage.from('media').upload(storagePath, mediaFile);
-        imageUrl = getMediaUrl('media', storagePath);
+        try {
+          imageUrl = await uploadToR2(mediaFile);
+        } catch (r2Error) {
+          debugPrint('Custom status media R2 upload failed, falling back to Supabase: $r2Error');
+          final fileName = 'status_${DateTime.now().millisecondsSinceEpoch}.$extension';
+          final storagePath = 'statuses/$myId/$fileName';
+          await client.storage.from('media').upload(storagePath, mediaFile);
+          imageUrl = getMediaUrl('media', storagePath);
+        }
 
         // Store video trimming metadata inside the media URL parameters
         if (isVideo && trimStart != null && trimEnd != null) {
@@ -267,10 +337,15 @@ class SupabaseService {
 
       String? voiceUrl;
       if (voiceFile != null) {
-        final fileName = 'status_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-        final storagePath = 'statuses/$myId/$fileName';
-        await client.storage.from('media').upload(storagePath, voiceFile);
-        voiceUrl = getMediaUrl('media', storagePath);
+        try {
+          voiceUrl = await uploadToR2(voiceFile);
+        } catch (r2Error) {
+          debugPrint('Custom status voice R2 upload failed, falling back to Supabase: $r2Error');
+          final fileName = 'status_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+          final storagePath = 'statuses/$myId/$fileName';
+          await client.storage.from('media').upload(storagePath, voiceFile);
+          voiceUrl = getMediaUrl('media', storagePath);
+        }
 
         // Pre-cache the uploaded voice file locally
         await LocalStorageService().cacheLocalFileForUrl(voiceUrl, voiceFile);
@@ -395,11 +470,16 @@ class SupabaseService {
     if (myId == null) throw Exception('User not authenticated');
 
     try {
-      final fileName = 'status_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final storagePath = 'statuses/$myId/$fileName';
-
-      await client.storage.from('media').upload(storagePath, imageFile);
-      final imageUrl = getMediaUrl('media', storagePath);
+      String imageUrl;
+      try {
+        imageUrl = await uploadToR2(imageFile);
+      } catch (r2Error) {
+        debugPrint('Legacy status R2 upload failed, falling back to Supabase: $r2Error');
+        final fileName = 'status_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final storagePath = 'statuses/$myId/$fileName';
+        await client.storage.from('media').upload(storagePath, imageFile);
+        imageUrl = getMediaUrl('media', storagePath);
+      }
 
       await createStatus(myId, userName, imageUrl);
     } catch (e) {
@@ -854,12 +934,15 @@ class SupabaseService {
     try {
       String? mediaUrl;
       if (mediaFile != null) {
-        // Compress and upload media file to Supabase storage
-        final fileName = '${DateTime.now().millisecondsSinceEpoch}_${mediaFile.path.split('/').last}';
-        final storagePath = 'chat_media/$chatId/$fileName';
-
-        await client.storage.from('media').upload(storagePath, mediaFile);
-        mediaUrl = getMediaUrl('media', storagePath);
+        try {
+          mediaUrl = await uploadToR2(mediaFile);
+        } catch (r2Error) {
+          debugPrint('Chat media R2 upload failed, falling back to Supabase: $r2Error');
+          final fileName = '${DateTime.now().millisecondsSinceEpoch}_${mediaFile.path.split('/').last}';
+          final storagePath = 'chat_media/$chatId/$fileName';
+          await client.storage.from('media').upload(storagePath, mediaFile);
+          mediaUrl = getMediaUrl('media', storagePath);
+        }
       }
 
       // Calculate expiration time if disappearing is enabled
