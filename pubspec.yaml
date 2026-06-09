@@ -51,6 +51,9 @@ dependencies:
   video_editor: ^3.0.0
   record: ^6.2.1
   audioplayers: ^6.7.0
+  firebase_core: ^3.1.1
+  firebase_auth: ^5.1.1
+  firebase_messaging: ^15.0.3
 
 dev_dependencies:
   flutter_test:

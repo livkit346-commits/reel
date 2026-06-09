@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:reel/services/local_storage_service.dart';
 import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart' as fb;
 
 class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
@@ -29,26 +30,57 @@ class SupabaseService {
     return client.storage.from(bucket).getPublicUrl(path);
   }
 
-  // Auth: Sign Up with Email
+  // Auth: Sign Up with Email (Parallel Sync with Firebase Auth)
   Future<AuthResponse> signUpWithEmail(String email, String password) async {
     try {
+      // 1. Sign up on Supabase first
       final response = await client.auth.signUp(
         email: email,
         password: password,
       );
+
+      // 2. Sign up on Firebase Auth
+      try {
+        await fb.FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      } catch (fbError) {
+        debugPrint('Firebase signUp failed: $fbError');
+      }
+
       return response;
     } catch (e) {
       rethrow;
     }
   }
 
-  // Auth: Sign In with Email
+  // Auth: Sign In with Email (Parallel Sync with Firebase Auth)
   Future<AuthResponse> signInWithEmail(String email, String password) async {
     try {
+      // 1. Sign in on Supabase
       final response = await client.auth.signInWithPassword(
         email: email,
         password: password,
       );
+
+      // 2. Sign in on Firebase Auth
+      try {
+        await fb.FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      } catch (fbError) {
+        debugPrint('Firebase signIn failed: $fbError. Attempting dynamic sync creation...');
+        try {
+          // Fallback sync: if user exists on Supabase but not on Firebase, create it on Firebase!
+          await fb.FirebaseAuth.instance.createUserWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
+        } catch (_) {}
+      }
+
       return response;
     } catch (e) {
       rethrow;
@@ -59,6 +91,7 @@ class SupabaseService {
   Future<void> signOut() async {
     try {
       await client.auth.signOut();
+      await fb.FirebaseAuth.instance.signOut();
     } catch (e) {
       rethrow;
     }
@@ -673,6 +706,25 @@ class SupabaseService {
         return response['sharelocation'] as bool? ?? false;
       } catch (_) {
         return false;
+      }
+    }
+  }
+
+  // Push Notifications: Update user FCM push token in Supabase
+  Future<void> updatePushToken(String token) async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+
+    try {
+      // 1. Try camelCase pushToken
+      await client.from('users').update({'pushToken': token}).eq('id', myId);
+    } catch (e1) {
+      debugPrint('updatePushToken camelCase failed: $e1. Trying lowercase...');
+      try {
+        // 2. Try lowercase pushtoken
+        await client.from('users').update({'pushtoken': token}).eq('id', myId);
+      } catch (e2) {
+        debugPrint('updatePushToken lowercase failed: $e2');
       }
     }
   }

@@ -5,9 +5,15 @@ import 'package:reel/pages/main_screen.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/theme/reel_theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:reel/firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   
   await Supabase.initialize(
     url: 'https://zvxrcwgvvubgqlxbcyov.supabase.co',

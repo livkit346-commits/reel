@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:reel/services/fcm_service.dart';
+import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/chat/chat_list_page.dart';
 import 'package:reel/pages/explore/explore_feed_page.dart';
 import 'package:reel/pages/updates/updates_page.dart';
@@ -14,6 +17,15 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _selectedIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final supabaseService = context.read<SupabaseService>();
+      FcmService().init(supabaseService);
+    });
+  }
 
   final List<Widget> _pages = [
     const ChatListPage(),
