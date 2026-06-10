@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/services/websocket_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 
 class ChatListPage extends StatefulWidget {
@@ -15,6 +17,7 @@ class ChatListPage extends StatefulWidget {
 class _ChatListPageState extends State<ChatListPage> {
   late Future<List<dynamic>> _chatsFuture;
   final Set<String> _selectedChats = {};
+  StreamSubscription? _wsSubscription;
 
   void _toggleSelection(String chatId) {
     setState(() {
@@ -29,7 +32,19 @@ class _ChatListPageState extends State<ChatListPage> {
   @override
   void initState() {
     super.initState();
+    WebSocketService().connect();
     _loadChats();
+    _wsSubscription = WebSocketService().messageStream.listen((event) {
+      if (event['type'] == 'message') {
+        _loadChats();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _wsSubscription?.cancel();
+    super.dispose();
   }
 
   void _loadChats() {

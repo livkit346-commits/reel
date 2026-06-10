@@ -1,0 +1,211 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:http/http.dart' as http;
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+class WebSocketService {
+  static final WebSocketService _instance = WebSocketService._internal();
+  factory WebSocketService() => _instance;
+  WebSocketService._internal();
+
+  // Dynamic host resolver based on platform (safely supporting Web and Mobile emulators)
+  static String get backendHost {
+    if (kIsWeb) return 'localhost:8080';
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return '10.0.2.2:8080'; // Special loopback IP for Android Emulator
+    }
+    return 'localhost:8080';
+  }
+
+  static String get wsUrl => 'ws://$backendHost/ws';
+  static String get httpUrl => 'http://$backendHost';
+
+  WebSocketChannel? _channel;
+  bool _isConnecting = false;
+  bool _shouldReconnect = true;
+  Timer? _reconnectTimer;
+
+  // Stream controller to broadcast incoming messages
+  final StreamController<Map<String, dynamic>> _messageStreamController =
+      StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get messageStream => _messageStreamController.stream;
+
+  // Stream controller to broadcast connection state changes
+  final StreamController<bool> _connectionStateController =
+      StreamController<bool>.broadcast();
+  Stream<bool> get connectionStateStream => _connectionStateController.stream;
+
+  bool get isConnected => _channel != null;
+
+  // Helper to fetch fresh Firebase Auth JWT Token
+  Future<String?> _getFirebaseToken() async {
+    try {
+      final user = fb.FirebaseAuth.instance.currentUser;
+      if (user == null) return null;
+      // Get the ID Token (force refresh if close to expiration)
+      return await user.getIdToken(true);
+    } catch (e) {
+      debugPrint('Error getting Firebase ID Token: $e');
+      return null;
+    }
+  }
+
+  // Connect to the Go WebSocket Gateway
+  Future<void> connect() async {
+    if (isConnected) return;
+    if (_isConnecting) return;
+    _isConnecting = true;
+    _shouldReconnect = true;
+
+    try {
+      final token = await _getFirebaseToken();
+      if (token == null) {
+        debugPrint('WebSocket connect aborted: No active Firebase session.');
+        _isConnecting = false;
+        return;
+      }
+
+      final uri = Uri.parse('$wsUrl?token=$token');
+      debugPrint('Connecting to WebSocket Gateway: $uri');
+      
+      _channel = WebSocketChannel.connect(uri);
+      _isConnecting = false;
+      _connectionStateController.add(true);
+      debugPrint('WebSocket connection successfully initiated.');
+
+      _channel!.stream.listen(
+        (data) {
+          _handleIncomingData(data);
+        },
+        onError: (err) {
+          debugPrint('WebSocket connection error: $err');
+          _handleDisconnect();
+        },
+        onDone: () {
+          debugPrint('WebSocket connection closed by server.');
+          _handleDisconnect();
+        },
+      );
+    } catch (e) {
+      debugPrint('Failed to connect to WebSocket Gateway: $e');
+      _isConnecting = false;
+      _handleDisconnect();
+    }
+  }
+
+  // Handle incoming string data and parse it into map
+  void _handleIncomingData(dynamic data) {
+    try {
+      if (data is String) {
+        final decoded = jsonDecode(data) as Map<String, dynamic>;
+        _messageStreamController.add(decoded);
+      }
+    } catch (e) {
+      debugPrint('Error parsing incoming WebSocket data: $e');
+    }
+  }
+
+  // Handle connection drops and trigger auto-reconnection
+  void _handleDisconnect() {
+    _channel = null;
+    _connectionStateController.add(false);
+    _reconnectTimer?.cancel();
+    
+    if (_shouldReconnect) {
+      debugPrint('Scheduling auto-reconnect in 5 seconds...');
+      _reconnectTimer = Timer(const Duration(seconds: 5), () {
+        connect();
+      });
+    }
+  }
+
+  // Explicitly disconnect from the gateway
+  void disconnect() {
+    _shouldReconnect = false;
+    _reconnectTimer?.cancel();
+    _channel?.sink.close();
+    _channel = null;
+    _connectionStateController.add(false);
+    debugPrint('WebSocket manually disconnected.');
+  }
+
+  // Send a message over the active socket connection
+  bool sendMessage({
+    required String chatId,
+    required String recipientId,
+    required String text,
+    String? mediaUrl,
+    String? mediaType,
+    required String tempId,
+  }) {
+    if (!isConnected) {
+      debugPrint('WebSocket is offline, cannot transmit message immediately.');
+      return false;
+    }
+
+    try {
+      final payload = {
+        "tempId": tempId,
+        "chatId": chatId,
+        "recipientId": recipientId,
+        "text": text,
+        "mediaUrl": mediaUrl ?? "",
+        "mediaType": mediaType ?? "",
+      };
+
+      _channel!.sink.add(jsonEncode(payload));
+      return true;
+    } catch (e) {
+      debugPrint('Error writing to WebSocket sink: $e');
+      return false;
+    }
+  }
+
+  // Send a status change event (e.g. marking a message as received to delete it from DynamoDB)
+  void sendStatusUpdate({
+    required String chatId,
+    required String messageId,
+    required String recipientId,
+    required String status,
+  }) {
+    if (!isConnected) return;
+
+    try {
+      final payload = {
+        "type": "status",
+        "chatId": chatId,
+        "messageId": messageId,
+        "recipientId": recipientId,
+        "status": status,
+      };
+
+      _channel!.sink.add(jsonEncode(payload));
+    } catch (e) {
+      debugPrint('Error sending status update: $e');
+    }
+  }
+
+  // Fetch all undelivered history for a chat from DynamoDB
+  Future<List<dynamic>> fetchHistory(String chatId) async {
+    try {
+      final token = await _getFirebaseToken();
+      if (token == null) throw Exception('User not authenticated');
+
+      final uri = Uri.parse('$httpUrl/history?chatId=$chatId&token=$token');
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> history = jsonDecode(response.body);
+        return history;
+      } else {
+        debugPrint('Failed to query history from DynamoDB gateway: ${response.statusCode} - ${response.body}');
+        return [];
+      }
+    } catch (e) {
+      debugPrint('Error fetching history: $e');
+      return [];
+    }
+  }
+}

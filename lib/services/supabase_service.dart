@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:reel/services/local_storage_service.dart';
 import 'package:http/http.dart' as http;
@@ -914,37 +916,70 @@ class SupabaseService {
       final chatsList = List<Map<String, dynamic>>.from(response);
       for (final chat in chatsList) {
         final cid = chat['chatId'] as String;
-        final unreadCountResponse = await client
-            .from('messages')
-            .select('id')
-            .eq('chatId', cid)
-            .neq('senderId', myId)
-            .eq('received', false);
-        chat['hasUnread'] = unreadCountResponse.isNotEmpty;
 
-        // Fetch single latest message details for preview and sorting
+        // 1. Try loading the latest message from local JSON cache
+        Map<String, dynamic>? latestMsg;
         try {
-          final latestMsg = await client
-              .from('messages')
-              .select('text, mediaType, createdAt')
-              .eq('chatId', cid)
-              .order('createdAt', ascending: false)
-              .limit(1)
-              .maybeSingle();
+          final directory = await getApplicationDocumentsDirectory();
+          final file = File('${directory.path}/chats/${cid}_messages.json');
+          if (await file.exists()) {
+            final content = await file.readAsString();
+            final List<dynamic> decoded = jsonDecode(content);
+            if (decoded.isNotEmpty) {
+              latestMsg = Map<String, dynamic>.from(decoded.last);
+            }
+          }
+        } catch (_) {}
 
-          if (latestMsg != null) {
-            chat['latestMessageText'] = latestMsg['text'];
-            chat['latestMessageTime'] = latestMsg['createdAt'];
-            chat['latestMessageType'] = latestMsg['mediaType'];
-          } else {
+        if (latestMsg != null) {
+          chat['latestMessageText'] = latestMsg['text'];
+          String? timeStr;
+          if (latestMsg['createdAt'] != null) {
+            timeStr = latestMsg['createdAt'] as String;
+          } else if (latestMsg['timestamp'] != null) {
+            final ts = latestMsg['timestamp'] as int;
+            timeStr = DateTime.fromMillisecondsSinceEpoch(ts).toIso8601String();
+          }
+          chat['latestMessageTime'] = timeStr ?? '1970-01-01T00:00:00Z';
+          chat['latestMessageType'] = latestMsg['mediaType'];
+
+          // Compute hasUnread locally: last message sender is not me and received is false
+          final isMe = latestMsg['senderId'] == myId;
+          final isReceived = latestMsg['received'] as bool? ?? false;
+          chat['hasUnread'] = !isMe && !isReceived;
+        } else {
+          // 2. Fallback: Query legacy Supabase messages table
+          final unreadCountResponse = await client
+              .from('messages')
+              .select('id')
+              .eq('chatId', cid)
+              .neq('senderId', myId)
+              .eq('received', false);
+          chat['hasUnread'] = unreadCountResponse.isNotEmpty;
+
+          try {
+            final legacyLatestMsg = await client
+                .from('messages')
+                .select('text, mediaType, createdAt')
+                .eq('chatId', cid)
+                .order('createdAt', ascending: false)
+                .limit(1)
+                .maybeSingle();
+
+            if (legacyLatestMsg != null) {
+              chat['latestMessageText'] = legacyLatestMsg['text'];
+              chat['latestMessageTime'] = legacyLatestMsg['createdAt'];
+              chat['latestMessageType'] = legacyLatestMsg['mediaType'];
+            } else {
+              chat['latestMessageText'] = null;
+              chat['latestMessageTime'] = '1970-01-01T00:00:00Z';
+              chat['latestMessageType'] = null;
+            }
+          } catch (_) {
             chat['latestMessageText'] = null;
             chat['latestMessageTime'] = '1970-01-01T00:00:00Z';
             chat['latestMessageType'] = null;
           }
-        } catch (_) {
-          chat['latestMessageText'] = null;
-          chat['latestMessageTime'] = '1970-01-01T00:00:00Z';
-          chat['latestMessageType'] = null;
         }
       }
 

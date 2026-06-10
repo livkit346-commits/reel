@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/services/websocket_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/chat/cached_media_view.dart';
 import 'package:reel/pages/chat/forward_message_page.dart';
@@ -51,6 +52,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   Timer? _offlineRetryTimer;
   bool _wasOffline = false;
   final Set<String> _sendingMessageIds = {};
+  StreamSubscription? _wsSubscription;
 
   // Audio Recording states
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -64,8 +66,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     super.initState();
     _loadChatSettings();
     _checkFollowingStatus();
+    
+    // Connect to Go WebSocket backend and listen to the stream
+    WebSocketService().connect();
+    _wsSubscription = WebSocketService().messageStream.listen((event) {
+      _handleWebSocketEvent(event);
+    });
+
     _loadLocalMessages().then((_) {
       _retryPendingMessages();
+      _fetchUndeliveredHistory();
     });
 
     _messageController.addListener(() {
@@ -79,6 +89,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   @override
   void dispose() {
+    _wsSubscription?.cancel();
     _offlineRetryTimer?.cancel();
     _recordingTimer?.cancel();
     _audioRecorder.dispose();
@@ -180,43 +191,46 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     final supabase = context.read<SupabaseService>();
     try {
-      Map<String, dynamic> result;
-      if (pendingMsg['mediaFilePath'] != null) {
+      String? mediaUrl = pendingMsg['mediaUrl'];
+      
+      // 1. If it's a media message and has no URL yet, upload it first
+      if (pendingMsg['mediaFilePath'] != null && mediaUrl == null) {
         final file = File(pendingMsg['mediaFilePath']);
         if (!await file.exists()) {
           _sendingMessageIds.remove(tempId);
           return;
         }
-        result = await supabase.sendMessage(
-          chatId: widget.chatId,
-          mediaFile: file,
-          mediaType: pendingMsg['mediaType'],
-          disappearingDuration: _disappearingDuration,
-          replyToMessageId: pendingMsg['replyToMessageId'],
-        );
-      } else {
-        result = await supabase.sendMessage(
-          chatId: widget.chatId,
-          text: pendingMsg['text'],
-          disappearingDuration: _disappearingDuration,
-          replyToMessageId: pendingMsg['replyToMessageId'],
-        );
-      }
-
-      final index = _localMessages.indexWhere((m) => m['id'] == tempId);
-      if (index != -1) {
+        mediaUrl = await supabase.uploadToR2(file);
+        
+        // Update URL locally
         setState(() {
-          _localMessages[index] = {
-            ...result,
-            'isPending': false,
-          };
+          final index = _localMessages.indexWhere((m) => m['id'] == tempId);
+          if (index != -1) {
+            _localMessages[index]['mediaUrl'] = mediaUrl;
+          }
         });
         await _saveLocalMessages();
       }
 
+      // 2. Send via WebSocket
+      final sent = WebSocketService().sendMessage(
+        chatId: widget.chatId,
+        recipientId: widget.otherUserId,
+        text: pendingMsg['text'] ?? "",
+        mediaUrl: mediaUrl,
+        mediaType: pendingMsg['mediaType'],
+        tempId: tempId,
+      );
+
+      if (sent) {
+        // WebSocket successfully accepted it, wait for 'ack' event to resolve isPending.
+      } else {
+        throw Exception('WebSocket client is offline');
+      }
+
       if (_wasOffline) {
         _wasOffline = false;
-        _syncIncomingMessages();
+        _fetchUndeliveredHistory();
       }
     } catch (e) {
       debugPrint('Failed to send pending message $tempId: $e');
@@ -230,7 +244,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     final pending = _localMessages.where((m) => m['isPending'] == true).toList();
     if (pending.isEmpty && _wasOffline) {
       _wasOffline = false;
-      _syncIncomingMessages();
+      _fetchUndeliveredHistory();
       return;
     }
     for (final msg in pending) {
@@ -238,18 +252,133 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     }
   }
 
-  Future<void> _syncIncomingMessages() async {
-    final supabase = context.read<SupabaseService>();
+  Future<void> _fetchUndeliveredHistory() async {
     try {
-      final serverMessages = await supabase.getChatMessages(widget.chatId);
-      if (serverMessages.isNotEmpty) {
-        final typedMessages = serverMessages.map((e) => Map<String, dynamic>.from(e)).toList();
+      final history = await WebSocketService().fetchHistory(widget.chatId);
+      if (history.isNotEmpty) {
+        final supabase = context.read<SupabaseService>();
+        final myId = supabase.currentUser?.id;
+
         setState(() {
-          _mergeMessages(typedMessages);
+          for (final msg in history) {
+            final typedMsg = Map<String, dynamic>.from(msg);
+            final msgId = typedMsg['messageId'] ?? typedMsg['id'];
+
+            final exists = _localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
+            if (!exists) {
+              final localMsg = {
+                'id': msgId,
+                'messageId': msgId,
+                'chatId': typedMsg['chatId'],
+                'senderId': typedMsg['senderId'],
+                'text': typedMsg['text'],
+                'mediaUrl': typedMsg['mediaUrl'],
+                'mediaType': typedMsg['mediaType'],
+                'createdAt': typedMsg['timestamp'] != null
+                    ? DateTime.fromMillisecondsSinceEpoch(typedMsg['timestamp']).toIso8601String()
+                    : DateTime.now().toIso8601String(),
+                'received': true,
+              };
+              _localMessages.add(localMsg);
+
+              // Notify the server we received it so it gets deleted from DynamoDB
+              if (typedMsg['senderId'] != myId) {
+                WebSocketService().sendStatusUpdate(
+                  chatId: widget.chatId,
+                  messageId: msgId,
+                  recipientId: typedMsg['senderId'],
+                  status: 'received',
+                );
+              }
+            }
+          }
+
+          // Sort chronologically
+          _localMessages.sort((a, b) {
+            final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+            final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+            return timeA.compareTo(timeB);
+          });
         });
+        await _saveLocalMessages();
       }
     } catch (e) {
-      debugPrint('Error manual syncing incoming messages: $e');
+      debugPrint('Error manual syncing incoming history: $e');
+    }
+  }
+
+  void _handleWebSocketEvent(Map<String, dynamic> event) {
+    if (!mounted) return;
+
+    final type = event['type'] ?? 'message';
+    final eventChatId = event['chatId'];
+
+    if (eventChatId != widget.chatId) return;
+
+    if (type == 'ack') {
+      final tempId = event['tempId'];
+      final messageId = event['messageId'];
+      final timestamp = event['timestamp'] as int?;
+
+      setState(() {
+        final index = _localMessages.indexWhere((m) => m['id'] == tempId);
+        if (index != -1) {
+          _localMessages[index]['id'] = messageId;
+          _localMessages[index]['messageId'] = messageId;
+          _localMessages[index]['isPending'] = false;
+          if (timestamp != null) {
+            _localMessages[index]['createdAt'] =
+                DateTime.fromMillisecondsSinceEpoch(timestamp).toIso8601String();
+          }
+        }
+      });
+      _saveLocalMessages();
+    } else if (type == 'status') {
+      final messageId = event['messageId'];
+      final status = event['status'];
+
+      setState(() {
+        final index = _localMessages.indexWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
+        if (index != -1) {
+          _localMessages[index]['received'] = (status == 'received');
+        }
+      });
+      _saveLocalMessages();
+    } else if (type == 'message') {
+      final supabase = context.read<SupabaseService>();
+      final myId = supabase.currentUser?.id;
+      final senderId = event['senderId'];
+      final messageId = event['messageId'];
+
+      final exists = _localMessages.any((m) => m['id'] == messageId || m['messageId'] == messageId);
+      if (exists) return;
+
+      setState(() {
+        final localMsg = {
+          'id': messageId,
+          'messageId': messageId,
+          'chatId': event['chatId'],
+          'senderId': senderId,
+          'text': event['text'],
+          'mediaUrl': event['mediaUrl'],
+          'mediaType': event['mediaType'],
+          'createdAt': event['timestamp'] != null
+              ? DateTime.fromMillisecondsSinceEpoch(event['timestamp']).toIso8601String()
+              : DateTime.now().toIso8601String(),
+          'received': true,
+        };
+        _localMessages.add(localMsg);
+      });
+      _saveLocalMessages();
+
+      if (senderId != myId) {
+        WebSocketService().sendStatusUpdate(
+          chatId: widget.chatId,
+          messageId: messageId,
+          recipientId: senderId,
+          status: 'received',
+        );
+      }
     }
   }
 
@@ -632,11 +761,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     final myId = supabase.currentUser?.id;
     final primaryColor = Theme.of(context).primaryColor;
 
-    final messageStream = supabase.client
-        .from('messages')
-        .stream(primaryKey: ['id'])
-        .eq('chatId', widget.chatId)
-        .order('createdAt', ascending: true);
+
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -838,24 +963,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               ),
             ),
           Expanded(
-            child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: messageStream,
-              builder: (context, snapshot) {
+            child: Builder(
+              builder: (context) {
                 if (_isLoadingLocal) {
                   return const Center(child: CircularProgressIndicator());
-                }
-
-                final streamMessages = snapshot.data ?? [];
-
-                if (streamMessages.isNotEmpty) {
-                  _mergeMessages(streamMessages);
-                  for (final msg in streamMessages) {
-                    final senderId = msg['senderId'] as String;
-                    final isReceived = msg['received'] as bool? ?? false;
-                    if (senderId != myId && !isReceived) {
-                      supabase.markMessageAsReceived(msg['id'] as String);
-                    }
-                  }
                 }
 
                 final displayMessages = _localMessages.where((m) {
@@ -1069,8 +1180,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         ),
                       ),
                     );
-                },
-              );
+                  },
+                );
               },
             ),
           ),
