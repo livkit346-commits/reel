@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:reel/services/supabase_service.dart';
 
 class WebSocketService {
   static final WebSocketService _instance = WebSocketService._internal();
@@ -11,13 +12,7 @@ class WebSocketService {
   WebSocketService._internal();
 
   // Dynamic host resolver based on platform (safely supporting Web and Mobile emulators)
-  static String get backendHost {
-    if (kIsWeb) return 'localhost:8080';
-    if (defaultTargetPlatform == TargetPlatform.android) {
-      return '10.0.2.2:8080'; // Special loopback IP for Android Emulator
-    }
-    return 'localhost:8080';
-  }
+  static String get backendHost => '54.205.149.147:8080';
 
   static String get wsUrl => 'ws://$backendHost/ws';
   static String get httpUrl => 'http://$backendHost';
@@ -39,17 +34,9 @@ class WebSocketService {
 
   bool get isConnected => _channel != null;
 
-  // Helper to fetch fresh Firebase Auth JWT Token
-  Future<String?> _getFirebaseToken() async {
-    try {
-      final user = fb.FirebaseAuth.instance.currentUser;
-      if (user == null) return null;
-      // Get the ID Token (force refresh if close to expiration)
-      return await user.getIdToken(true);
-    } catch (e) {
-      debugPrint('Error getting Firebase ID Token: $e');
-      return null;
-    }
+  // Helper to fetch fresh custom JWT Token
+  Future<String?> _getAuthToken() async {
+    return await SupabaseService().getValidAccessToken();
   }
 
   // Connect to the Go WebSocket Gateway
@@ -60,9 +47,9 @@ class WebSocketService {
     _shouldReconnect = true;
 
     try {
-      final token = await _getFirebaseToken();
+      final token = await _getAuthToken();
       if (token == null) {
-        debugPrint('WebSocket connect aborted: No active Firebase session.');
+        debugPrint('WebSocket connect aborted: No active session.');
         _isConnecting = false;
         return;
       }
@@ -190,7 +177,7 @@ class WebSocketService {
   // Fetch all undelivered history for a chat from DynamoDB
   Future<List<dynamic>> fetchHistory(String chatId) async {
     try {
-      final token = await _getFirebaseToken();
+      final token = await _getAuthToken();
       if (token == null) throw Exception('User not authenticated');
 
       final uri = Uri.parse('$httpUrl/history?chatId=$chatId&token=$token');

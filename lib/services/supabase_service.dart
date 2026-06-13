@@ -32,58 +32,179 @@ class SupabaseService {
     return client.storage.from(bucket).getPublicUrl(path);
   }
 
-  // Auth: Sign Up with Email (Parallel Sync with Firebase Auth)
+  static String get backendUrl => 'http://54.205.149.147:8080';
+
+  // Parse JWT and check if expired or expiring within 5 minutes
+  bool _isTokenExpired(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return true;
+      final payload = parts[1];
+      
+      var normalized = payload;
+      while (normalized.length % 4 != 0) {
+        normalized += '=';
+      }
+      
+      final payloadDecoded = utf8.decode(base64Url.decode(normalized));
+      final Map<String, dynamic> claims = jsonDecode(payloadDecoded);
+      final exp = claims['exp'] as int?;
+      if (exp == null) return true;
+      
+      final expirationTime = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
+      return DateTime.now().add(const Duration(minutes: 5)).isAfter(expirationTime);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  // Retrieve valid access token, auto-refreshing if expired
+  Future<String?> getValidAccessToken() async {
+    try {
+      final cached = await LocalStorageService().getCachedJson('auth_tokens');
+      if (cached == null || cached is! Map) return null;
+      
+      final accessToken = cached['accessToken'] as String?;
+      final refreshToken = cached['refreshToken'] as String?;
+      
+      if (accessToken == null || refreshToken == null) return null;
+      
+      if (!_isTokenExpired(accessToken)) {
+        return accessToken;
+      }
+      
+      // Token expired, refresh it
+      return await _refreshTokens(refreshToken);
+    } catch (e) {
+      debugPrint('Error getting valid access token: $e');
+      return null;
+    }
+  }
+
+  // Call the refresh endpoint to obtain new tokens
+  Future<String?> _refreshTokens(String refreshToken) async {
+    try {
+      final uri = Uri.parse('$backendUrl/auth/refresh');
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'refreshToken': refreshToken}),
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final newAccessToken = data['accessToken'] as String?;
+        final newRefreshToken = data['refreshToken'] as String?;
+        
+        if (newAccessToken != null && newRefreshToken != null) {
+          await LocalStorageService().cacheJson('auth_tokens', {
+            'accessToken': newAccessToken,
+            'refreshToken': newRefreshToken,
+          });
+          
+          // Apply to Supabase client
+          await client.auth.setSession(newAccessToken);
+          return newAccessToken;
+        }
+      }
+      
+      // If refresh fails (e.g. token compromised or expired refresh token), clear local tokens
+      await LocalStorageService().cacheJson('auth_tokens', null);
+      await client.auth.signOut();
+      return null;
+    } catch (e) {
+      debugPrint('Error refreshing tokens: $e');
+      return null;
+    }
+  }
+
+  // Load persisted session on startup
+  Future<void> initializeSession() async {
+    try {
+      final token = await getValidAccessToken();
+      if (token != null) {
+        await client.auth.setSession(token);
+        debugPrint('Successfully restored user session from cached custom JWT.');
+      }
+    } catch (e) {
+      debugPrint('Failed to initialize session: $e');
+    }
+  }
+
+  // Auth: Sign Up with Email via Go backend and auto-login
   Future<AuthResponse> signUpWithEmail(String email, String password) async {
     try {
-      // 1. Sign up on Supabase first
-      final response = await client.auth.signUp(
-        email: email,
-        password: password,
+      final uri = Uri.parse('$backendUrl/auth/register');
+      // Use email prefix as a placeholder display name
+      final defaultName = email.split('@').first;
+      
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+          'name': defaultName,
+          'photoUrl': '',
+        }),
       );
 
-      // 2. Sign up on Firebase Auth
-      try {
-        await fb.FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: email,
-          password: password,
-        );
-      } catch (fbError) {
-        debugPrint('Firebase signUp failed: $fbError');
+      if (response.statusCode != 201) {
+        throw Exception(response.body.isNotEmpty ? response.body : 'Registration failed with code ${response.statusCode}');
       }
 
-      return response;
+      // Automatically sign in the user after successful registration
+      return await signInWithEmail(email, password);
     } catch (e) {
       rethrow;
     }
   }
 
-  // Auth: Sign In with Email (Parallel Sync with Firebase Auth)
+  // Auth: Sign In with Email via Go backend
   Future<AuthResponse> signInWithEmail(String email, String password) async {
     try {
-      // 1. Sign in on Supabase
-      final response = await client.auth.signInWithPassword(
-        email: email,
-        password: password,
+      final uri = Uri.parse('$backendUrl/auth/login');
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+        }),
       );
 
-      // 2. Sign in on Firebase Auth
+      if (response.statusCode != 200) {
+        throw Exception(response.body.isNotEmpty ? response.body : 'Invalid email or password');
+      }
+
+      final data = jsonDecode(response.body);
+      final accessToken = data['accessToken'] as String?;
+      final refreshToken = data['refreshToken'] as String?;
+
+      if (accessToken == null || refreshToken == null) {
+        throw Exception('Invalid session tokens returned by server');
+      }
+
+      // Persist tokens locally
+      await LocalStorageService().cacheJson('auth_tokens', {
+        'accessToken': accessToken,
+        'refreshToken': refreshToken,
+      });
+
+      // Pass token to Supabase client
+      final authResponse = await client.auth.setSession(accessToken);
+
+      // Sign in to Firebase Auth as a fallback/sync (if firebase is still active for other things, though we don't require it)
       try {
         await fb.FirebaseAuth.instance.signInWithEmailAndPassword(
           email: email,
           password: password,
         );
       } catch (fbError) {
-        debugPrint('Firebase signIn failed: $fbError. Attempting dynamic sync creation...');
-        try {
-          // Fallback sync: if user exists on Supabase but not on Firebase, create it on Firebase!
-          await fb.FirebaseAuth.instance.createUserWithEmailAndPassword(
-            email: email,
-            password: password,
-          );
-        } catch (_) {}
+        debugPrint('Firebase signIn sync failed (ignored): $fbError');
       }
 
-      return response;
+      return authResponse;
     } catch (e) {
       rethrow;
     }
@@ -92,10 +213,27 @@ class SupabaseService {
   // Auth: Sign Out
   Future<void> signOut() async {
     try {
-      await client.auth.signOut();
-      await fb.FirebaseAuth.instance.signOut();
+      final cached = await LocalStorageService().getCachedJson('auth_tokens');
+      if (cached != null && cached is Map) {
+        final refreshToken = cached['refreshToken'] as String?;
+        if (refreshToken != null) {
+          final uri = Uri.parse('$backendUrl/auth/logout');
+          await http.post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'refreshToken': refreshToken}),
+          ).timeout(const Duration(seconds: 5), onTimeout: () => http.Response('timeout', 408));
+        }
+      }
     } catch (e) {
-      rethrow;
+      debugPrint('Error calling logout endpoint: $e');
+    } finally {
+      // Clear cache and sign out Supabase/Firebase clients
+      await LocalStorageService().cacheJson('auth_tokens', null);
+      await client.auth.signOut();
+      try {
+        await fb.FirebaseAuth.instance.signOut();
+      } catch (_) {}
     }
   }
 
