@@ -58,6 +58,52 @@ class SupabaseService {
     }
   }
 
+  // Offline session recovery helper for custom JWT
+  Future<AuthResponse> _setSessionOffline(String accessToken, String refreshToken) async {
+    try {
+      final parts = accessToken.split('.');
+      if (parts.length != 3) {
+        throw Exception('Invalid custom JWT format');
+      }
+      final payload = parts[1];
+      var normalized = payload;
+      while (normalized.length % 4 != 0) {
+        normalized += '=';
+      }
+      final payloadDecoded = utf8.decode(base64Url.decode(normalized));
+      final Map<String, dynamic> claims = jsonDecode(payloadDecoded);
+      final userId = claims['sub'] as String? ?? '';
+      final email = claims['email'] as String? ?? 'user@reelapp.com';
+      final exp = claims['exp'] as int? ?? (DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600);
+      final timeNow = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final expiresIn = exp - timeNow;
+
+      final sessionMap = {
+        'access_token': accessToken,
+        'refresh_token': refreshToken,
+        'expires_in': expiresIn,
+        'expires_at': exp,
+        'token_type': 'bearer',
+        'user': {
+          'id': userId,
+          'email': email,
+          'created_at': DateTime.now().toIso8601String(),
+          'last_sign_in_at': DateTime.now().toIso8601String(),
+          'app_metadata': {'provider': 'email', 'providers': ['email']},
+          'user_metadata': {},
+          'aud': 'authenticated',
+          'role': 'authenticated',
+        }
+      };
+
+      final jsonStr = jsonEncode(sessionMap);
+      return await client.auth.recoverSession(jsonStr);
+    } catch (e) {
+      debugPrint('Error in _setSessionOffline: $e');
+      rethrow;
+    }
+  }
+
   // Retrieve valid access token, auto-refreshing if expired
   Future<String?> getValidAccessToken() async {
     try {
@@ -102,8 +148,8 @@ class SupabaseService {
             'refreshToken': newRefreshToken,
           });
           
-          // Apply to Supabase client
-          await client.auth.setSession(newAccessToken);
+          // Apply to Supabase client offline
+          await _setSessionOffline(newAccessToken, newRefreshToken);
           return newAccessToken;
         }
       }
@@ -121,10 +167,19 @@ class SupabaseService {
   // Load persisted session on startup
   Future<void> initializeSession() async {
     try {
-      final token = await getValidAccessToken();
-      if (token != null) {
-        await client.auth.setSession(token);
-        debugPrint('Successfully restored user session from cached custom JWT.');
+      final cached = await LocalStorageService().getCachedJson('auth_tokens');
+      if (cached != null && cached is Map) {
+        final accessToken = cached['accessToken'] as String?;
+        final refreshToken = cached['refreshToken'] as String?;
+        if (accessToken != null && refreshToken != null) {
+          if (!_isTokenExpired(accessToken)) {
+            await _setSessionOffline(accessToken, refreshToken);
+            debugPrint('Successfully restored user session from cached custom JWT.');
+          } else {
+            // Try to refresh
+            await _refreshTokens(refreshToken);
+          }
+        }
       }
     } catch (e) {
       debugPrint('Failed to initialize session: $e');
@@ -191,8 +246,8 @@ class SupabaseService {
         'refreshToken': refreshToken,
       });
 
-      // Pass token to Supabase client
-      final authResponse = await client.auth.setSession(accessToken);
+      // Pass token to Supabase client offline
+      final authResponse = await _setSessionOffline(accessToken, refreshToken);
 
       // Sign in to Firebase Auth as a fallback/sync (if firebase is still active for other things, though we don't require it)
       try {

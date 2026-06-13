@@ -18,6 +18,10 @@ void main() async {
   await Supabase.initialize(
     url: 'https://zvxrcwgvvubgqlxbcyov.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp2eHJjd2d2dnViZ3FseGJjeW92Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5NjM4MDgsImV4cCI6MjA5NDUzOTgwOH0.RVrUvHt-fnh7n02ap39-y9gpjvu4x6p0Xaq-CH8qP6w',
+    authOptions: const FlutterAuthClientOptions(
+      autoRefreshToken: false,
+      localStorage: EmptyLocalStorage(),
+    ),
   );
 
   final supabaseService = SupabaseService();
