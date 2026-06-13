@@ -43,3 +43,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Backend private keys, binaries, and configurations
+backend/reel-key.pem
+backend/reel.service
+backend/reel-backend
+backend/reel-backend.exe
+backend/ec2_ip.txt
+
