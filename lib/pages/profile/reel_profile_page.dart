@@ -201,7 +201,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: const Text('Mutual Friends Only', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             content: Text(
-              'Snapchat Rules: Both you and $otherUserName must add each other as friends before sending private messages!',
+              'Reel Rule: Both you and $otherUserName must add each other as friends before sending private messages!',
               style: const TextStyle(color: Colors.white70),
             ),
             actions: [

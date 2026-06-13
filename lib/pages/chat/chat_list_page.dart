@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
+import 'package:reel/pages/add/add_friends_page.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/services/websocket_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 
@@ -15,7 +17,8 @@ class ChatListPage extends StatefulWidget {
 }
 
 class _ChatListPageState extends State<ChatListPage> {
-  late Future<List<dynamic>> _chatsFuture;
+  List<dynamic> _chats = [];
+  bool _loading = true;
   final Set<String> _selectedChats = {};
   StreamSubscription? _wsSubscription;
 
@@ -33,7 +36,7 @@ class _ChatListPageState extends State<ChatListPage> {
   void initState() {
     super.initState();
     WebSocketService().connect();
-    _loadChats();
+    _initChats();
     _wsSubscription = WebSocketService().messageStream.listen((event) {
       if (event['type'] == 'message') {
         _loadChats();
@@ -47,11 +50,40 @@ class _ChatListPageState extends State<ChatListPage> {
     super.dispose();
   }
 
-  void _loadChats() {
+  Future<void> _initChats() async {
     final supabase = context.read<SupabaseService>();
-    setState(() {
-      _chatsFuture = supabase.getActiveChats();
-    });
+    final myId = supabase.currentUser?.id;
+    if (myId != null) {
+      try {
+        final cached = await LocalStorageService().getCachedJson('active_chats_$myId');
+        if (cached != null && cached is List) {
+          setState(() {
+            _chats = cached;
+            _loading = false;
+          });
+        }
+      } catch (_) {}
+    }
+    await _loadChats();
+  }
+
+  Future<void> _loadChats() async {
+    final supabase = context.read<SupabaseService>();
+    try {
+      final freshChats = await supabase.getActiveChats();
+      if (mounted) {
+        setState(() {
+          _chats = freshChats;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
   }
 
   String _formatMessageTime(String? timeStr) {
@@ -113,7 +145,7 @@ class _ChatListPageState extends State<ChatListPage> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: const Text('Mutual Friends Only', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             content: Text(
-              'Snapchat Rules: Both you and $otherUserName must add each other as friends before sending private messages!',
+              'Reel Rule: Both you and $otherUserName must add each other as friends before sending private messages!',
               style: const TextStyle(color: Colors.white70),
             ),
             actions: [
@@ -175,162 +207,151 @@ class _ChatListPageState extends State<ChatListPage> {
               ]
             : const [],
       ),
-      body: FutureBuilder<List<dynamic>>(
-        future: _chatsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      body: _loading && _chats.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: () async => _loadChats(),
+              child: _chats.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.chat_bubble_outline, size: 64, color: Colors.white24),
+                          SizedBox(height: 16),
+                          Text(
+                            'No active chats yet.',
+                            style: TextStyle(color: Colors.white54, fontSize: 16),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Use the Add Friends tab to find and message users!',
+                            style: TextStyle(color: Colors.white38, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _chats.length,
+                      itemBuilder: (context, index) {
+                        final chatMap = _chats[index] as Map<String, dynamic>;
+                        final chatId = chatMap['chatId'] as String;
+                        final userProfile = chatMap['users'] as Map<String, dynamic>;
 
-          final activeChats = snapshot.data ?? [];
+                        final otherUserId = userProfile['id'] as String;
+                        final otherUserName = userProfile['name'] as String? ?? 'User';
+                        final otherPhoto = userProfile['photoUrl'] as String?;
 
-          if (activeChats.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Icon(Icons.chat_bubble_outline, size: 64, color: Colors.white24),
-                  SizedBox(height: 16),
-                  Text(
-                    'No active chats yet.',
-                    style: TextStyle(color: Colors.white54, fontSize: 16),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Use the Add Friends tab to find and message users!',
-                    style: TextStyle(color: Colors.white38, fontSize: 13),
-                  ),
-                ],
-              ),
-            );
-          }
+                        final hasUnread = chatMap['hasUnread'] as bool? ?? false;
 
-          return RefreshIndicator(
-            onRefresh: () async => _loadChats(),
-            child: ListView.builder(
-              itemCount: activeChats.length,
-              itemBuilder: (context, index) {
-                final chatMap = activeChats[index] as Map<String, dynamic>;
-                final chatId = chatMap['chatId'] as String;
-                final userProfile = chatMap['users'] as Map<String, dynamic>;
-                
-                final otherUserId = userProfile['id'] as String;
-                final otherUserName = userProfile['name'] as String? ?? 'User';
-                final otherPhoto = userProfile['photoUrl'] as String?;
+                        final isSelected = _selectedChats.contains(chatId);
 
-                final hasUnread = chatMap['hasUnread'] as bool? ?? false;
-
-                final isSelected = _selectedChats.contains(chatId);
-
-                return ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  selected: isSelected,
-                  selectedTileColor: Colors.white.withOpacity(0.1),
-                  onLongPress: () => _toggleSelection(chatId),
-                  leading: UserAvatar(
-                    userId: otherUserId,
-                    radius: 26,
-                    onTap: () {
-                      if (_selectedChats.isNotEmpty) {
-                        _toggleSelection(chatId);
-                        return;
-                      }
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ReelProfilePage(userId: otherUserId),
-                        ),
-                      );
-                    },
-                  ),
-                  title: Text(
-                    otherUserName,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                  subtitle: Text(
-                    hasUnread
-                        ? 'New secure message received!'
-                        : (chatMap['latestMessageText'] != null && chatMap['latestMessageText'].toString().isNotEmpty
-                            ? chatMap['latestMessageText'].toString()
-                            : (chatMap['latestMessageType'] == 'image'
-                                ? '📷 Photo'
-                                : (chatMap['latestMessageType'] == 'video'
-                                    ? '🎥 Video'
-                                    : (chatMap['latestMessageType'] == 'audio'
-                                        ? '🎤 Voice Message'
-                                        : 'Tap to view encrypted ephemeral messages')))),
-                    style: TextStyle(
-                      color: hasUnread ? const Color(0xFF00BFFF) : Colors.white38,
-                      fontSize: 13,
-                      fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (chatMap['latestMessageTime'] != null && chatMap['latestMessageTime'] != '1970-01-01T00:00:00Z') ...[
-                        Text(
-                          _formatMessageTime(chatMap['latestMessageTime']?.toString()),
-                          style: const TextStyle(color: Colors.white30, fontSize: 11),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      if (isSelected)
-                        const Icon(Icons.check_circle, color: Color(0xFF00BFFF), size: 20)
-                      else if (hasUnread)
-                        Container(
-                          width: 10,
-                          height: 10,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF00BFFF),
-                            shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Color(0xFF00BFFF),
-                                blurRadius: 8,
-                                spreadRadius: 1,
-                              ),
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          selected: isSelected,
+                          selectedTileColor: Colors.white.withOpacity(0.1),
+                          onLongPress: () => _toggleSelection(chatId),
+                          leading: UserAvatar(
+                            userId: otherUserId,
+                            radius: 26,
+                            onTap: () {
+                              if (_selectedChats.isNotEmpty) {
+                                _toggleSelection(chatId);
+                                return;
+                              }
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => ReelProfilePage(userId: otherUserId),
+                                ),
+                              );
+                            },
+                          ),
+                          title: Text(
+                            otherUserName,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          subtitle: Text(
+                            hasUnread
+                                ? 'New secure message received!'
+                                : (chatMap['latestMessageText'] != null && chatMap['latestMessageText'].toString().isNotEmpty
+                                    ? chatMap['latestMessageText'].toString()
+                                    : (chatMap['latestMessageType'] == 'image'
+                                        ? '📷 Photo'
+                                        : (chatMap['latestMessageType'] == 'video'
+                                            ? '🎥 Video'
+                                            : (chatMap['latestMessageType'] == 'audio'
+                                                ? '🎤 Voice Message'
+                                                : 'Tap to view encrypted ephemeral messages')))),
+                            style: TextStyle(
+                              color: hasUnread ? const Color(0xFF00BFFF) : Colors.white38,
+                              fontSize: 13,
+                              fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (chatMap['latestMessageTime'] != null && chatMap['latestMessageTime'] != '1970-01-01T00:00:00Z') ...[
+                                Text(
+                                  _formatMessageTime(chatMap['latestMessageTime']?.toString()),
+                                  style: const TextStyle(color: Colors.white30, fontSize: 11),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              if (isSelected)
+                                const Icon(Icons.check_circle, color: Color(0xFF00BFFF), size: 20)
+                              else if (hasUnread)
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF00BFFF),
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Color(0xFF00BFFF),
+                                        blurRadius: 8,
+                                        spreadRadius: 1,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              const SizedBox(width: 8),
+                              const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
                             ],
                           ),
-                        ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
-                    ],
-                  ),
-                  onTap: () {
-                    if (_selectedChats.isNotEmpty) {
-                      _toggleSelection(chatId);
-                      return;
-                    }
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => ChatRoomPage(
-                          chatId: chatId,
-                          otherUserId: otherUserId,
-                          otherUserName: otherUserName,
-                        ),
-                      ),
-                    ).then((_) => _loadChats());
-                  },
-                );
-              },
+                          onTap: () {
+                            if (_selectedChats.isNotEmpty) {
+                              _toggleSelection(chatId);
+                              return;
+                            }
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ChatRoomPage(
+                                  chatId: chatId,
+                                  otherUserId: otherUserId,
+                                  otherUserName: otherUserName,
+                                ),
+                              ),
+                            ).then((_) => _loadChats());
+                          },
+                        );
+                      },
+                    ),
             ),
-          );
-        },
-      ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          // Go to search / discovery list
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Search and tap a profile to start a new chat!')),
-          );
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const AddFriendsPage()),
+          ).then((_) => _loadChats());
         },
         backgroundColor: Theme.of(context).primaryColor,
         child: const Icon(Icons.chat, color: Colors.white),
