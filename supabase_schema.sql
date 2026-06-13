@@ -1,6 +1,6 @@
 -- Create users table
 CREATE TABLE IF NOT EXISTS public.users (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY,
   name TEXT NOT NULL,
   photoUrl TEXT,
   phone TEXT,

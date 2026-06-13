@@ -569,6 +569,8 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+
 	// Enforce 9 character minimum on passwords
 	if len(req.Password) < 9 {
 		http.Error(w, "Password must be at least 9 characters long", http.StatusBadRequest)
@@ -666,6 +668,8 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
 
 	// Enforce Rate Limiting
 	if !limiter.Allow(ip) || !limiter.Allow(req.Email) {
