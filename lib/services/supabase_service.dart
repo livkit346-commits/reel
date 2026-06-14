@@ -380,6 +380,7 @@ class SupabaseService {
 
   // Profile: Upload avatar image
   Future<String> uploadAvatar(File imageFile) async {
+    await getValidAccessToken();
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
 
@@ -401,6 +402,7 @@ class SupabaseService {
 
   // Profile: Upload cover image
   Future<String> uploadCoverImage(File imageFile) async {
+    await getValidAccessToken();
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
 
@@ -1718,6 +1720,38 @@ class SupabaseService {
       await client.from('posts').update({'reposts': currentReposts + 1}).eq('id', postId);
     } catch (e) {
       rethrow;
+    }
+  }
+
+  // Get all friends/users we follow
+  Future<List<Map<String, dynamic>>> getAddedFriends() async {
+    final myId = currentUser?.id;
+    if (myId == null) return [];
+
+    try {
+      // Fetch followed users details using foreign key relationship
+      final response = await client
+          .from('follows')
+          .select('followingId, users!follows_followingId_fkey(id, name, photoUrl)')
+          .eq('followerId', myId);
+
+      final List<Map<String, dynamic>> friends = [];
+      for (final item in (response as List)) {
+        final userDetail = item['users'] ?? item['users!follows_followingId_fkey'];
+        if (userDetail != null) {
+          friends.add(Map<String, dynamic>.from(userDetail));
+        }
+      }
+      return friends;
+    } catch (e) {
+      debugPrint('Error getting added friends: $e');
+      // Fallback: get all users (excluding current user) so the user is never stuck
+      try {
+        final response = await client.from('users').select('id, name, photoUrl').neq('id', myId).limit(30);
+        return List<Map<String, dynamic>>.from(response);
+      } catch (_) {
+        return [];
+      }
     }
   }
 }

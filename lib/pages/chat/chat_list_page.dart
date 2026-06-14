@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
+import 'package:reel/pages/chat/select_friend_page.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/pages/add/add_friends_page.dart';
 import 'package:reel/services/supabase_service.dart';
@@ -370,7 +371,7 @@ class _ChatListPageState extends State<ChatListPage> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (context) => const AddFriendsPage()),
+            MaterialPageRoute(builder: (context) => const SelectFriendPage()),
           ).then((_) => _loadChats());
         },
         backgroundColor: Theme.of(context).primaryColor,

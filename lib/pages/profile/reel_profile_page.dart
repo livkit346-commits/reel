@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/auth/reel_auth_page.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
@@ -218,6 +219,20 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
 
   // Upload new profile avatar natively
   Future<void> _uploadProfilePicture() async {
+    try {
+      final PermissionState ps = await PhotoManager.requestPermissionExtend();
+      if (!ps.isAuth) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Gallery permission is required to choose a profile photo.')),
+          );
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint('Error requesting photo permission: $e');
+    }
+
     final pickedFile = await _picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 50,
@@ -250,6 +265,20 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
 
   // Upload new cover image banner natively
   Future<void> _uploadCoverImage() async {
+    try {
+      final PermissionState ps = await PhotoManager.requestPermissionExtend();
+      if (!ps.isAuth) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Gallery permission is required to choose a cover banner.')),
+          );
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint('Error requesting photo permission: $e');
+    }
+
     final pickedFile = await _picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 60,
@@ -530,11 +559,10 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                                         width: double.infinity,
                                         fit: BoxFit.cover,
                                       )
-                                    : Image.network(
-                                        'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+                                    : Container(
                                         height: 140,
                                         width: double.infinity,
-                                        fit: BoxFit.cover,
+                                        color: Colors.grey[950],
                                       ),
                                 if (_uploadingCover)
                                   Positioned.fill(
