@@ -21,6 +21,7 @@ class _ChatListPageState extends State<ChatListPage> {
   bool _loading = true;
   final Set<String> _selectedChats = {};
   StreamSubscription? _wsSubscription;
+  StreamSubscription? _connSubscription;
 
   void _toggleSelection(String chatId) {
     setState(() {
@@ -37,9 +38,27 @@ class _ChatListPageState extends State<ChatListPage> {
     super.initState();
     WebSocketService().connect();
     _initChats();
-    _wsSubscription = WebSocketService().messageStream.listen((event) {
+    
+    // Listen to real-time incoming messages
+    _wsSubscription = WebSocketService().messageStream.listen((event) async {
       if (event['type'] == 'message') {
-        _loadChats();
+        final supabase = context.read<SupabaseService>();
+        await supabase.saveIncomingMessage(event);
+        if (mounted) {
+          _loadChats();
+        }
+      }
+    });
+
+    // Automatically sync offline messages when WebSocket successfully connects/reconnects
+    _connSubscription = WebSocketService().connectionStateStream.listen((connected) {
+      if (connected) {
+        final supabase = context.read<SupabaseService>();
+        supabase.syncOfflineMessages().then((_) {
+          if (mounted) {
+            _loadChats();
+          }
+        });
       }
     });
   }
@@ -47,6 +66,7 @@ class _ChatListPageState extends State<ChatListPage> {
   @override
   void dispose() {
     _wsSubscription?.cancel();
+    _connSubscription?.cancel();
     super.dispose();
   }
 

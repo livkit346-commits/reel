@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:reel/services/local_storage_service.dart';
+import 'package:reel/services/websocket_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 
@@ -15,6 +16,9 @@ class SupabaseService {
   SupabaseService._internal();
 
   final SupabaseClient client = Supabase.instance.client;
+
+  // Track active chat room ID to avoid race conditions with background listeners
+  String? activeChatId;
 
   // In-session liked posts cache to persist hearts across scroll/navigation
   final Set<String> _likedPostIds = {};
@@ -1196,6 +1200,168 @@ class SupabaseService {
         }
       } catch (_) {}
       return [];
+    }
+  }
+
+  // Sync offline/undelivered messages for all active chats
+  Future<void> syncOfflineMessages() async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+
+    try {
+      // 1. Find all active chats
+      final participants = await client.from('chat_participants').select('chatId').eq('userId', myId);
+      final chatIds = participants.map((p) => p['chatId'] as String).toList();
+      if (chatIds.isEmpty) return;
+
+      final directory = await getApplicationDocumentsDirectory();
+
+      // 2. Fetch history for each chat
+      for (final cid in chatIds) {
+        if (cid == activeChatId) continue; // Skip active chat room as it manages its own history/cache
+        if (!WebSocketService().isConnected) continue;
+
+        final history = await WebSocketService().fetchHistory(cid);
+        if (history.isEmpty) continue;
+
+        // Load existing local messages for this chat
+        final file = File('${directory.path}/chats/${cid}_messages.json');
+        List<Map<String, dynamic>> localMessages = [];
+        if (await file.exists()) {
+          try {
+            final content = await file.readAsString();
+            final List<dynamic> decoded = jsonDecode(content);
+            localMessages = decoded.map((m) => Map<String, dynamic>.from(m)).toList();
+          } catch (_) {}
+        }
+
+        bool hasChanges = false;
+        for (final msg in history) {
+          final typedMsg = Map<String, dynamic>.from(msg);
+          final msgId = typedMsg['messageId'] ?? typedMsg['id'];
+
+          final exists = localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
+          if (!exists) {
+            final localMsg = {
+              'id': msgId,
+              'messageId': msgId,
+              'chatId': typedMsg['chatId'],
+              'senderId': typedMsg['senderId'],
+              'text': typedMsg['text'],
+              'mediaUrl': typedMsg['mediaUrl'],
+              'mediaType': typedMsg['mediaType'],
+              'createdAt': typedMsg['timestamp'] != null
+                  ? DateTime.fromMillisecondsSinceEpoch(typedMsg['timestamp']).toIso8601String()
+                  : DateTime.now().toIso8601String(),
+              'received': true,
+            };
+            localMessages.add(localMsg);
+            hasChanges = true;
+
+            // Notify the server we received it so it gets deleted from DynamoDB
+            if (typedMsg['senderId'] != myId) {
+              WebSocketService().sendStatusUpdate(
+                chatId: cid,
+                messageId: msgId,
+                recipientId: typedMsg['senderId'],
+                status: 'received',
+              );
+            }
+          }
+        }
+
+        if (hasChanges) {
+          // Sort messages chronologically
+          localMessages.sort((a, b) {
+            final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+            final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+            return timeA.compareTo(timeB);
+          });
+
+          // Save back to local file cache
+          final dir = Directory('${directory.path}/chats');
+          if (!await dir.exists()) {
+            await dir.create(recursive: true);
+          }
+          await file.writeAsString(jsonEncode(localMessages));
+        }
+      }
+    } catch (e) {
+      debugPrint('Error syncing offline messages: $e');
+    }
+  }
+
+  // Save a single incoming WebSocket message to the local cache and send received status
+  Future<void> saveIncomingMessage(Map<String, dynamic> event) async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+
+    final chatId = event['chatId'];
+    if (chatId == null) return;
+    
+    // Skip if this is the active chat room (which is currently open and has its own handler)
+    if (chatId == activeChatId) return;
+
+    final messageId = event['messageId'] ?? event['id'];
+    if (messageId == null) return;
+
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/chats/${chatId}_messages.json');
+      List<Map<String, dynamic>> localMessages = [];
+      if (await file.exists()) {
+        try {
+          final content = await file.readAsString();
+          final List<dynamic> decoded = jsonDecode(content);
+          localMessages = decoded.map((m) => Map<String, dynamic>.from(m)).toList();
+        } catch (_) {}
+      }
+
+      final exists = localMessages.any((m) => m['id'] == messageId || m['messageId'] == messageId);
+      if (!exists) {
+        final senderId = event['senderId'];
+        final localMsg = {
+          'id': messageId,
+          'messageId': messageId,
+          'chatId': chatId,
+          'senderId': senderId,
+          'text': event['text'],
+          'mediaUrl': event['mediaUrl'],
+          'mediaType': event['mediaType'],
+          'createdAt': event['timestamp'] != null
+              ? DateTime.fromMillisecondsSinceEpoch((event['timestamp'] as num).toInt()).toIso8601String()
+              : DateTime.now().toIso8601String(),
+          'received': true,
+        };
+        localMessages.add(localMsg);
+
+        // Sort messages chronologically
+        localMessages.sort((a, b) {
+          final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+          final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+          return timeA.compareTo(timeB);
+        });
+
+        // Save back to local file cache
+        final dir = Directory('${directory.path}/chats');
+        if (!await dir.exists()) {
+          await dir.create(recursive: true);
+        }
+        await file.writeAsString(jsonEncode(localMessages));
+        debugPrint('Saved incoming message $messageId to local cache for chat $chatId');
+
+        // Notify the server we received it so it gets deleted from DynamoDB
+        if (senderId != myId && WebSocketService().isConnected) {
+          WebSocketService().sendStatusUpdate(
+            chatId: chatId,
+            messageId: messageId,
+            recipientId: senderId,
+            status: 'received',
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error saving incoming message: $e');
     }
   }
 

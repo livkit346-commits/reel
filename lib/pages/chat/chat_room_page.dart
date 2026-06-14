@@ -64,6 +64,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   @override
   void initState() {
     super.initState();
+    final supabase = context.read<SupabaseService>();
+    supabase.activeChatId = widget.chatId;
+
     _loadChatSettings();
     _checkFollowingStatus();
     
@@ -89,6 +92,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   @override
   void dispose() {
+    final supabase = context.read<SupabaseService>();
+    if (supabase.activeChatId == widget.chatId) {
+      supabase.activeChatId = null;
+    }
     _wsSubscription?.cancel();
     _offlineRetryTimer?.cancel();
     _recordingTimer?.cancel();
