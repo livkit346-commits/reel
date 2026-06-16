@@ -256,11 +256,10 @@ class _ChatListPageState extends State<ChatListPage> {
                       itemBuilder: (context, index) {
                         final chatMap = _chats[index] as Map<String, dynamic>;
                         final chatId = chatMap['chatId'] as String;
-                        final userProfile = chatMap['users'] as Map<String, dynamic>;
-
-                        final otherUserId = userProfile['id'] as String;
-                        final otherUserName = userProfile['name'] as String? ?? 'User';
-                        final otherPhoto = userProfile['photoUrl'] as String?;
+                        final isGroup = chatMap['isGroup'] as bool? ?? false;
+                        final chatName = chatMap['chatName'] as String? ?? 'Chat';
+                        final chatIcon = chatMap['chatIcon'] as String?;
+                        final otherUserId = chatMap['otherUserId'] as String? ?? '';
 
                         final hasUnread = chatMap['hasUnread'] as bool? ?? false;
 
@@ -271,24 +270,35 @@ class _ChatListPageState extends State<ChatListPage> {
                           selected: isSelected,
                           selectedTileColor: Colors.white.withOpacity(0.1),
                           onLongPress: () => _toggleSelection(chatId),
-                          leading: UserAvatar(
-                            userId: otherUserId,
-                            radius: 26,
-                            onTap: () {
-                              if (_selectedChats.isNotEmpty) {
-                                _toggleSelection(chatId);
-                                return;
-                              }
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => ReelProfilePage(userId: otherUserId),
+                          leading: isGroup
+                              ? CircleAvatar(
+                                  radius: 26,
+                                  backgroundColor: Colors.indigo.withOpacity(0.3),
+                                  backgroundImage: chatIcon != null && chatIcon.isNotEmpty
+                                      ? NetworkImage(chatIcon)
+                                      : null,
+                                  child: chatIcon != null && chatIcon.isNotEmpty
+                                      ? null
+                                      : const Icon(Icons.group, color: Colors.indigoAccent),
+                                )
+                              : UserAvatar(
+                                  userId: otherUserId,
+                                  radius: 26,
+                                  onTap: () {
+                                    if (_selectedChats.isNotEmpty) {
+                                      _toggleSelection(chatId);
+                                      return;
+                                    }
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => ReelProfilePage(userId: otherUserId),
+                                      ),
+                                    );
+                                  },
                                 ),
-                              );
-                            },
-                          ),
                           title: Text(
-                            otherUserName,
+                            chatName,
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
@@ -358,7 +368,8 @@ class _ChatListPageState extends State<ChatListPage> {
                                 builder: (context) => ChatRoomPage(
                                   chatId: chatId,
                                   otherUserId: otherUserId,
-                                  otherUserName: otherUserName,
+                                  otherUserName: chatName,
+                                  isGroup: isGroup,
                                 ),
                               ),
                             ).then((_) => _loadChats());

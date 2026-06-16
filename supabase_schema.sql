@@ -109,7 +109,11 @@ CREATE POLICY "Statuses deletable by owner" ON public.statuses FOR DELETE USING 
 CREATE TABLE IF NOT EXISTS public.chats (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-  "disappearingDuration" TEXT DEFAULT 'off' NOT NULL -- 'off', '24h', '48h'
+  "disappearingDuration" TEXT DEFAULT 'off' NOT NULL, -- 'off', '24h', '48h'
+  "isGroup" BOOLEAN DEFAULT false NOT NULL,
+  "name" TEXT,
+  "groupIcon" TEXT,
+  "creatorId" UUID REFERENCES public.users(id)
 );
 
 -- Enable RLS for chats

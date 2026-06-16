@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
+import 'package:reel/pages/chat/create_group_page.dart';
 import 'package:reel/pages/add/add_friends_page.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
@@ -162,7 +163,12 @@ class _SelectFriendPageState extends State<SelectFriendPage> {
                     'New Group',
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                   ),
-                  onTap: _showGroupComingSoonDialog,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const CreateGroupPage()),
+                    );
+                  },
                 ),
                 // Option: Add Friends (New Contact)
                 ListTile(

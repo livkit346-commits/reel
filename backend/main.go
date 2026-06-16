@@ -75,6 +75,30 @@ var (
 	supabaseKey string
 )
 
+// Group cache structures
+type GroupCacheEntry struct {
+	Participants []string
+	ExpiresAt    time.Time
+}
+
+type ChatMetadata struct {
+	IsGroup   bool   `json:"isGroup"`
+	Name      string `json:"name"`
+	GroupIcon string `json:"groupIcon"`
+}
+
+type ChatMetadataCacheEntry struct {
+	Metadata  ChatMetadata
+	ExpiresAt time.Time
+}
+
+var (
+	groupCache             = make(map[string]GroupCacheEntry)
+	groupCacheMutex        sync.RWMutex
+	chatMetadataCache      = make(map[string]ChatMetadataCacheEntry)
+	chatMetadataCacheMutex sync.RWMutex
+)
+
 func main() {
 	// 1. Read environment variables
 	port := os.Getenv("PORT")
@@ -222,7 +246,7 @@ func (c *Client) readPump() {
 		if chatMsg.Type == "status" {
 			if chatMsg.Status == "received" && chatMsg.MessageID != "" && chatMsg.ChatID != "" {
 				// Purge message from DynamoDB since it has been successfully received
-				err := deleteMessageFromDynamoDB(chatMsg.ChatID, chatMsg.MessageID)
+				err := deleteMessageFromDynamoDB(chatMsg.ChatID, chatMsg.MessageID, c.UserID)
 				if err != nil {
 					log.Printf("Error deleting message from DynamoDB on status update: %v", err)
 				} else {
@@ -248,13 +272,21 @@ func (c *Client) readPump() {
 		timestamp := time.Now().UnixMilli()
 		msgID := fmt.Sprintf("%015d-%s", timestamp, uuid.New().String())
 
-		// 2. Save message to DynamoDB
-		err = saveMessageToDynamoDB(c.UserID, msgID, timestamp, chatMsg)
+		// 2. Resolve all recipients (excluding the sender) for this chat
+		recipients, err := getChatRecipients(chatMsg.ChatID, c.UserID)
 		if err != nil {
-			log.Printf("Error saving to DynamoDB: %v", err)
+			log.Printf("Error resolving recipients for chat %s: %v", chatMsg.ChatID, err)
+			// Fallback to routing to RecipientID if database query fails
+			recipients = []string{chatMsg.RecipientID}
 		}
 
-		// 3. Send acknowledgment back to the sender
+		// 3. Save message once to DynamoDB
+		err = saveMessageToDynamoDB(c.UserID, msgID, timestamp, chatMsg)
+		if err != nil {
+			log.Printf("Error saving message %s to DynamoDB: %v", msgID, err)
+		}
+
+		// 4. Send acknowledgment back to the sender
 		ackMsg, _ := json.Marshal(ChatMessage{
 			Type:      "ack",
 			TempID:    chatMsg.TempID,
@@ -264,31 +296,35 @@ func (c *Client) readPump() {
 		})
 		c.Send <- ackMsg
 
-		// 4. Deliver message to recipient
-		forwardedMsg := ChatMessage{
-			Type:        "message",
-			MessageID:   msgID,
-			ChatID:      chatMsg.ChatID,
-			SenderID:    c.UserID,
-			RecipientID: chatMsg.RecipientID,
-			Text:        chatMsg.Text,
-			MediaURL:    chatMsg.MediaURL,
-			MediaType:   chatMsg.MediaType,
-			Timestamp:   timestamp,
-			Status:      "sent",
-		}
-		deliveredMsg, _ := json.Marshal(forwardedMsg)
+		// 5. Deliver message to online recipients via WebSocket or offline via FCM
+		for _, recipientID := range recipients {
+			if recipientID == "" {
+				continue
+			}
 
-		hub.mutex.RLock()
-		recipientClient, online := hub.clients[chatMsg.RecipientID]
-		hub.mutex.RUnlock()
+			forwardedMsg := ChatMessage{
+				Type:        "message",
+				MessageID:   msgID,
+				ChatID:      chatMsg.ChatID,
+				SenderID:    c.UserID,
+				RecipientID: recipientID,
+				Text:        chatMsg.Text,
+				MediaURL:    chatMsg.MediaURL,
+				MediaType:   chatMsg.MediaType,
+				Timestamp:   timestamp,
+				Status:      "sent",
+			}
+			deliveredMsg, _ := json.Marshal(forwardedMsg)
 
-		if online {
-			// Deliver instantly via open socket
-			recipientClient.Send <- deliveredMsg
-		} else {
-			// Trigger FCM push notification since recipient is offline
-			go sendFcmNotification(chatMsg.RecipientID, c.UserID, chatMsg.Text)
+			hub.mutex.RLock()
+			recipientClient, online := hub.clients[recipientID]
+			hub.mutex.RUnlock()
+
+			if online {
+				recipientClient.Send <- deliveredMsg
+			} else {
+				go sendFcmNotification(recipientID, c.UserID, chatMsg.ChatID, chatMsg.Text)
+			}
 		}
 	}
 }
@@ -310,6 +346,133 @@ func (c *Client) writePump() {
 	}
 }
 
+// Participant Querying helpers
+type ParticipantResult struct {
+	UserID string `json:"userId"`
+}
+
+func getChatRecipients(chatID, senderID string) ([]string, error) {
+	if supabaseUrl == "" || supabaseKey == "" {
+		return nil, fmt.Errorf("Supabase URL or Key not set")
+	}
+
+	// 1. Check in-memory cache
+	groupCacheMutex.RLock()
+	entry, exists := groupCache[chatID]
+	groupCacheMutex.RUnlock()
+
+	if exists && time.Now().Before(entry.ExpiresAt) {
+		return filterSender(entry.Participants, senderID), nil
+	}
+
+	// 2. Query Supabase chat_participants table
+	clientHttp := &http.Client{Timeout: 5 * time.Second}
+	reqUrl := fmt.Sprintf("%s/rest/v1/chat_participants?select=userId&chatId=eq.%s", supabaseUrl, chatID)
+	req, err := http.NewRequest("GET", reqUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("apikey", supabaseKey)
+	req.Header.Set("Authorization", "Bearer "+supabaseKey)
+
+	resp, err := clientHttp.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to fetch participants from Supabase (HTTP %d)", resp.StatusCode)
+	}
+
+	var results []ParticipantResult
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return nil, err
+	}
+
+	participants := make([]string, len(results))
+	for i, res := range results {
+		participants[i] = res.UserID
+	}
+
+	// 3. Update Cache (valid for 1 minute)
+	groupCacheMutex.Lock()
+	groupCache[chatID] = GroupCacheEntry{
+		Participants: participants,
+		ExpiresAt:    time.Now().Add(1 * time.Minute),
+	}
+	groupCacheMutex.Unlock()
+
+	return filterSender(participants, senderID), nil
+}
+
+func filterSender(participants []string, senderID string) []string {
+	recipients := make([]string, 0)
+	for _, p := range participants {
+		if p != senderID {
+			recipients = append(recipients, p)
+		}
+	}
+	return recipients
+}
+
+func getChatMetadata(chatID string) (ChatMetadata, error) {
+	var empty ChatMetadata
+	if supabaseUrl == "" || supabaseKey == "" {
+		return empty, fmt.Errorf("Supabase URL or Key not set")
+	}
+
+	// 1. Check in-memory cache
+	chatMetadataCacheMutex.RLock()
+	entry, exists := chatMetadataCache[chatID]
+	chatMetadataCacheMutex.RUnlock()
+
+	if exists && time.Now().Before(entry.ExpiresAt) {
+		return entry.Metadata, nil
+	}
+
+	// 2. Query Supabase chats table
+	clientHttp := &http.Client{Timeout: 5 * time.Second}
+	reqUrl := fmt.Sprintf("%s/rest/v1/chats?select=isGroup,name,groupIcon&id=eq.%s", supabaseUrl, chatID)
+	req, err := http.NewRequest("GET", reqUrl, nil)
+	if err != nil {
+		return empty, err
+	}
+	req.Header.Set("apikey", supabaseKey)
+	req.Header.Set("Authorization", "Bearer "+supabaseKey)
+
+	resp, err := clientHttp.Do(req)
+	if err != nil {
+		return empty, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return empty, fmt.Errorf("failed to fetch chat metadata from Supabase (HTTP %d)", resp.StatusCode)
+	}
+
+	var results []ChatMetadata
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return empty, err
+	}
+
+	if len(results) == 0 {
+		return empty, fmt.Errorf("chat metadata not found for ID %s", chatID)
+	}
+
+	meta := results[0]
+
+	// 3. Update Cache (valid for 1 minute)
+	chatMetadataCacheMutex.Lock()
+	chatMetadataCache[chatID] = ChatMetadataCacheEntry{
+		Metadata:  meta,
+		ExpiresAt: time.Now().Add(1 * time.Minute),
+	}
+	chatMetadataCacheMutex.Unlock()
+
+	return meta, nil
+}
+
 // Write message log to DynamoDB table
 func saveMessageToDynamoDB(senderID, msgID string, timestamp int64, msg ChatMessage) error {
 	if dbClient == nil {
@@ -317,19 +480,21 @@ func saveMessageToDynamoDB(senderID, msgID string, timestamp int64, msg ChatMess
 	}
 
 	timestampStr := fmt.Sprintf("%d", timestamp)
+	ttlVal := time.Now().Add(48 * time.Hour).Unix()
+	ttlStr := fmt.Sprintf("%d", ttlVal)
 
 	input := &dynamodb.PutItemInput{
 		TableName: aws.String("ReelMessages"),
 		Item: map[string]types.AttributeValue{
-			"chatId":      &types.AttributeValueMemberS{Value: msg.ChatID},
-			"messageId":   &types.AttributeValueMemberS{Value: msgID},
-			"senderId":    &types.AttributeValueMemberS{Value: senderID},
-			"recipientId": &types.AttributeValueMemberS{Value: msg.RecipientID},
-			"text":        &types.AttributeValueMemberS{Value: msg.Text},
-			"mediaUrl":    &types.AttributeValueMemberS{Value: msg.MediaURL},
-			"mediaType":   &types.AttributeValueMemberS{Value: msg.MediaType},
-			"timestamp":   &types.AttributeValueMemberN{Value: timestampStr},
-			"status":      &types.AttributeValueMemberS{Value: "sent"},
+			"chatId":    &types.AttributeValueMemberS{Value: msg.ChatID},
+			"messageId": &types.AttributeValueMemberS{Value: msgID},
+			"senderId":  &types.AttributeValueMemberS{Value: senderID},
+			"text":      &types.AttributeValueMemberS{Value: msg.Text},
+			"mediaUrl":  &types.AttributeValueMemberS{Value: msg.MediaURL},
+			"mediaType": &types.AttributeValueMemberS{Value: msg.MediaType},
+			"timestamp": &types.AttributeValueMemberN{Value: timestampStr},
+			"status":    &types.AttributeValueMemberS{Value: "sent"},
+			"ttl":       &types.AttributeValueMemberN{Value: ttlStr},
 		},
 	}
 
@@ -337,36 +502,33 @@ func saveMessageToDynamoDB(senderID, msgID string, timestamp int64, msg ChatMess
 	return err
 }
 
-// Delete message from DynamoDB table
-func deleteMessageFromDynamoDB(chatID, messageID string) error {
-	if dbClient == nil {
-		return nil
-	}
-
-	input := &dynamodb.DeleteItemInput{
-		TableName: aws.String("ReelMessages"),
-		Key: map[string]types.AttributeValue{
-			"chatId":    &types.AttributeValueMemberS{Value: chatID},
-			"messageId": &types.AttributeValueMemberS{Value: messageID},
-		},
-	}
-
-	_, err := dbClient.DeleteItem(context.TODO(), input)
-	return err
+// Delete message from DynamoDB table (No-Op: messages are cleaned up automatically via TTL)
+func deleteMessageFromDynamoDB(chatID, messageID, userID string) error {
+	return nil
 }
 
 // Retrieve undelivered messages from DynamoDB
-func getMessagesFromDynamoDB(chatID string) ([]ChatMessage, error) {
+func getMessagesFromDynamoDB(chatID, since string) ([]ChatMessage, error) {
 	if dbClient == nil {
 		return []ChatMessage{}, nil
 	}
 
+	var keyCond string
+	exprValues := map[string]types.AttributeValue{
+		":chatId": &types.AttributeValueMemberS{Value: chatID},
+	}
+
+	if since != "" {
+		keyCond = "chatId = :chatId AND messageId > :since"
+		exprValues[":since"] = &types.AttributeValueMemberS{Value: since}
+	} else {
+		keyCond = "chatId = :chatId"
+	}
+
 	input := &dynamodb.QueryInput{
-		TableName:              aws.String("ReelMessages"),
-		KeyConditionExpression: aws.String("chatId = :chatId"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":chatId": &types.AttributeValueMemberS{Value: chatID},
-		},
+		TableName:                 aws.String("ReelMessages"),
+		KeyConditionExpression:    aws.String(keyCond),
+		ExpressionAttributeValues: exprValues,
 	}
 
 	result, err := dbClient.Query(context.TODO(), input)
@@ -453,7 +615,8 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages, err := getMessagesFromDynamoDB(chatID)
+	since := r.URL.Query().Get("since")
+	messages, err := getMessagesFromDynamoDB(chatID, since)
 	if err != nil {
 		log.Printf("Error querying messages from DynamoDB: %v", err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -465,8 +628,8 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(messages)
 }
 
-// Fetch recipient FCM token from Supabase and send push notification via FCM
-func sendFcmNotification(recipientID, senderID, messageText string) {
+// Fetch recipient FCM token and chat metadata from Supabase and send push notification via FCM
+func sendFcmNotification(recipientID, senderID, chatID, messageText string) {
 	if firebaseApp == nil || supabaseUrl == "" || supabaseKey == "" {
 		return
 	}
@@ -515,26 +678,43 @@ func sendFcmNotification(recipientID, senderID, messageText string) {
 		}
 	}
 
-	// 3. Send Notification via Firebase Cloud Messaging
+	// 3. Fetch Chat metadata to check if group
+	meta, err := getChatMetadata(chatID)
+	isGroup := false
+	chatName := ""
+	if err == nil {
+		isGroup = meta.IsGroup
+		chatName = meta.Name
+	}
+
+	// 4. Construct Notification Title & Body
+	title := senderName
+	body := messageText
+	if body == "" {
+		body = "📷 Sent a photo/video"
+	}
+
+	if isGroup && chatName != "" {
+		title = chatName
+		body = fmt.Sprintf("%s: %s", senderName, body)
+	}
+
+	// 5. Send Notification via Firebase Cloud Messaging
 	ctx := context.Background()
 	fcmClient, err := firebaseApp.Messaging(ctx)
 	if err != nil {
 		return
 	}
 
-	bodyText := messageText
-	if bodyText == "" {
-		bodyText = "📷 Sent a photo/video"
-	}
-
 	fcmMsg := &messaging.Message{
 		Token: pushToken,
 		Notification: &messaging.Notification{
-			Title: senderName,
-			Body:  bodyText,
+			Title: title,
+			Body:  body,
 		},
 		Data: map[string]string{
 			"click_action": "FLUTTER_NOTIFICATION_CLICK",
+			"chatId":       chatID,
 			"senderId":     senderID,
 		},
 	}

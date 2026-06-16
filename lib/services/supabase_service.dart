@@ -1093,6 +1093,56 @@ class SupabaseService {
     }
   }
 
+  // Create a new group chat with name, participants list, and optional group icon
+  Future<String> createGroupChat(String name, List<String> participantIds, File? iconFile) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      String? groupIconUrl;
+
+      // 1. Upload group icon if provided
+      if (iconFile != null) {
+        try {
+          groupIconUrl = await uploadToR2(iconFile);
+        } catch (r2Error) {
+          debugPrint('Group icon R2 upload failed, falling back to Supabase Storage: $r2Error');
+          final ext = iconFile.path.split('.').last.toLowerCase();
+          final fileName = 'group_icon_${DateTime.now().millisecondsSinceEpoch}.$ext';
+          final storagePath = 'group_icons/$fileName';
+          
+          await client.storage.from('media').upload(storagePath, iconFile);
+          groupIconUrl = getMediaUrl('media', storagePath);
+        }
+      }
+
+      // 2. Insert chat row
+      final chatInsert = await client.from('chats').insert({
+        'isGroup': true,
+        'name': name,
+        'groupIcon': groupIconUrl,
+        'creatorId': myId,
+        'disappearingDuration': 'off'
+      }).select('id').single();
+
+      final newChatId = chatInsert['id'] as String;
+
+      // 3. Add participants (current user + selected friends)
+      final allParticipants = {myId, ...participantIds}.toList();
+      final participantInserts = allParticipants.map((uid) => {
+        'chatId': newChatId,
+        'userId': uid,
+      }).toList();
+
+      await client.from('chat_participants').insert(participantInserts);
+
+      return newChatId;
+    } catch (e) {
+      debugPrint('Error creating group chat: $e');
+      rethrow;
+    }
+  }
+
   // Get active chats list for the current user with latest-message sorting and offline cache support
   Future<List<dynamic>> getActiveChats() async {
     final myId = currentUser?.id;
@@ -1105,16 +1155,48 @@ class SupabaseService {
 
       if (chatIds.isEmpty) return [];
 
-      // Fetch participants details (excluding current user) for each chat
-      final response = await client
-          .from('chat_participants')
-          .select('chatId, users(id, name, photoUrl)')
-          .inFilter('chatId', chatIds)
-          .neq('userId', myId);
+      // Fetch chats metadata (isGroup, name, groupIcon) for these chatIds
+      final chatsMetaResponse = await client
+          .from('chats')
+          .select('id, isGroup, name, groupIcon')
+          .inFilter('id', chatIds);
 
-      final chatsList = List<Map<String, dynamic>>.from(response);
-      for (final chat in chatsList) {
-        final cid = chat['chatId'] as String;
+      final List<dynamic> chatsList = [];
+
+      for (final chatMeta in chatsMetaResponse) {
+        final cid = chatMeta['id'] as String;
+        final isGroup = chatMeta['isGroup'] as bool? ?? false;
+
+        final chatData = <String, dynamic>{
+          'chatId': cid,
+          'isGroup': isGroup,
+        };
+
+        if (isGroup) {
+          chatData['chatName'] = chatMeta['name'] ?? 'Group Chat';
+          chatData['chatIcon'] = chatMeta['groupIcon'];
+          chatData['otherUserId'] = '';
+        } else {
+          // 1-on-1 chat: Fetch the other participant's profile
+          final otherParticipant = await client
+              .from('chat_participants')
+              .select('users(id, name, photoUrl)')
+              .eq('chatId', cid)
+              .neq('userId', myId)
+              .maybeSingle();
+
+          if (otherParticipant != null && otherParticipant['users'] != null) {
+            final user = otherParticipant['users'] as Map<String, dynamic>;
+            chatData['chatName'] = user['name'] ?? 'User';
+            chatData['chatIcon'] = user['photoUrl'];
+            chatData['otherUserId'] = user['id'];
+          } else {
+            // Fallback if other user is deleted or not found
+            chatData['chatName'] = 'Deleted User';
+            chatData['chatIcon'] = null;
+            chatData['otherUserId'] = '';
+          }
+        }
 
         // 1. Try loading the latest message from local JSON cache
         Map<String, dynamic>? latestMsg;
@@ -1131,7 +1213,7 @@ class SupabaseService {
         } catch (_) {}
 
         if (latestMsg != null) {
-          chat['latestMessageText'] = latestMsg['text'];
+          chatData['latestMessageText'] = latestMsg['text'];
           String? timeStr;
           if (latestMsg['createdAt'] != null) {
             timeStr = latestMsg['createdAt'] as String;
@@ -1139,47 +1221,22 @@ class SupabaseService {
             final ts = latestMsg['timestamp'] as int;
             timeStr = DateTime.fromMillisecondsSinceEpoch(ts).toIso8601String();
           }
-          chat['latestMessageTime'] = timeStr ?? '1970-01-01T00:00:00Z';
-          chat['latestMessageType'] = latestMsg['mediaType'];
+          chatData['latestMessageTime'] = timeStr ?? '1970-01-01T00:00:00Z';
+          chatData['latestMessageType'] = latestMsg['mediaType'];
 
-          // Compute hasUnread locally: last message sender is not me and received is false
+          // Compute hasUnread locally
           final isMe = latestMsg['senderId'] == myId;
           final isReceived = latestMsg['received'] as bool? ?? false;
-          chat['hasUnread'] = !isMe && !isReceived;
+          chatData['hasUnread'] = !isMe && !isReceived;
         } else {
-          // 2. Fallback: Query legacy Supabase messages table
-          final unreadCountResponse = await client
-              .from('messages')
-              .select('id')
-              .eq('chatId', cid)
-              .neq('senderId', myId)
-              .eq('received', false);
-          chat['hasUnread'] = unreadCountResponse.isNotEmpty;
-
-          try {
-            final legacyLatestMsg = await client
-                .from('messages')
-                .select('text, mediaType, createdAt')
-                .eq('chatId', cid)
-                .order('createdAt', ascending: false)
-                .limit(1)
-                .maybeSingle();
-
-            if (legacyLatestMsg != null) {
-              chat['latestMessageText'] = legacyLatestMsg['text'];
-              chat['latestMessageTime'] = legacyLatestMsg['createdAt'];
-              chat['latestMessageType'] = legacyLatestMsg['mediaType'];
-            } else {
-              chat['latestMessageText'] = null;
-              chat['latestMessageTime'] = '1970-01-01T00:00:00Z';
-              chat['latestMessageType'] = null;
-            }
-          } catch (_) {
-            chat['latestMessageText'] = null;
-            chat['latestMessageTime'] = '1970-01-01T00:00:00Z';
-            chat['latestMessageType'] = null;
-          }
+          // Fallback: Query legacy messages
+          chatData['latestMessageText'] = null;
+          chatData['latestMessageTime'] = '1970-01-01T00:00:00Z';
+          chatData['latestMessageType'] = null;
+          chatData['hasUnread'] = false;
         }
+
+        chatsList.add(chatData);
       }
 
       // Sort chats descending by the latest message's timestamp
@@ -1189,12 +1246,12 @@ class SupabaseService {
         return timeB.compareTo(timeA);
       });
 
-      // Cache the sorted active chats list locally for offline load fallback
+      // Cache active chats list locally for offline fallback
       await LocalStorageService().cacheJson('active_chats_$myId', chatsList);
 
       return chatsList;
     } catch (e) {
-      // Offline fallback: load cached active chats from local storage
+      // Offline fallback: load cached active chats
       try {
         final cached = await LocalStorageService().getCachedJson('active_chats_$myId');
         if (cached != null) {
@@ -1223,10 +1280,7 @@ class SupabaseService {
         if (cid == activeChatId) continue; // Skip active chat room as it manages its own history/cache
         if (!WebSocketService().isConnected) continue;
 
-        final history = await WebSocketService().fetchHistory(cid);
-        if (history.isEmpty) continue;
-
-        // Load existing local messages for this chat
+        // Load existing local messages for this chat first to get lastMessageId
         final file = File('${directory.path}/chats/${cid}_messages.json');
         List<Map<String, dynamic>> localMessages = [];
         if (await file.exists()) {
@@ -1236,6 +1290,18 @@ class SupabaseService {
             localMessages = decoded.map((m) => Map<String, dynamic>.from(m)).toList();
           } catch (_) {}
         }
+
+        String? lastMessageId;
+        if (localMessages.isNotEmpty) {
+          final nonPending = localMessages.where((m) => m['isPending'] != true).toList();
+          if (nonPending.isNotEmpty) {
+            nonPending.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+            lastMessageId = nonPending.last['id'];
+          }
+        }
+
+        final history = await WebSocketService().fetchHistory(cid, lastMessageId: lastMessageId);
+        if (history.isEmpty) continue;
 
         bool hasChanges = false;
         for (final msg in history) {
@@ -1259,16 +1325,6 @@ class SupabaseService {
             };
             localMessages.add(localMsg);
             hasChanges = true;
-
-            // Notify the server we received it so it gets deleted from DynamoDB
-            if (typedMsg['senderId'] != myId) {
-              WebSocketService().sendStatusUpdate(
-                chatId: cid,
-                messageId: msgId,
-                recipientId: typedMsg['senderId'],
-                status: 'received',
-              );
-            }
           }
         }
 

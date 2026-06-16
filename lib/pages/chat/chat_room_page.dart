@@ -21,12 +21,14 @@ class ChatRoomPage extends StatefulWidget {
   final String chatId;
   final String otherUserId;
   final String otherUserName;
+  final bool isGroup;
 
   const ChatRoomPage({
     super.key,
     required this.chatId,
     required this.otherUserId,
     required this.otherUserName,
+    this.isGroup = false,
   });
 
   @override
@@ -61,6 +63,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   Timer? _recordingTimer;
   DateTime? _recordingStartTime;
 
+  // Group chat details
+  String? _groupIcon;
+  Map<String, String> _participantNames = {};
+
   @override
   void initState() {
     super.initState();
@@ -68,7 +74,12 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     supabase.activeChatId = widget.chatId;
 
     _loadChatSettings();
-    _checkFollowingStatus();
+    if (widget.isGroup) {
+      _loadGroupDetails();
+      _loadGroupParticipants();
+    } else {
+      _checkFollowingStatus();
+    }
     
     // Connect to Go WebSocket backend and listen to the stream
     WebSocketService().connect();
@@ -272,7 +283,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   Future<void> _fetchUndeliveredHistory() async {
     try {
-      final history = await WebSocketService().fetchHistory(widget.chatId);
+      String? lastMessageId;
+      if (_localMessages.isNotEmpty) {
+        final nonPending = _localMessages.where((m) => m['isPending'] != true).toList();
+        if (nonPending.isNotEmpty) {
+          nonPending.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+          lastMessageId = nonPending.last['id'];
+        }
+      }
+
+      final history = await WebSocketService().fetchHistory(widget.chatId, lastMessageId: lastMessageId);
       if (history.isNotEmpty) {
         final supabase = context.read<SupabaseService>();
         final myId = supabase.currentUser?.id;
@@ -298,16 +318,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 'received': true,
               };
               _localMessages.add(localMsg);
-
-              // Notify the server we received it so it gets deleted from DynamoDB
-              if (typedMsg['senderId'] != myId) {
-                WebSocketService().sendStatusUpdate(
-                  chatId: widget.chatId,
-                  messageId: msgId,
-                  recipientId: typedMsg['senderId'],
-                  status: 'received',
-                );
-              }
             }
           }
 
@@ -483,6 +493,87 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         _isFollowing = following;
       });
     } catch (_) {}
+  }
+
+  Future<void> _loadGroupDetails() async {
+    if (!widget.isGroup) return;
+    final supabase = context.read<SupabaseService>();
+    try {
+      final res = await supabase.client
+          .from('chats')
+          .select('name, groupIcon')
+          .eq('id', widget.chatId)
+          .maybeSingle();
+      if (res != null && mounted) {
+        setState(() {
+          _groupIcon = res['groupIcon'] as String?;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading group details: $e');
+    }
+  }
+
+  Future<void> _loadGroupParticipants() async {
+    if (!widget.isGroup) return;
+    final supabase = context.read<SupabaseService>();
+    try {
+      final response = await supabase.client
+          .from('chat_participants')
+          .select('userId, users(name)')
+          .eq('chatId', widget.chatId);
+      
+      final Map<String, String> names = {};
+      for (final row in response) {
+        final uid = row['userId'] as String;
+        final user = row['users'] as Map<String, dynamic>?;
+        if (user != null) {
+          names[uid] = user['name'] as String? ?? 'User';
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _participantNames = names;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading group participants: $e');
+    }
+  }
+
+  Future<void> _leaveGroup() async {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (myId == null) return;
+
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator(color: Colors.cyanAccent)),
+      );
+
+      await supabase.client
+          .from('chat_participants')
+          .delete()
+          .eq('chatId', widget.chatId)
+          .eq('userId', myId);
+
+      if (mounted) {
+        Navigator.pop(context); // Pop loading dialog
+        Navigator.pop(context); // Exit chat room
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('You have left the group ${widget.otherUserName}')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Pop loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to leave group: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _toggleFollow() async {
@@ -773,6 +864,60 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     );
   }
 
+  void _showLeaveGroupConfirmation() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[950],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Leave Group', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to leave "${widget.otherUserName}"?', style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context); // Pop confirmation dialog
+              _leaveGroup();
+            },
+            child: const Text('Leave', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showGroupMembersDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[950],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('${widget.otherUserName} Members', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView(
+            shrinkWrap: true,
+            children: _participantNames.entries.map((entry) {
+              return ListTile(
+                leading: UserAvatar(userId: entry.key, radius: 16),
+                title: Text(entry.value, style: const TextStyle(color: Colors.white)),
+              );
+            }).toList(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close', style: TextStyle(color: Colors.cyanAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final supabase = context.read<SupabaseService>();
@@ -863,19 +1008,34 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         titleSpacing: 0,
         title: GestureDetector(
           onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ReelProfilePage(userId: widget.otherUserId),
-              ),
-            );
+            if (widget.isGroup) {
+              _showGroupMembersDialog();
+            } else {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ReelProfilePage(userId: widget.otherUserId),
+                ),
+              );
+            }
           },
           child: Row(
             children: [
-              UserAvatar(
-                userId: widget.otherUserId,
-                radius: 18,
-              ),
+              widget.isGroup
+                  ? CircleAvatar(
+                      radius: 18,
+                      backgroundColor: Colors.indigo.withOpacity(0.3),
+                      backgroundImage: _groupIcon != null && _groupIcon!.isNotEmpty
+                          ? NetworkImage(_groupIcon!)
+                          : null,
+                      child: _groupIcon != null && _groupIcon!.isNotEmpty
+                          ? null
+                          : const Icon(Icons.group, color: Colors.indigoAccent, size: 18),
+                    )
+                  : UserAvatar(
+                      userId: widget.otherUserId,
+                      radius: 18,
+                    ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -886,7 +1046,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
                     ),
                     Text(
-                      _disappearingDuration == 'off' ? 'tap settings for disappearing' : '⏰ disappearing: $_disappearingDuration',
+                      widget.isGroup
+                          ? '${_participantNames.length} members'
+                          : (_disappearingDuration == 'off' ? 'tap settings for disappearing' : '⏰ disappearing: $_disappearingDuration'),
                       style: const TextStyle(fontSize: 11, color: Colors.white54),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -910,53 +1072,80 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 _toggleBlock();
               } else if (value == 'report') {
                 _reportUser();
+              } else if (value == 'leave') {
+                _showLeaveGroupConfirmation();
+              } else if (value == 'members') {
+                _showGroupMembersDialog();
               }
             },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'friend',
-                child: Row(
-                  children: [
-                    Icon(_isFollowing ? Icons.person_remove : Icons.person_add, color: Colors.white70, size: 18),
-                    const SizedBox(width: 8),
-                    Text(_isFollowing ? 'Unfollow Friends' : 'Follow Friend', style: const TextStyle(color: Colors.white)),
+            itemBuilder: (context) => widget.isGroup
+                ? [
+                    const PopupMenuItem(
+                      value: 'members',
+                      child: Row(
+                        children: [
+                          Icon(Icons.people_outline, color: Colors.white70, size: 18),
+                          const SizedBox(width: 8),
+                          Text('Group Members', style: TextStyle(color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'leave',
+                      child: Row(
+                        children: [
+                          Icon(Icons.exit_to_app, color: Colors.redAccent, size: 18),
+                          const SizedBox(width: 8),
+                          Text('Leave Group', style: TextStyle(color: Colors.redAccent)),
+                        ],
+                      ),
+                    ),
+                  ]
+                : [
+                    PopupMenuItem(
+                      value: 'friend',
+                      child: Row(
+                        children: [
+                          Icon(_isFollowing ? Icons.person_remove : Icons.person_add, color: Colors.white70, size: 18),
+                          const SizedBox(width: 8),
+                          Text(_isFollowing ? 'Unfollow Friends' : 'Follow Friend', style: const TextStyle(color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'block',
+                      child: Row(
+                        children: [
+                          Icon(Icons.block, color: _isBlocked ? Colors.green : Colors.redAccent, size: 18),
+                          const SizedBox(width: 8),
+                          Text(_isBlocked ? 'Unblock Contact' : 'Block User', style: const TextStyle(color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'report',
+                      child: Row(
+                        children: [
+                          Icon(Icons.report_problem_outlined, color: Colors.amber, size: 18),
+                          const SizedBox(width: 8),
+                          Text('Report Abuse', style: TextStyle(color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuDivider(height: 1),
+                    const PopupMenuItem(
+                      value: 'off',
+                      child: Text('⏰ Disappearing: Off', style: TextStyle(color: Colors.white)),
+                    ),
+                    const PopupMenuItem(
+                      value: '24h',
+                      child: Text('⏰ Disappearing: 24 Hours', style: TextStyle(color: Colors.white)),
+                    ),
+                    const PopupMenuItem(
+                      value: '48h',
+                      child: Text('⏰ Disappearing: 48 Hours', style: TextStyle(color: Colors.white)),
+                    ),
                   ],
-                ),
-              ),
-              PopupMenuItem(
-                value: 'block',
-                child: Row(
-                  children: [
-                    Icon(Icons.block, color: _isBlocked ? Colors.green : Colors.redAccent, size: 18),
-                    const SizedBox(width: 8),
-                    Text(_isBlocked ? 'Unblock Contact' : 'Block User', style: const TextStyle(color: Colors.white)),
-                  ],
-                ),
-              ),
-              const PopupMenuItem(
-                value: 'report',
-                child: Row(
-                  children: [
-                    Icon(Icons.report_problem_outlined, color: Colors.amber, size: 18),
-                    const SizedBox(width: 8),
-                    Text('Report Abuse', style: TextStyle(color: Colors.white)),
-                  ],
-                ),
-              ),
-              const PopupMenuDivider(height: 1),
-              const PopupMenuItem(
-                value: 'off',
-                child: Text('⏰ Disappearing: Off', style: TextStyle(color: Colors.white)),
-              ),
-              const PopupMenuItem(
-                value: '24h',
-                child: Text('⏰ Disappearing: 24 Hours', style: TextStyle(color: Colors.white)),
-              ),
-              const PopupMenuItem(
-                value: '48h',
-                child: Text('⏰ Disappearing: 48 Hours', style: TextStyle(color: Colors.white)),
-              ),
-            ],
           ),
         ],
       ),
@@ -1107,6 +1296,21 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                         ],
                                       )
                                     else ...[
+                                      if (widget.isGroup && !isMe)
+                                        Align(
+                                          alignment: Alignment.topLeft,
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(bottom: 6),
+                                            child: Text(
+                                              _participantNames[msg['senderId']] ?? 'User',
+                                              style: TextStyle(
+                                                color: Colors.cyanAccent.shade400,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
                                       if ((mediaUrl != null || msg['mediaFilePath'] != null) && mediaType != null) ...[
                                         if (mediaType == 'audio')
                                           AudioMessagePlayer(

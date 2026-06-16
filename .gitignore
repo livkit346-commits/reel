@@ -50,4 +50,5 @@ backend/reel.service
 backend/reel-backend
 backend/reel-backend.exe
 backend/ec2_ip.txt
+backend/firebase-service-account.json
 

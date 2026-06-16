@@ -173,13 +173,17 @@ class WebSocketService {
     }
   }
 
-  // Fetch all undelivered history for a chat from DynamoDB
-  Future<List<dynamic>> fetchHistory(String chatId) async {
+  // Fetch history for a chat from DynamoDB since a specific message ID
+  Future<List<dynamic>> fetchHistory(String chatId, {String? lastMessageId}) async {
     try {
       final token = await _getAuthToken();
       if (token == null) throw Exception('User not authenticated');
 
-      final uri = Uri.parse('$httpUrl/history?chatId=$chatId&token=$token');
+      var urlStr = '$httpUrl/history?chatId=$chatId&token=$token';
+      if (lastMessageId != null && lastMessageId.isNotEmpty) {
+        urlStr += '&since=$lastMessageId';
+      }
+      final uri = Uri.parse(urlStr);
       final response = await http.get(uri).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
