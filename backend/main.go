@@ -539,7 +539,12 @@ func sendFcmNotification(recipientID, senderID, messageText string) {
 		},
 	}
 
-	_, _ = fcmClient.Send(ctx, fcmMsg)
+	respMsg, fcmErr := fcmClient.Send(ctx, fcmMsg)
+	if fcmErr != nil {
+		log.Printf("FCM notification error sending to %s: %v", recipientID, fcmErr)
+	} else {
+		log.Printf("FCM notification successfully sent: %s", respMsg)
+	}
 }
 
 // User Registration endpoint

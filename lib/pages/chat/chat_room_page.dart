@@ -207,7 +207,18 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           _sendingMessageIds.remove(tempId);
           return;
         }
-        mediaUrl = await supabase.uploadToR2(file);
+        
+        try {
+          mediaUrl = await supabase.uploadToR2(file);
+        } catch (r2Error) {
+          debugPrint('Chat media R2 upload failed, falling back to Supabase Storage: $r2Error');
+          final ext = file.path.split('.').last.toLowerCase();
+          final fileName = 'chat_media_${DateTime.now().millisecondsSinceEpoch}.$ext';
+          final storagePath = 'chats/${widget.chatId}/$fileName';
+          
+          await supabase.client.storage.from('media').upload(storagePath, file);
+          mediaUrl = supabase.getMediaUrl('media', storagePath);
+        }
         
         // Update URL locally
         setState(() {
