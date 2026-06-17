@@ -67,11 +67,20 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   String? _groupIcon;
   Map<String, String> _participantNames = {};
 
+  // Global static in-memory cache for all chats to achieve instant load times
+  static final Map<String, List<Map<String, dynamic>>> _inMemoryMsgCache = {};
+
   @override
   void initState() {
     super.initState();
     final supabase = context.read<SupabaseService>();
     supabase.activeChatId = widget.chatId;
+
+    // Try to load from in-memory cache first for instant rendering
+    if (_inMemoryMsgCache.containsKey(widget.chatId)) {
+      _localMessages = List<Map<String, dynamic>>.from(_inMemoryMsgCache[widget.chatId]!);
+      _isLoadingLocal = false;
+    }
 
     _loadChatSettings();
     if (widget.isGroup) {
@@ -294,9 +303,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
       final history = await WebSocketService().fetchHistory(widget.chatId, lastMessageId: lastMessageId);
       if (history.isNotEmpty) {
-        final supabase = context.read<SupabaseService>();
-        final myId = supabase.currentUser?.id;
-
         setState(() {
           for (final msg in history) {
             final typedMsg = Map<String, dynamic>.from(msg);
@@ -304,6 +310,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
             final exists = _localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
             if (!exists) {
+              if (_mergeIncomingUserMessage(typedMsg)) {
+                continue;
+              }
               final localMsg = {
                 'id': msgId,
                 'messageId': msgId,
@@ -381,6 +390,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       final exists = _localMessages.any((m) => m['id'] == messageId || m['messageId'] == messageId);
       if (exists) return;
 
+      if (_mergeIncomingUserMessage(event)) return;
+
       setState(() {
         final localMsg = {
           'id': messageId,
@@ -434,6 +445,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   }
 
   Future<void> _saveLocalMessages() async {
+    // Update static in-memory cache
+    _inMemoryMsgCache[widget.chatId] = List<Map<String, dynamic>>.from(_localMessages);
+
     try {
       final directory = await getApplicationDocumentsDirectory();
       final dir = Directory('${directory.path}/chats');
@@ -445,34 +459,300 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     } catch (_) {}
   }
 
-  void _mergeMessages(List<Map<String, dynamic>> streamMessages) {
-    bool changed = false;
-    for (final streamMsg in streamMessages) {
-      final msgId = streamMsg['id'];
-      final existingIndex = _localMessages.indexWhere((m) => m['id'] == msgId);
-      if (existingIndex == -1) {
-        _localMessages.add(streamMsg);
-        changed = true;
-      } else {
-        // Update values if changed (e.g. received status)
-        final existing = _localMessages[existingIndex];
-        if (existing['received'] != streamMsg['received'] ||
-            existing['mediaUrl'] != streamMsg['mediaUrl'] ||
-            existing['text'] != streamMsg['text']) {
-          _localMessages[existingIndex] = streamMsg;
-          changed = true;
+  bool _mergeIncomingUserMessage(Map<String, dynamic> msg) {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (msg['senderId'] != myId) return false;
+
+    final msgId = msg['messageId'] ?? msg['id'];
+    if (msgId == null) return false;
+
+    // Normalize text helper to handle null vs empty string difference
+    String normalizeText(dynamic val) {
+      if (val == null) return '';
+      return val.toString().trim();
+    }
+
+    final msgText = normalizeText(msg['text']);
+    final msgMediaUrl = msg['mediaUrl']?.toString();
+
+    // Look for a local pending message with matching content
+    for (int i = 0; i < _localMessages.length; i++) {
+      final local = _localMessages[i];
+      if (local['isPending'] == true) {
+        final localText = normalizeText(local['text']);
+        final localMediaUrl = local['mediaUrl']?.toString();
+        final hasLocalFilePath = local['mediaFilePath'] != null;
+
+        bool match = false;
+        if (msgMediaUrl != null) {
+          // If the incoming message has a media URL, check if local has same media URL or local path
+          if (msgMediaUrl == localMediaUrl || hasLocalFilePath) {
+            match = true;
+          }
+        } else {
+          // Otherwise compare normalized text content
+          if (msgText.isNotEmpty && msgText == localText) {
+            match = true;
+          }
+        }
+
+        if (match) {
+          setState(() {
+            _localMessages[i]['id'] = msgId;
+            _localMessages[i]['messageId'] = msgId;
+            _localMessages[i]['isPending'] = false;
+            if (msg['timestamp'] != null) {
+              _localMessages[i]['createdAt'] =
+                  DateTime.fromMillisecondsSinceEpoch(msg['timestamp']).toIso8601String();
+            } else if (msg['createdAt'] != null) {
+              _localMessages[i]['createdAt'] = msg['createdAt'];
+            }
+          });
+          _saveLocalMessages();
+          return true;
         }
       }
     }
+    return false;
+  }
 
-    if (changed) {
-      _localMessages.sort((a, b) {
-        final aTime = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
-        final bTime = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
-        return aTime.compareTo(bTime);
-      });
-      _saveLocalMessages();
+
+
+  Widget _buildReplyBubble(Map<String, dynamic> msg, String? myId) {
+    if (msg['replyToMessageId'] == null) return const SizedBox.shrink();
+
+    final replyId = msg['replyToMessageId'];
+    final repliedMsg = _localMessages.firstWhere(
+      (m) => m['id'] == replyId || m['messageId'] == replyId,
+      orElse: () => {},
+    );
+
+    final isRepliedEmpty = repliedMsg.isEmpty;
+    
+    // Sender Name
+    String senderName = 'Message';
+    if (!isRepliedEmpty) {
+      final rSenderId = repliedMsg['senderId'];
+      if (rSenderId == myId) {
+        senderName = 'You';
+      } else if (widget.isGroup) {
+        senderName = _participantNames[rSenderId] ?? 'User';
+      } else {
+        senderName = widget.otherUserName;
+      }
     }
+
+    // Left line and text colors
+    final bool isRepliedMe = !isRepliedEmpty && repliedMsg['senderId'] == myId;
+    final Color themeColor = isRepliedMe
+        ? const Color(0xFF00A884) // WhatsApp green for "You"
+        : const Color(0xFF34B7F1); // Nice sky blue for others
+
+    // Content preview
+    Widget contentWidget;
+    if (isRepliedEmpty) {
+      contentWidget = const Text(
+        'Replied message',
+        style: TextStyle(color: Colors.white60, fontSize: 12),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    } else {
+      final String? rText = repliedMsg['text'] as String?;
+      final String? rMediaUrl = repliedMsg['mediaUrl'] as String?;
+      final String? rMediaFilePath = repliedMsg['mediaFilePath'] as String?;
+      final String? rMediaType = repliedMsg['mediaType'] as String?;
+
+      if ((rMediaUrl != null || rMediaFilePath != null) && rMediaType != null) {
+        IconData iconData = Icons.insert_drive_file;
+        String mediaText = 'Media';
+        if (rMediaType == 'image') {
+          iconData = Icons.photo;
+          mediaText = 'Photo';
+        } else if (rMediaType == 'video') {
+          iconData = Icons.videocam;
+          mediaText = 'Video';
+        } else if (rMediaType == 'audio') {
+          iconData = Icons.mic;
+          mediaText = 'Audio';
+        }
+
+        contentWidget = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(iconData, size: 14, color: Colors.white54),
+            const SizedBox(width: 4),
+            Text(
+              mediaText,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            if (rText != null && rText.trim().isNotEmpty) ...[
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  rText,
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ],
+        );
+      } else {
+        contentWidget = Text(
+          rText ?? '',
+          style: const TextStyle(color: Colors.white70, fontSize: 12),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      }
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.18),
+        borderRadius: BorderRadius.circular(8),
+        border: Border(left: BorderSide(color: themeColor, width: 4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            senderName,
+            style: TextStyle(
+              color: themeColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 3),
+          contentWidget,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReplyComposePreview(String? myId) {
+    if (_replyingToMessage == null) return const SizedBox.shrink();
+
+    final msg = _replyingToMessage!;
+    final rSenderId = msg['senderId'];
+    
+    // Sender Name
+    String senderName = 'Message';
+    if (rSenderId == myId) {
+      senderName = 'You';
+    } else if (widget.isGroup) {
+      senderName = _participantNames[rSenderId] ?? 'User';
+    } else {
+      senderName = widget.otherUserName;
+    }
+
+    final bool isRepliedMe = rSenderId == myId;
+    final Color themeColor = isRepliedMe
+        ? const Color(0xFF00A884)
+        : const Color(0xFF34B7F1);
+
+    // Content preview
+    Widget contentWidget;
+    final String? rText = msg['text'] as String?;
+    final String? rMediaUrl = msg['mediaUrl'] as String?;
+    final String? rMediaFilePath = msg['mediaFilePath'] as String?;
+    final String? rMediaType = msg['mediaType'] as String?;
+
+    if ((rMediaUrl != null || rMediaFilePath != null) && rMediaType != null) {
+      IconData iconData = Icons.insert_drive_file;
+      String mediaText = 'Media';
+      if (rMediaType == 'image') {
+        iconData = Icons.photo;
+        mediaText = 'Photo';
+      } else if (rMediaType == 'video') {
+        iconData = Icons.videocam;
+        mediaText = 'Video';
+      } else if (rMediaType == 'audio') {
+        iconData = Icons.mic;
+        mediaText = 'Audio';
+      }
+
+      contentWidget = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(iconData, size: 14, color: Colors.white54),
+          const SizedBox(width: 4),
+          Text(
+            mediaText,
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+          if (rText != null && rText.trim().isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                rText,
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ],
+      );
+    } else {
+      contentWidget = Text(
+        rText ?? '',
+        style: const TextStyle(color: Colors.white70, fontSize: 12),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(12),
+        border: Border(left: BorderSide(color: themeColor, width: 4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Replying to $senderName',
+                  style: TextStyle(
+                    color: themeColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                contentWidget,
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                _replyingToMessage = null;
+              });
+            },
+            child: const Icon(Icons.close, color: Colors.white54, size: 20),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadChatSettings() async {
@@ -821,48 +1101,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     );
   }
 
-  void _showMessageOptions(BuildContext context, Map<String, dynamic> msg, bool isMe) {
-    final isDeleted = msg['isDeleted'] as bool? ?? false;
-    if (isDeleted) return; 
 
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          decoration: BoxDecoration(
-            color: const Color(0xFF121212),
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (msg['text'] != null && msg['text'].toString().isNotEmpty)
-                ListTile(
-                  leading: const Icon(Icons.copy, color: Colors.white),
-                  title: const Text('Copy Text', style: TextStyle(color: Colors.white)),
-                  onTap: () {
-                    Clipboard.setData(ClipboardData(text: msg['text']));
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
-                  },
-                ),
-              ListTile(
-                leading: const Icon(Icons.delete, color: Colors.redAccent),
-                title: const Text('Delete Message', style: TextStyle(color: Colors.redAccent)),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showDeleteOptions(context, msg, isMe);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
 
   void _showLeaveGroupConfirmation() {
     showDialog(
@@ -922,9 +1161,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   Widget build(BuildContext context) {
     final supabase = context.read<SupabaseService>();
     final myId = supabase.currentUser?.id;
-    final primaryColor = Theme.of(context).primaryColor;
-
-
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -1255,7 +1491,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                               decoration: BoxDecoration(
                                 color: isDeleted 
                                     ? Colors.transparent 
-                                    : (isMe ? const Color(0xFFFE2C55) : const Color(0xFF262626)),
+                                    : (isMe ? const Color(0xFF7E1C31) : const Color(0xFF262626)),
                                 border: isDeleted ? Border.all(color: Colors.white24, width: 1) : null,
                                 borderRadius: BorderRadius.only(
                                   topLeft: const Radius.circular(20),
@@ -1271,21 +1507,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     if (msg['replyToMessageId'] != null)
-                                      Container(
-                                        padding: const EdgeInsets.all(8),
-                                        margin: const EdgeInsets.only(bottom: 6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.black26,
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: const Border(left: BorderSide(color: Color(0xFF00A884), width: 4)),
-                                        ),
-                                        child: const Text(
-                                          'Replied message',
-                                          style: TextStyle(color: Colors.white70, fontSize: 12),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
+                                      _buildReplyBubble(msg, myId),
                                     if (isDeleted)
                                       const Row(
                                         mainAxisSize: MainAxisSize.min,
@@ -1418,43 +1640,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             child: Column(
               children: [
                 if (_replyingToMessage != null)
-                  Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E1E),
-                      borderRadius: BorderRadius.circular(12),
-                      border: const Border(left: BorderSide(color: Color(0xFF00A884), width: 4)),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Replying to message', style: TextStyle(color: Color(0xFF00A884), fontWeight: FontWeight.bold, fontSize: 13)),
-                              const SizedBox(height: 4),
-                              Text(
-                                _replyingToMessage!['text']?.toString() ?? 'Media message',
-                                style: const TextStyle(color: Colors.white70, fontSize: 13),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                        GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _replyingToMessage = null;
-                            });
-                          },
-                          child: const Icon(Icons.close, color: Colors.white54, size: 20),
-                        ),
-                      ],
-                    ),
-                  ),
+                  _buildReplyComposePreview(myId),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   color: const Color(0xFF121212),
