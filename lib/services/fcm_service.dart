@@ -1,5 +1,7 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:reel/main.dart';
+import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/services/supabase_service.dart';
 
 // Background message handler (Must be a top-level function)
@@ -16,9 +18,11 @@ class FcmService {
 
   final FirebaseMessaging _messaging = FirebaseMessaging.instance;
   bool _initialized = false;
+  late SupabaseService _supabaseService;
 
   Future<void> init(SupabaseService supabaseService) async {
     if (_initialized) return;
+    _supabaseService = supabaseService;
 
     try {
       // 1. Request notifications permissions
@@ -60,14 +64,53 @@ class FcmService {
         }
       });
 
-      // 6. Handle app opened from a notification click
+      // 6. Handle app opened from a notification click (background state)
       FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
         debugPrint('App opened from notification: ${message.data}');
+        final chatId = message.data['chatId'];
+        if (chatId != null) {
+          _navigateToChat(chatId);
+        }
       });
+
+      // 7. Check if the app was opened from a terminated state via a notification click
+      RemoteMessage? initialMessage = await _messaging.getInitialMessage();
+      if (initialMessage != null) {
+        debugPrint('App opened from terminated state via notification: ${initialMessage.data}');
+        final chatId = initialMessage.data['chatId'];
+        if (chatId != null) {
+          Future.delayed(const Duration(milliseconds: 1000), () {
+            _navigateToChat(chatId);
+          });
+        }
+      }
 
       _initialized = true;
     } catch (e) {
       debugPrint('FcmService initialization error: $e');
+    }
+  }
+
+  void _navigateToChat(String chatId) async {
+    try {
+      final details = await _supabaseService.getChatDetails(chatId);
+      if (details == null) {
+        debugPrint('Could not resolve chat details for chatId: $chatId');
+        return;
+      }
+
+      navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (context) => ChatRoomPage(
+            chatId: details['chatId'],
+            otherUserId: details['otherUserId'],
+            otherUserName: details['chatName'],
+            isGroup: details['isGroup'],
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error navigating to chat page: $e');
     }
   }
 

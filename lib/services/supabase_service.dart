@@ -321,7 +321,7 @@ class SupabaseService {
   // Upload any file directly to Cloudflare R2 via our Supabase Edge Function
   Future<String> uploadToR2(File file) async {
     try {
-      final filename = file.path.split('/').last;
+      final filename = file.path.split(RegExp(r'[/\\]')).last;
       
       // Determine contentType
       String contentType = 'application/octet-stream';
@@ -1143,6 +1143,51 @@ class SupabaseService {
     }
   }
 
+  // Fetch a single chat's details (chatName, chatIcon, isGroup, otherUserId) for routing
+  Future<Map<String, dynamic>?> getChatDetails(String chatId) async {
+    final myId = currentUser?.id;
+    if (myId == null) return null;
+
+    try {
+      final chatMeta = await client.from('chats').select('id, isGroup, name, groupIcon').eq('id', chatId).maybeSingle();
+      if (chatMeta == null) return null;
+
+      final isGroup = chatMeta['isGroup'] as bool? ?? false;
+      final data = <String, dynamic>{
+        'chatId': chatId,
+        'isGroup': isGroup,
+      };
+
+      if (isGroup) {
+        data['chatName'] = chatMeta['name'] ?? 'Group Chat';
+        data['chatIcon'] = chatMeta['groupIcon'];
+        data['otherUserId'] = '';
+      } else {
+        final otherParticipant = await client
+            .from('chat_participants')
+            .select('users(id, name, photoUrl)')
+            .eq('chatId', chatId)
+            .neq('userId', myId)
+            .maybeSingle();
+
+        if (otherParticipant != null && otherParticipant['users'] != null) {
+          final user = otherParticipant['users'] as Map<String, dynamic>;
+          data['chatName'] = user['name'] ?? 'User';
+          data['chatIcon'] = user['photoUrl'];
+          data['otherUserId'] = user['id'];
+        } else {
+          data['chatName'] = 'User';
+          data['chatIcon'] = null;
+          data['otherUserId'] = '';
+        }
+      }
+      return data;
+    } catch (e) {
+      debugPrint('Error getting chat details: $e');
+      return null;
+    }
+  }
+
   // Get active chats list for the current user with latest-message sorting and offline cache support
   Future<List<dynamic>> getActiveChats() async {
     final myId = currentUser?.id;
@@ -1442,7 +1487,7 @@ class SupabaseService {
           mediaUrl = await uploadToR2(mediaFile);
         } catch (r2Error) {
           debugPrint('Chat media R2 upload failed, falling back to Supabase: $r2Error');
-          final fileName = '${DateTime.now().millisecondsSinceEpoch}_${mediaFile.path.split('/').last}';
+          final fileName = '${DateTime.now().millisecondsSinceEpoch}_${mediaFile.path.split(RegExp(r'[/\\]')).last}';
           final storagePath = 'chat_media/$chatId/$fileName';
           await client.storage.from('media').upload(storagePath, mediaFile);
           mediaUrl = getMediaUrl('media', storagePath);

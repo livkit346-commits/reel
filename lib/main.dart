@@ -39,6 +39,8 @@ void main() async {
   );
 }
 
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 class ReelApp extends StatelessWidget {
   final bool showMainScreen;
   const ReelApp({super.key, required this.showMainScreen});
@@ -46,6 +48,7 @@ class ReelApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       title: 'Reel',
       debugShowCheckedModeBanner: false,
       theme: ReelTheme.darkTheme,
