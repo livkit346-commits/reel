@@ -561,6 +561,17 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
   void _showMemberOptions(Map<String, dynamic> member) {
     if (member['id'] == _myId) return;
 
+    final creatorId = _groupDetails?['creatorId'];
+    final isMeAdmin = _isCurrentUserAdmin;
+    final targetIsAdmin = _metadata['admins']?.contains(member['id']) == true;
+    final isTargetCreator = member['id'] == creatorId;
+    
+    final canManageAdmins = isMeAdmin && !isTargetCreator;
+    
+    final canRemove = _isCreator
+        ? !isTargetCreator
+        : (isMeAdmin && !targetIsAdmin && !isTargetCreator);
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -652,17 +663,6 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                     }
                   },
                 ),
-                final creatorId = _groupDetails?['creatorId'];
-                final isMeAdmin = _isCurrentUserAdmin;
-                final targetIsAdmin = _metadata['admins']?.contains(member['id']) == true;
-                final isTargetCreator = member['id'] == creatorId;
-                
-                final canManageAdmins = isMeAdmin && !isTargetCreator;
-                
-                final canRemove = _isCreator
-                    ? !isTargetCreator
-                    : (isMeAdmin && !targetIsAdmin && !isTargetCreator);
-
                 if (canManageAdmins)
                   _buildSheetActionTile(
                     icon: targetIsAdmin ? Icons.admin_panel_settings_outlined : Icons.admin_panel_settings,
