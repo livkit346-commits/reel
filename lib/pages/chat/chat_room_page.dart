@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/services/websocket_service.dart';
+import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/chat/cached_media_view.dart';
 import 'package:reel/pages/chat/forward_message_page.dart';
