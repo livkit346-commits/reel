@@ -84,15 +84,45 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   bool _isStickerPickerActive = false;
   Map<String, dynamic> _metadata = {};
   String? _creatorId;
+  bool _hasInitialScrolled = false;
+  DateTime? _lastSeenTime;
 
   // Global static in-memory cache for all chats to achieve instant load times
   static final Map<String, List<Map<String, dynamic>>> _inMemoryMsgCache = {};
+
+  Future<void> _loadLastSeenTime() async {
+    final timeStr = await LocalStorageService().getCachedJson('last_seen_time_${widget.chatId}') as String?;
+    if (timeStr != null) {
+      if (mounted) {
+        setState(() {
+          _lastSeenTime = DateTime.tryParse(timeStr);
+        });
+      }
+    }
+  }
+
+  Future<void> _saveLastSeenTime() async {
+    await LocalStorageService().cacheJson('last_seen_time_${widget.chatId}', DateTime.now().toIso8601String());
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
 
   @override
   void initState() {
     super.initState();
     final supabase = context.read<SupabaseService>();
     supabase.activeChatId = widget.chatId;
+    _loadLastSeenTime();
 
     // Try to load from in-memory cache first for instant rendering
     if (_inMemoryMsgCache.containsKey(widget.chatId)) {
@@ -130,6 +160,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   @override
   void dispose() {
+    _saveLastSeenTime();
     final supabase = context.read<SupabaseService>();
     if (supabase.activeChatId == widget.chatId) {
       supabase.activeChatId = null;
@@ -435,6 +466,13 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         _localMessages.add(localMsg);
       });
       _saveLocalMessages();
+
+      if (_scrollController.hasClients) {
+        final isNearBottom = _scrollController.position.maxScrollExtent - _scrollController.offset < 200;
+        if (isNearBottom) {
+          _scrollToBottom();
+        }
+      }
 
       if (senderId != myId) {
         WebSocketService().sendStatusUpdate(
@@ -1134,6 +1172,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       _localMessages.add(tempMsg);
     });
     await _saveLocalMessages();
+    _scrollToBottom();
 
     // Trigger background attempt
     _attemptSendPendingMessage(tempMsg);
@@ -1169,6 +1208,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       _localMessages.add(tempMsg);
     });
     await _saveLocalMessages();
+    _scrollToBottom();
 
     // Trigger background attempt
     _attemptSendPendingMessage(tempMsg);
@@ -1679,7 +1719,32 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (_scrollController.hasClients) {
-                    _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+                    if (!_hasInitialScrolled) {
+                      _hasInitialScrolled = true;
+                      
+                      int unreadIndex = -1;
+                      if (_lastSeenTime != null) {
+                        for (int i = 0; i < displayMessages.length; i++) {
+                          final msg = displayMessages[i];
+                          final createdAtStr = msg['createdAt'] as String?;
+                          if (createdAtStr != null) {
+                            final parsed = DateTime.tryParse(createdAtStr);
+                            if (parsed != null && parsed.isAfter(_lastSeenTime!) && msg['senderId'] != myId) {
+                              unreadIndex = i;
+                              break;
+                            }
+                          }
+                        }
+                      }
+                      
+                      if (unreadIndex != -1) {
+                        final maxScroll = _scrollController.position.maxScrollExtent;
+                        final targetOffset = (unreadIndex / displayMessages.length) * maxScroll;
+                        _scrollController.jumpTo(targetOffset.clamp(0.0, maxScroll));
+                      } else {
+                        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+                      }
+                    }
                   }
                 });
 
@@ -1965,24 +2030,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       : Row(
                           children: [
                             GestureDetector(
-                              onTap: _isBlocked ? null : () {
-                                setState(() {
-                                  _isStickerPickerActive = !_isStickerPickerActive;
-                                });
-                                if (_isStickerPickerActive) {
-                                  FocusScope.of(context).unfocus();
-                                }
-                              },
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8),
-                                child: Icon(
-                                  _isStickerPickerActive ? Icons.keyboard : Icons.sticky_note_2_outlined,
-                                  color: _isStickerPickerActive ? const Color(0xFF00BFFF) : Colors.white70,
-                                  size: 26,
-                                ),
-                              ),
-                            ),
-                            GestureDetector(
                               onTap: _isBlocked ? null : _sendVideo,
                               child: const Padding(
                                 padding: EdgeInsets.symmetric(horizontal: 8),
@@ -2022,6 +2069,24 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                           border: InputBorder.none,
                                           isDense: true,
                                           contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                                        ),
+                                      ),
+                                    ),
+                                    GestureDetector(
+                                      onTap: _isBlocked ? null : () {
+                                        setState(() {
+                                          _isStickerPickerActive = !_isStickerPickerActive;
+                                        });
+                                        if (_isStickerPickerActive) {
+                                          FocusScope.of(context).unfocus();
+                                        }
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                                        child: Icon(
+                                          _isStickerPickerActive ? Icons.keyboard : Icons.emoji_emotions_outlined,
+                                          color: _isStickerPickerActive ? const Color(0xFF00BFFF) : Colors.white70,
+                                          size: 24,
                                         ),
                                       ),
                                     ),
@@ -2243,6 +2308,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       _isStickerPickerActive = false;
     });
     await _saveLocalMessages();
+    _scrollToBottom();
 
     _attemptSendStickerPendingMessage(tempMsg);
   }
