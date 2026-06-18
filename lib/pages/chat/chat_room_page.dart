@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 import 'dart:convert';
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -1468,7 +1469,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       value: '48h',
                       child: Text('⏰ Disappearing: 48 Hours', style: TextStyle(color: Colors.white)),
                     ),
-                  ],
+                  ];
+            },
           ),
         ],
       ),
