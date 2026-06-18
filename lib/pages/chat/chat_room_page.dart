@@ -13,9 +13,11 @@ import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/chat/cached_media_view.dart';
 import 'package:reel/pages/chat/forward_message_page.dart';
 import 'package:reel/pages/chat/chat_video_viewer_page.dart';
+import 'package:reel/pages/chat/group_info_page.dart';
 import 'package:swipe_to/swipe_to.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:reel/theme/reel_theme.dart';
 
 class ChatRoomPage extends StatefulWidget {
   final String chatId;
@@ -546,8 +548,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     // Left line and text colors
     final bool isRepliedMe = !isRepliedEmpty && repliedMsg['senderId'] == myId;
     final Color themeColor = isRepliedMe
-        ? const Color(0xFF00A884) // WhatsApp green for "You"
-        : const Color(0xFF34B7F1); // Nice sky blue for others
+        ? ReelTheme.accentColor
+        : ReelTheme.oceanBlue;
 
     // Content preview
     Widget contentWidget;
@@ -612,28 +614,41 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.18),
-        borderRadius: BorderRadius.circular(8),
-        border: Border(left: BorderSide(color: themeColor, width: 4)),
+        color: themeColor.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border(
+          left: BorderSide(color: themeColor, width: 3.5),
+          top: BorderSide(color: themeColor.withOpacity(0.15)),
+          right: BorderSide(color: themeColor.withOpacity(0.15)),
+          bottom: BorderSide(color: themeColor.withOpacity(0.15)),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            senderName,
-            style: TextStyle(
-              color: themeColor,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          Row(
+            children: [
+              Icon(Icons.reply_rounded, color: themeColor.withOpacity(0.8), size: 14),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  senderName,
+                  style: TextStyle(
+                    color: themeColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 3),
+          const SizedBox(height: 4),
           contentWidget,
         ],
       ),
@@ -658,8 +673,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     final bool isRepliedMe = rSenderId == myId;
     final Color themeColor = isRepliedMe
-        ? const Color(0xFF00A884)
-        : const Color(0xFF34B7F1);
+        ? ReelTheme.accentColor
+        : ReelTheme.oceanBlue;
 
     // Content preview
     Widget contentWidget;
@@ -713,44 +728,69 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       );
     }
 
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1E1E),
-        borderRadius: BorderRadius.circular(12),
-        border: Border(left: BorderSide(color: themeColor, width: 4)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Replying to $senderName',
-                  style: TextStyle(
-                    color: themeColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                contentWidget,
-              ],
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.03),
+            borderRadius: BorderRadius.circular(16),
+            border: Border(
+              left: BorderSide(color: themeColor, width: 4),
+              top: BorderSide(color: Colors.white.withOpacity(0.08)),
+              right: BorderSide(color: Colors.white.withOpacity(0.08)),
+              bottom: BorderSide(color: Colors.white.withOpacity(0.08)),
             ),
           ),
-          GestureDetector(
-            onTap: () {
-              setState(() {
-                _replyingToMessage = null;
-              });
-            },
-            child: const Icon(Icons.close, color: Colors.white54, size: 20),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.reply_rounded, color: themeColor, size: 16),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Replying to $senderName',
+                          style: TextStyle(
+                            color: themeColor,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    contentWidget,
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _replyingToMessage = null;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white70, size: 16),
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1245,7 +1285,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         title: GestureDetector(
           onTap: () {
             if (widget.isGroup) {
-              _showGroupMembersDialog();
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => GroupInfoPage(chatId: widget.chatId),
+                ),
+              ).then((_) {
+                _loadGroupDetails();
+                _loadGroupParticipants();
+                _loadChatSettings();
+              });
             } else {
               Navigator.push(
                 context,
@@ -1299,7 +1348,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             icon: const Icon(Icons.more_vert, color: Colors.white),
             color: Colors.grey[900],
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            onSelected: (value) {
+            onSelected: (value) async {
               if (value == 'off' || value == '24h' || value == '48h') {
                 _updateDisappearingSettings(value);
               } else if (value == 'friend') {
@@ -1310,33 +1359,71 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 _reportUser();
               } else if (value == 'leave') {
                 _showLeaveGroupConfirmation();
-              } else if (value == 'members') {
-                _showGroupMembersDialog();
+              } else if (value == 'members' || value == 'info') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => GroupInfoPage(chatId: widget.chatId),
+                  ),
+                ).then((_) {
+                  _loadGroupDetails();
+                  _loadGroupParticipants();
+                  _loadChatSettings();
+                });
+              } else if (value == 'mute') {
+                await context.read<SupabaseService>().toggleMuteChat(widget.chatId);
+                setState(() {});
               }
             },
-            itemBuilder: (context) => widget.isGroup
-                ? [
-                    const PopupMenuItem(
-                      value: 'members',
-                      child: Row(
-                        children: [
-                          Icon(Icons.people_outline, color: Colors.white70, size: 18),
-                          const SizedBox(width: 8),
-                          Text('Group Members', style: TextStyle(color: Colors.white)),
-                        ],
+            itemBuilder: (context) {
+              final supabase = context.read<SupabaseService>();
+              final isMuted = supabase.isChatMuted(widget.chatId);
+
+              return widget.isGroup
+                  ? [
+                      const PopupMenuItem(
+                        value: 'info',
+                        child: Row(
+                          children: [
+                            Icon(Icons.info_outline, color: Colors.white70, size: 18),
+                            SizedBox(width: 8),
+                            Text('Group Info', style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
                       ),
-                    ),
-                    const PopupMenuItem(
-                      value: 'leave',
-                      child: Row(
-                        children: [
-                          Icon(Icons.exit_to_app, color: Colors.redAccent, size: 18),
-                          const SizedBox(width: 8),
-                          Text('Leave Group', style: TextStyle(color: Colors.redAccent)),
-                        ],
+                      PopupMenuItem(
+                        value: 'mute',
+                        child: Row(
+                          children: [
+                            Icon(isMuted ? Icons.volume_up : Icons.volume_off, color: Colors.white70, size: 18),
+                            const SizedBox(width: 8),
+                            Text(isMuted ? 'Unmute Notifications' : 'Mute Notifications', style: const TextStyle(color: Colors.white)),
+                          ],
+                        ),
                       ),
-                    ),
-                  ]
+                      const PopupMenuItem(
+                        value: 'off',
+                        child: Text('⏰ Disappearing: Off', style: TextStyle(color: Colors.white)),
+                      ),
+                      const PopupMenuItem(
+                        value: '24h',
+                        child: Text('⏰ Disappearing: 24 Hours', style: TextStyle(color: Colors.white)),
+                      ),
+                      const PopupMenuItem(
+                        value: '48h',
+                        child: Text('⏰ Disappearing: 48 Hours', style: TextStyle(color: Colors.white)),
+                      ),
+                      const PopupMenuItem(
+                        value: 'leave',
+                        child: Row(
+                          children: [
+                            Icon(Icons.exit_to_app, color: Colors.redAccent, size: 18),
+                            SizedBox(width: 8),
+                            Text('Leave Group', style: TextStyle(color: Colors.redAccent)),
+                          ],
+                        ),
+                      ),
+                    ]
                 : [
                     PopupMenuItem(
                       value: 'friend',

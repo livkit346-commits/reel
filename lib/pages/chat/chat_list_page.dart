@@ -262,7 +262,7 @@ class _ChatListPageState extends State<ChatListPage> {
                         final otherUserId = chatMap['otherUserId'] as String? ?? '';
 
                         final hasUnread = chatMap['hasUnread'] as bool? ?? false;
-
+                        final isMuted = context.read<SupabaseService>().isChatMuted(chatId);
                         final isSelected = _selectedChats.contains(chatId);
 
                         return ListTile(
@@ -353,6 +353,10 @@ class _ChatListPageState extends State<ChatListPage> {
                                     ],
                                   ),
                                 ),
+                              if (isMuted) ...[
+                                const SizedBox(width: 8),
+                                const Icon(Icons.volume_off, color: Colors.white30, size: 14),
+                              ],
                               const SizedBox(width: 8),
                               const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
                             ],

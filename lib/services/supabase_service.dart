@@ -1855,4 +1855,72 @@ class SupabaseService {
       }
     }
   }
+
+  // Local JSON-based mute notification persistence
+  Set<String> _mutedChatIds = {};
+  bool _mutedChatsLoaded = false;
+
+  Future<void> _loadMutedChats() async {
+    if (_mutedChatsLoaded) return;
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/muted_chats.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final list = jsonDecode(content) as List<dynamic>;
+        _mutedChatIds = list.map((e) => e.toString()).toSet();
+      }
+    } catch (e) {
+      debugPrint('Error loading muted chats: $e');
+    }
+    _mutedChatsLoaded = true;
+  }
+
+  Future<void> _saveMutedChats() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/muted_chats.json');
+      await file.writeAsString(jsonEncode(_mutedChatIds.toList()));
+    } catch (e) {
+      debugPrint('Error saving muted chats: $e');
+    }
+  }
+
+  bool isChatMuted(String chatId) {
+    if (!_mutedChatsLoaded) {
+      _loadMutedChats();
+    }
+    return _mutedChatIds.contains(chatId);
+  }
+
+  Future<void> toggleMuteChat(String chatId) async {
+    await _loadMutedChats();
+    if (_mutedChatIds.contains(chatId)) {
+      _mutedChatIds.remove(chatId);
+    } else {
+      _mutedChatIds.add(chatId);
+    }
+    await _saveMutedChats();
+  }
+
+  // Group Management Methods
+  Future<void> updateGroupName(String chatId, String name) async {
+    await client.from('chats').update({'name': name}).eq('id', chatId);
+  }
+
+  Future<void> updateGroupIcon(String chatId, File iconFile) async {
+    final iconUrl = await uploadToR2(iconFile);
+    await client.from('chats').update({'groupIcon': iconUrl}).eq('id', chatId);
+  }
+
+  Future<void> addGroupParticipant(String chatId, String userId) async {
+    await client.from('chat_participants').insert({
+      'chatId': chatId,
+      'userId': userId,
+    });
+  }
+
+  Future<void> removeGroupParticipant(String chatId, String userId) async {
+    await client.from('chat_participants').delete().eq('chatId', chatId).eq('userId', userId);
+  }
 }
