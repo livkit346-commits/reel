@@ -1200,10 +1200,10 @@ class SupabaseService {
 
       if (chatIds.isEmpty) return [];
 
-      // Fetch chats metadata (isGroup, name, groupIcon) for these chatIds
+      // Fetch chats metadata (isGroup, name, groupIcon, createdAt) for these chatIds
       final chatsMetaResponse = await client
           .from('chats')
-          .select('id, isGroup, name, groupIcon')
+          .select('id, isGroup, name, groupIcon, createdAt')
           .inFilter('id', chatIds);
 
       final List<dynamic> chatsList = [];
@@ -1276,7 +1276,7 @@ class SupabaseService {
         } else {
           // Fallback: Query legacy messages
           chatData['latestMessageText'] = null;
-          chatData['latestMessageTime'] = '1970-01-01T00:00:00Z';
+          chatData['latestMessageTime'] = chatMeta['createdAt'] ?? '1970-01-01T00:00:00Z';
           chatData['latestMessageType'] = null;
           chatData['hasUnread'] = false;
         }

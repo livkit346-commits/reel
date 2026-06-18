@@ -43,7 +43,8 @@ class _ChatListPageState extends State<ChatListPage> {
     
     // Listen to real-time incoming messages
     _wsSubscription = WebSocketService().messageStream.listen((event) async {
-      if (event['type'] == 'message') {
+      final type = event['type'] ?? 'message';
+      if (type == 'message') {
         final supabase = context.read<SupabaseService>();
         await supabase.saveIncomingMessage(event);
         if (mounted) {
@@ -329,7 +330,9 @@ class _ChatListPageState extends State<ChatListPage> {
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              if (chatMap['latestMessageTime'] != null && chatMap['latestMessageTime'] != '1970-01-01T00:00:00Z') ...[
+                              if ((chatMap['latestMessageText'] != null || chatMap['latestMessageType'] != null) &&
+                                  chatMap['latestMessageTime'] != null &&
+                                  chatMap['latestMessageTime'] != '1970-01-01T00:00:00Z') ...[
                                 Text(
                                   _formatMessageTime(chatMap['latestMessageTime']?.toString()),
                                   style: const TextStyle(color: Colors.white30, fontSize: 11),
