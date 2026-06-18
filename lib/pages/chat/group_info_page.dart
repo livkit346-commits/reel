@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/widgets/user_avatar.dart';
@@ -25,6 +27,8 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
   String? _myId;
   bool _isMuted = false;
   String _disappearingDuration = 'off';
+  Map<String, dynamic> _metadata = {};
+  bool _mediaVisibility = true;
 
   final ImagePicker _picker = ImagePicker();
 
@@ -71,14 +75,273 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
         }
       }
 
+      // 3. Fetch media visibility setting
+      final mediaVis = await LocalStorageService().getCachedJson('media_visibility_${widget.chatId}');
+      
+      // 4. Fetch group metadata JSON from Storage
+      final metadata = await supabase.getGroupMetadata(widget.chatId);
+
       setState(() {
         _members = loadedMembers;
+        _mediaVisibility = mediaVis != false;
+        _metadata = metadata;
         _loading = false;
       });
     } catch (e) {
       debugPrint('Error loading GroupInfo details: $e');
       setState(() => _loading = false);
     }
+  }
+
+  bool get _isCurrentUserAdmin {
+    if (_myId == null) return false;
+    if (_isCreator) return true;
+    final admins = _metadata['admins'] as List<dynamic>? ?? [];
+    return admins.contains(_myId);
+  }
+
+  bool get _canEditGroupInfo {
+    if (_myId == null) return false;
+    if (_isCreator) return true;
+    final editGroupInfo = _metadata['restrictions']?['editGroupInfo'] ?? 'all';
+    if (editGroupInfo == 'all') return true;
+    final admins = _metadata['admins'] as List<dynamic>? ?? [];
+    return admins.contains(_myId);
+  }
+
+  Future<void> _saveMetadata() async {
+    setState(() => _loading = true);
+    try {
+      await context.read<SupabaseService>().saveGroupMetadata(widget.chatId, _metadata);
+      await _loadAllDetails();
+    } catch (e) {
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update group settings: $e')));
+    }
+  }
+
+  void _editDescription() {
+    final controller = TextEditingController(text: _metadata['description'] as String? ?? '');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF161618),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: const BorderSide(color: Colors.white12)),
+        title: const Text('Edit Description', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: controller,
+          maxLines: 4,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Enter group description',
+            hintStyle: const TextStyle(color: Colors.white30),
+            filled: true,
+            fillColor: Colors.white10,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.cyanAccent,
+              foregroundColor: Colors.black,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              final newDesc = controller.text.trim();
+              Navigator.pop(context);
+              _metadata['description'] = newDesc;
+              await _saveMetadata();
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDescriptionCard() {
+    final desc = _metadata['description'] as String? ?? '';
+    final canEdit = _canEditGroupInfo;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.02),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.06), width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'GROUP DESCRIPTION',
+                style: TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+              ),
+              if (canEdit)
+                IconButton(
+                  icon: const Icon(Icons.edit, color: Colors.cyanAccent, size: 18),
+                  onPressed: _editDescription,
+                  constraints: const BoxConstraints(),
+                  padding: EdgeInsets.zero,
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            desc.isNotEmpty ? desc : 'No description added yet.',
+            style: TextStyle(color: desc.isNotEmpty ? Colors.white70 : Colors.white24, fontSize: 14, height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMediaVisibilityCard() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.02),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.06), width: 1.2),
+      ),
+      child: SwitchListTile(
+        activeColor: Colors.cyanAccent,
+        activeTrackColor: Colors.cyanAccent.withOpacity(0.3),
+        inactiveTrackColor: Colors.white10,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+        title: const Text(
+          'Save Media to Gallery',
+          style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+        ),
+        subtitle: const Text(
+          'Automatically save downloaded photos and videos to phone gallery.',
+          style: TextStyle(color: Colors.white38, fontSize: 11),
+        ),
+        secondary: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.indigoAccent.withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.photo_library_outlined, color: Colors.indigoAccent, size: 20),
+        ),
+        value: _mediaVisibility,
+        onChanged: (val) async {
+          await LocalStorageService().cacheJson('media_visibility_${widget.chatId}', val);
+          setState(() {
+            _mediaVisibility = val;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildInviteLinkCard() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.02),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.06), width: 1.2),
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+        leading: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.cyanAccent.withOpacity(0.1),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(Icons.link_rounded, color: Colors.cyanAccent, size: 20),
+        ),
+        title: const Text(
+          'Share Group Invite Link',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+        ),
+        subtitle: const Text(
+          'Copy invite link to clipboard',
+          style: TextStyle(color: Colors.white38, fontSize: 11),
+        ),
+        trailing: const Icon(Icons.content_copy_rounded, size: 16, color: Colors.cyanAccent),
+        onTap: () {
+          final inviteLink = 'https://reel.app/join/${widget.chatId}';
+          Clipboard.setData(ClipboardData(text: inviteLink));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Group invite link copied to clipboard!'),
+              backgroundColor: Color(0xFF0D0D10),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildGroupControlsCard() {
+    if (!_isCurrentUserAdmin) return const SizedBox.shrink();
+    final editGroupInfo = _metadata['restrictions']?['editGroupInfo'] ?? 'all';
+    final sendMessages = _metadata['restrictions']?['sendMessages'] ?? 'all';
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.02),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.06), width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'GROUP CONTROLS (ADMIN ONLY)',
+            style: TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+          ),
+          const SizedBox(height: 12),
+          SwitchListTile(
+            activeColor: Colors.cyanAccent,
+            activeTrackColor: Colors.cyanAccent.withOpacity(0.3),
+            inactiveTrackColor: Colors.white10,
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Only Admins can Edit Info', style: TextStyle(color: Colors.white, fontSize: 14)),
+            subtitle: const Text('Allows editing group name, icon, description, and disappearing messages settings.', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            value: editGroupInfo == 'admins',
+            onChanged: (val) async {
+              _metadata['restrictions'] ??= {};
+              _metadata['restrictions']['editGroupInfo'] = val ? 'admins' : 'all';
+              await _saveMetadata();
+            },
+          ),
+          const Divider(color: Colors.white10, height: 16),
+          SwitchListTile(
+            activeColor: Colors.cyanAccent,
+            activeTrackColor: Colors.cyanAccent.withOpacity(0.3),
+            inactiveTrackColor: Colors.white10,
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Only Admins can Send Messages', style: TextStyle(color: Colors.white, fontSize: 14)),
+            subtitle: const Text('Restricts sending messages in the chat to group admins only.', style: TextStyle(color: Colors.white38, fontSize: 11)),
+            value: sendMessages == 'admins',
+            onChanged: (val) async {
+              _metadata['restrictions'] ??= {};
+              _metadata['restrictions']['sendMessages'] = val ? 'admins' : 'all';
+              await _saveMetadata();
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   bool get _isCreator => _groupDetails != null && _groupDetails!['creatorId'] == _myId;
@@ -389,7 +652,45 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                     }
                   },
                 ),
-                if (_isCreator)
+                final creatorId = _groupDetails?['creatorId'];
+                final isMeAdmin = _isCurrentUserAdmin;
+                final targetIsAdmin = _metadata['admins']?.contains(member['id']) == true;
+                final isTargetCreator = member['id'] == creatorId;
+                
+                final canManageAdmins = isMeAdmin && !isTargetCreator;
+                
+                final canRemove = _isCreator
+                    ? !isTargetCreator
+                    : (isMeAdmin && !targetIsAdmin && !isTargetCreator);
+
+                if (canManageAdmins)
+                  _buildSheetActionTile(
+                    icon: targetIsAdmin ? Icons.admin_panel_settings_outlined : Icons.admin_panel_settings,
+                    label: targetIsAdmin ? 'Dismiss as Admin' : 'Make Group Admin',
+                    color: Colors.deepPurpleAccent,
+                    onTap: () async {
+                      Navigator.pop(context);
+                      setState(() => _loading = true);
+                      try {
+                        _metadata['admins'] ??= [];
+                        final admins = List<String>.from(_metadata['admins']);
+                        if (targetIsAdmin) {
+                          admins.remove(member['id']);
+                        } else {
+                          admins.add(member['id']);
+                        }
+                        _metadata['admins'] = admins;
+                        await context.read<SupabaseService>().saveGroupMetadata(widget.chatId, _metadata);
+                        await _loadAllDetails();
+                      } catch (e) {
+                        setState(() => _loading = false);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Failed to update admin status: $e')),
+                        );
+                      }
+                    },
+                  ),
+                if (canRemove)
                   _buildSheetActionTile(
                     icon: Icons.person_remove_outlined,
                     label: 'Remove from Group',
@@ -774,7 +1075,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                                   ? null
                                   : const Icon(Icons.group_rounded, size: 55, color: Colors.cyanAccent),
                             ),
-                            if (_isCreator)
+                            if (_canEditGroupInfo)
                               Positioned(
                                 bottom: 4,
                                 right: 4,
@@ -811,7 +1112,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            if (_isCreator) ...[
+                            if (_canEditGroupInfo) ...[
                               const SizedBox(width: 8),
                               IconButton(
                                 icon: const Icon(Icons.edit, color: Colors.cyanAccent, size: 20),
@@ -836,6 +1137,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _buildDescriptionCard(),
                   Row(
                     children: [
                       Expanded(
@@ -908,6 +1210,9 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                       ),
                     ],
                   ),
+                  _buildMediaVisibilityCard(),
+                  _buildInviteLinkCard(),
+                  _buildGroupControlsCard(),
                   const SizedBox(height: 24),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -918,7 +1223,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                           'PARTICIPANTS (${_members.length})',
                           style: const TextStyle(color: Colors.white38, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
                         ),
-                        if (_isCreator)
+                        if (_isCurrentUserAdmin)
                           GestureDetector(
                             onTap: _showAddParticipantsPicker,
                             child: Container(
@@ -985,20 +1290,33 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                                     style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8),
                                   ),
                                 )
-                              : (member['id'] == _myId
+                              : (_metadata['admins']?.contains(member['id']) == true
                                   ? Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                       decoration: BoxDecoration(
-                                        color: Colors.cyanAccent.withOpacity(0.15),
+                                        color: Colors.deepPurpleAccent.withOpacity(0.15),
                                         borderRadius: BorderRadius.circular(20),
-                                        border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
+                                        border: Border.all(color: Colors.deepPurpleAccent.withOpacity(0.3)),
                                       ),
                                       child: const Text(
-                                        'YOU',
-                                        style: TextStyle(color: Colors.cyanAccent, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8),
+                                        'ADMIN',
+                                        style: TextStyle(color: Colors.deepPurpleAccent, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8),
                                       ),
                                     )
-                                  : const Icon(Icons.arrow_forward_ios_rounded, size: 12, color: Colors.white24)),
+                                  : (member['id'] == _myId
+                                      ? Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                          decoration: BoxDecoration(
+                                            color: Colors.cyanAccent.withOpacity(0.15),
+                                            borderRadius: BorderRadius.circular(20),
+                                            border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
+                                          ),
+                                          child: const Text(
+                                            'YOU',
+                                            style: TextStyle(color: Colors.cyanAccent, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.8),
+                                          ),
+                                        )
+                                      : const Icon(Icons.arrow_forward_ios_rounded, size: 12, color: Colors.white24))),
                           onTap: () => _showMemberOptions(member),
                         );
                       },

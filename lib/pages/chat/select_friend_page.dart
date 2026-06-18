@@ -40,38 +40,7 @@ class _SelectFriendPageState extends State<SelectFriendPage> {
     }
   }
 
-  void _showGroupComingSoonDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[950],
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.group_add, color: Colors.cyanAccent),
-            SizedBox(width: 8),
-            Text(
-              'Create Group',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
-        content: const Text(
-          'Group messaging is currently in development and will be available in a future update!',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'OK',
-              style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+
 
   Future<void> _startChat(String otherUserId, String otherUserName) async {
     final supabase = context.read<SupabaseService>();
@@ -120,6 +89,110 @@ class _SelectFriendPageState extends State<SelectFriendPage> {
         );
       }
     }
+  }
+
+  void _showJoinGroupDialog() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF161618),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: const BorderSide(color: Colors.white12)),
+        title: const Text('Join Group', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: controller,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Enter Group ID or invite link',
+            hintStyle: const TextStyle(color: Colors.white30),
+            filled: true,
+            fillColor: Colors.white10,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.cyanAccent,
+              foregroundColor: Colors.black,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              final input = controller.text.trim();
+              if (input.isNotEmpty) {
+                Navigator.pop(context); // Pop dialog
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) => const Center(child: CircularProgressIndicator(color: Colors.cyanAccent)),
+                );
+                
+                try {
+                  final supabase = context.read<SupabaseService>();
+                  String chatId = input;
+                  if (chatId.contains('/join/')) {
+                    chatId = chatId.split('/join/').last;
+                  }
+                  chatId = chatId.split('?').first.replaceAll('/', '').trim();
+
+                  await supabase.joinGroup(chatId);
+                  
+                  if (mounted) {
+                    Navigator.pop(context); // Pop loading dialog
+                    
+                    final chatData = await supabase.client
+                        .from('chats')
+                        .select('name')
+                        .eq('id', chatId)
+                        .maybeSingle();
+                    final groupName = chatData != null ? chatData['name'] as String? ?? 'Group' : 'Group';
+
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ChatRoomPage(
+                          chatId: chatId,
+                          otherUserId: '',
+                          otherUserName: groupName,
+                          isGroup: true,
+                        ),
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    Navigator.pop(context); // Pop loading dialog
+                    showDialog(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        backgroundColor: const Color(0xFF161618),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white10)),
+                        title: const Text('Failed to Join', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        content: Text(
+                          e.toString().contains('Exception:') ? e.toString().split('Exception:').last.trim() : 'Invalid Group ID or Link.',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('OK', style: TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                }
+              }
+            },
+            child: const Text('Join'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -185,6 +258,20 @@ class _SelectFriendPageState extends State<SelectFriendPage> {
                       context,
                       MaterialPageRoute(builder: (context) => const AddFriendsPage()),
                     );
+                  },
+                ),
+                // Option: Join Group via Link/ID
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.cyanAccent.withOpacity(0.1),
+                    child: const Icon(Icons.link_rounded, color: Colors.cyanAccent),
+                  ),
+                  title: const Text(
+                    'Join Group via Link/ID',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                  ),
+                  onTap: () {
+                    _showJoinGroupDialog();
                   },
                 ),
                 const Divider(color: Colors.white10, height: 24, thickness: 1),

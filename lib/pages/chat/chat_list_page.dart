@@ -8,6 +8,7 @@ import 'package:reel/pages/add/add_friends_page.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/services/websocket_service.dart';
+import 'package:reel/pages/chat/group_info_page.dart';
 import 'package:reel/widgets/user_avatar.dart';
 
 class ChatListPage extends StatefulWidget {
@@ -357,8 +358,150 @@ class _ChatListPageState extends State<ChatListPage> {
                                 const SizedBox(width: 8),
                                 const Icon(Icons.volume_off, color: Colors.white30, size: 14),
                               ],
-                              const SizedBox(width: 8),
-                              const Icon(Icons.arrow_forward_ios, size: 14, color: Colors.white24),
+                              const SizedBox(width: 4),
+                              PopupMenuButton<String>(
+                                icon: const Icon(Icons.more_vert, color: Colors.white38, size: 20),
+                                color: Colors.grey[950],
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  side: const BorderSide(color: Colors.white10),
+                                ),
+                                onSelected: (value) async {
+                                  if (value == 'info') {
+                                    if (isGroup) {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => GroupInfoPage(chatId: chatId),
+                                        ),
+                                      ).then((_) => _loadChats());
+                                    } else {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) => ReelProfilePage(userId: otherUserId),
+                                        ),
+                                      ).then((_) => _loadChats());
+                                    }
+                                  } else if (value == 'mute') {
+                                    await context.read<SupabaseService>().toggleMuteChat(chatId);
+                                    _loadChats();
+                                  } else if (value == 'clear') {
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        backgroundColor: const Color(0xFF161618),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: const BorderSide(color: Colors.white12)),
+                                        title: const Text('Clear Chat?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                        content: const Text('Are you sure you want to clear all messages for this chat? This cannot be undone.', style: TextStyle(color: Colors.white70)),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(context, false),
+                                            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                          ),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                                            onPressed: () => Navigator.pop(context, true),
+                                            child: const Text('Clear'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm == true) {
+                                      await context.read<SupabaseService>().clearChatLocally(chatId);
+                                      ChatRoomPage.clearCacheFor(chatId);
+                                      _loadChats();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Chat cleared successfully!')),
+                                      );
+                                    }
+                                  } else if (value == 'leave') {
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        backgroundColor: const Color(0xFF161618),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: const BorderSide(color: Colors.white12)),
+                                        title: const Text('Leave Group?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                        content: const Text('Are you sure you want to leave this group?', style: TextStyle(color: Colors.white70)),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(context, false),
+                                            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                          ),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                                            onPressed: () => Navigator.pop(context, true),
+                                            child: const Text('Leave'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm == true) {
+                                      final myId = context.read<SupabaseService>().currentUser?.id;
+                                      if (myId != null) {
+                                        await context.read<SupabaseService>().removeGroupParticipant(chatId, myId);
+                                        await context.read<SupabaseService>().clearChatLocally(chatId);
+                                        ChatRoomPage.clearCacheFor(chatId);
+                                        _loadChats();
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Left group successfully!')),
+                                        );
+                                      }
+                                    }
+                                  } else if (value == 'delete') {
+                                    final confirm = await showDialog<bool>(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        backgroundColor: const Color(0xFF161618),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: const BorderSide(color: Colors.white12)),
+                                        title: const Text('Delete Chat?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                        content: const Text('Are you sure you want to delete this chat? This will clear all messages and hide the chat.', style: TextStyle(color: Colors.white70)),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(context, false),
+                                            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                          ),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+                                            onPressed: () => Navigator.pop(context, true),
+                                            child: const Text('Delete'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm == true) {
+                                      await context.read<SupabaseService>().clearChatLocally(chatId);
+                                      ChatRoomPage.clearCacheFor(chatId);
+                                      final myId = context.read<SupabaseService>().currentUser?.id;
+                                      if (myId != null) {
+                                        await context.read<SupabaseService>().removeGroupParticipant(chatId, myId);
+                                      }
+                                      _loadChats();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Chat deleted successfully!')),
+                                      );
+                                    }
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  PopupMenuItem(
+                                    value: 'info',
+                                    child: Text(isGroup ? 'Group Info' : 'View Profile', style: const TextStyle(color: Colors.white)),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'mute',
+                                    child: Text(isMuted ? 'Unmute Notifications' : 'Mute Notifications', style: const TextStyle(color: Colors.white)),
+                                  ),
+                                  const PopupMenuItem(
+                                    value: 'clear',
+                                    child: Text('Clear Chat', style: TextStyle(color: Colors.white)),
+                                  ),
+                                  PopupMenuItem(
+                                    value: isGroup ? 'leave' : 'delete',
+                                    child: Text(isGroup ? 'Leave Group' : 'Delete Chat', style: const TextStyle(color: Colors.redAccent)),
+                                  ),
+                                ],
+                              ),
                             ],
                           ),
                           onTap: () {

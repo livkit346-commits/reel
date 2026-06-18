@@ -34,6 +34,10 @@ class ChatRoomPage extends StatefulWidget {
     this.isGroup = false,
   });
 
+  static void clearCacheFor(String chatId) {
+    _ChatRoomPageState._inMemoryMsgCache.remove(chatId);
+  }
+
   @override
   State<ChatRoomPage> createState() => _ChatRoomPageState();
 }
@@ -69,6 +73,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   // Group chat details
   String? _groupIcon;
   Map<String, String> _participantNames = {};
+  
+  // Search & Restrictions states
+  bool _isSearchActive = false;
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+  bool _canSendMessages = true;
+  Map<String, dynamic> _metadata = {};
+  String? _creatorId;
 
   // Global static in-memory cache for all chats to achieve instant load times
   static final Map<String, List<Map<String, dynamic>>> _inMemoryMsgCache = {};
@@ -124,6 +136,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     _recordingTimer?.cancel();
     _audioRecorder.dispose();
     _messageController.dispose();
+    _searchController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -431,8 +444,23 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       if (await file.exists()) {
         final content = await file.readAsString();
         final List<dynamic> decoded = jsonDecode(content);
+        
+        final clearTimestampStr = await LocalStorageService().getCachedJson('clear_timestamp_${widget.chatId}') as String?;
+        final clearTimestamp = clearTimestampStr != null ? DateTime.tryParse(clearTimestampStr) : null;
+
         setState(() {
-          _localMessages = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+          _localMessages = decoded.map((e) => Map<String, dynamic>.from(e)).where((m) {
+            if (clearTimestamp != null) {
+              final createdAtStr = m['createdAt'] as String?;
+              if (createdAtStr != null) {
+                final parsed = DateTime.tryParse(createdAtStr);
+                if (parsed != null && parsed.isBefore(clearTimestamp)) {
+                  return false;
+                }
+              }
+            }
+            return true;
+          }).toList();
           _isLoadingLocal = false;
         });
       } else {
@@ -822,16 +850,42 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     try {
       final res = await supabase.client
           .from('chats')
-          .select('name, groupIcon')
+          .select('name, groupIcon, creatorId')
           .eq('id', widget.chatId)
           .maybeSingle();
       if (res != null && mounted) {
         setState(() {
           _groupIcon = res['groupIcon'] as String?;
+          _creatorId = res['creatorId'] as String?;
         });
+        await _loadGroupMetadata();
       }
     } catch (e) {
       debugPrint('Error loading group details: $e');
+    }
+  }
+
+  Future<void> _loadGroupMetadata() async {
+    if (!widget.isGroup) return;
+    final supabase = context.read<SupabaseService>();
+    try {
+      final metadata = await supabase.getGroupMetadata(widget.chatId);
+      if (mounted) {
+        setState(() {
+          _metadata = metadata;
+          final myId = supabase.currentUser?.id;
+          final sendMessagesVal = metadata['restrictions']?['sendMessages'] ?? 'all';
+          if (sendMessagesVal == 'admins') {
+            final creatorId = _creatorId;
+            final admins = metadata['admins'] as List<dynamic>? ?? [];
+            _canSendMessages = (myId == creatorId || admins.contains(myId));
+          } else {
+            _canSendMessages = true;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading group metadata in chat room: $e');
     }
   }
 
@@ -1198,6 +1252,46 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     );
   }
 
+  void _confirmClearChat() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF161618),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24), side: const BorderSide(color: Colors.white12)),
+        title: const Text('Clear Chat?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: const Text('Are you sure you want to clear all messages in this chat? This cannot be undone.', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              Navigator.pop(context);
+              setState(() {
+                _isLoadingLocal = true;
+              });
+              await context.read<SupabaseService>().clearChatLocally(widget.chatId);
+              setState(() {
+                _localMessages.clear();
+                _isLoadingLocal = false;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Chat cleared successfully!')),
+              );
+            },
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final supabase = context.read<SupabaseService>();
@@ -1283,68 +1377,104 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           : AppBar(
               backgroundColor: Colors.grey[950],
         titleSpacing: 0,
-        title: GestureDetector(
-          onTap: () {
-            if (widget.isGroup) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => GroupInfoPage(chatId: widget.chatId),
+        title: _isSearchActive
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white, fontSize: 16),
+                decoration: const InputDecoration(
+                  hintText: 'Search messages...',
+                  hintStyle: TextStyle(color: Colors.white30),
+                  border: InputBorder.none,
                 ),
-              ).then((_) {
-                _loadGroupDetails();
-                _loadGroupParticipants();
-                _loadChatSettings();
-              });
-            } else {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ReelProfilePage(userId: widget.otherUserId),
-                ),
-              );
-            }
-          },
-          child: Row(
-            children: [
-              widget.isGroup
-                  ? CircleAvatar(
-                      radius: 18,
-                      backgroundColor: Colors.indigo.withOpacity(0.3),
-                      backgroundImage: _groupIcon != null && _groupIcon!.isNotEmpty
-                          ? NetworkImage(_groupIcon!)
-                          : null,
-                      child: _groupIcon != null && _groupIcon!.isNotEmpty
-                          ? null
-                          : const Icon(Icons.group, color: Colors.indigoAccent, size: 18),
-                    )
-                  : UserAvatar(
-                      userId: widget.otherUserId,
-                      radius: 18,
-                    ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                onChanged: (value) {
+                  setState(() {
+                    _searchQuery = value;
+                  });
+                },
+              )
+            : GestureDetector(
+                onTap: () {
+                  if (widget.isGroup) {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => GroupInfoPage(chatId: widget.chatId),
+                      ),
+                    ).then((_) {
+                      _loadGroupDetails();
+                      _loadGroupParticipants();
+                      _loadChatSettings();
+                    });
+                  } else {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => ReelProfilePage(userId: widget.otherUserId),
+                      ),
+                    );
+                  }
+                },
+                child: Row(
                   children: [
-                    Text(
-                      widget.otherUserName,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                    ),
-                    Text(
-                      widget.isGroup
-                          ? '${_participantNames.length} members'
-                          : (_disappearingDuration == 'off' ? 'tap settings for disappearing' : '⏰ disappearing: $_disappearingDuration'),
-                      style: const TextStyle(fontSize: 11, color: Colors.white54),
-                      overflow: TextOverflow.ellipsis,
+                    widget.isGroup
+                        ? CircleAvatar(
+                            radius: 18,
+                            backgroundColor: Colors.indigo.withOpacity(0.3),
+                            backgroundImage: _groupIcon != null && _groupIcon!.isNotEmpty
+                                ? NetworkImage(_groupIcon!)
+                                : null,
+                            child: _groupIcon != null && _groupIcon!.isNotEmpty
+                                ? null
+                                : const Icon(Icons.group, color: Colors.indigoAccent, size: 18),
+                          )
+                        : UserAvatar(
+                            userId: widget.otherUserId,
+                            radius: 18,
+                          ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.otherUserName,
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          Text(
+                            widget.isGroup
+                                ? '${_participantNames.length} members'
+                                : (_disappearingDuration == 'off' ? 'tap settings for disappearing' : '⏰ disappearing: $_disappearingDuration'),
+                            style: const TextStyle(fontSize: 11, color: Colors.white54),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
-            ],
-          ),
-        ),
         actions: [
+          if (_isSearchActive)
+            IconButton(
+              icon: const Icon(Icons.close, color: Colors.white),
+              onPressed: () {
+                setState(() {
+                  _isSearchActive = false;
+                  _searchQuery = '';
+                  _searchController.clear();
+                });
+              },
+            )
+          else
+            IconButton(
+              icon: const Icon(Icons.search, color: Colors.white),
+              onPressed: () {
+                setState(() {
+                  _isSearchActive = true;
+                });
+              },
+            ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             color: Colors.grey[900],
@@ -1374,6 +1504,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               } else if (value == 'mute') {
                 await context.read<SupabaseService>().toggleMuteChat(widget.chatId);
                 setState(() {});
+              } else if (value == 'clear') {
+                _confirmClearChat();
               }
             },
             itemBuilder: (context) {
@@ -1399,6 +1531,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                             Icon(isMuted ? Icons.volume_up : Icons.volume_off, color: Colors.white70, size: 18),
                             const SizedBox(width: 8),
                             Text(isMuted ? 'Unmute Notifications' : 'Mute Notifications', style: const TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'clear',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_sweep_outlined, color: Colors.white70, size: 18),
+                            SizedBox(width: 8),
+                            Text('Clear Chat', style: TextStyle(color: Colors.white)),
                           ],
                         ),
                       ),
@@ -1458,6 +1600,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                     ),
                     const PopupMenuDivider(height: 1),
                     const PopupMenuItem(
+                      value: 'clear',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_sweep_outlined, color: Colors.white70, size: 18),
+                          SizedBox(width: 8),
+                          Text('Clear Chat', style: TextStyle(color: Colors.white)),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
                       value: 'off',
                       child: Text('⏰ Disappearing: Off', style: TextStyle(color: Colors.white)),
                     ),
@@ -1503,7 +1655,12 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
                 final displayMessages = _localMessages.where((m) {
                   final deletedForList = m['deletedFor'] as List<dynamic>? ?? [];
-                  return !deletedForList.contains(myId);
+                  final isNotDeleted = !deletedForList.contains(myId);
+                  if (isNotDeleted && _isSearchActive && _searchQuery.isNotEmpty) {
+                    final text = (m['text'] as String?)?.toLowerCase() ?? '';
+                    return text.contains(_searchQuery.toLowerCase());
+                  }
+                  return isNotDeleted;
                 }).toList();
 
                 WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1669,7 +1826,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                   ),
                                           )
                                         else
-                                          CachedMediaView(url: mediaUrl!, mediaType: mediaType),
+                                          CachedMediaView(url: mediaUrl!, mediaType: mediaType, chatId: widget.chatId),
                                         const SizedBox(height: 6),
                                       ],
                                       if (text != null && text.isNotEmpty)
@@ -1733,8 +1890,19 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   color: const Color(0xFF121212),
-                  child: _isRecording
-                      ? Row(
+                  child: !_canSendMessages
+                      ? Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: const Center(
+                            child: Text(
+                              'Only admins can send messages to this group.',
+                              style: TextStyle(color: Colors.white54, fontSize: 14, fontStyle: FontStyle.italic),
+                            ),
+                          ),
+                        )
+                      : _isRecording
+                          ? Row(
                           children: [
                             const SizedBox(width: 8),
                             const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 16),

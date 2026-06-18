@@ -1336,6 +1336,24 @@ class SupabaseService {
           } catch (_) {}
         }
 
+        // Get cleared timestamp if any
+        final clearTimestampStr = await LocalStorageService().getCachedJson('clear_timestamp_$cid') as String?;
+        final clearTimestamp = clearTimestampStr != null ? DateTime.tryParse(clearTimestampStr) : null;
+        
+        // Filter out any local messages that are before the clear timestamp
+        if (clearTimestamp != null) {
+          localMessages = localMessages.where((m) {
+            final createdAtStr = m['createdAt'] as String?;
+            if (createdAtStr != null) {
+              final parsed = DateTime.tryParse(createdAtStr);
+              if (parsed != null && parsed.isBefore(clearTimestamp)) {
+                return false;
+              }
+            }
+            return true;
+          }).toList();
+        }
+
         String? lastMessageId;
         if (localMessages.isNotEmpty) {
           final nonPending = localMessages.where((m) => m['isPending'] != true).toList();
@@ -1355,6 +1373,18 @@ class SupabaseService {
 
           final exists = localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
           if (!exists) {
+            final createdAtStr = typedMsg['timestamp'] != null
+                ? DateTime.fromMillisecondsSinceEpoch(typedMsg['timestamp']).toIso8601String()
+                : DateTime.now().toIso8601String();
+
+            // Skip history messages before cleared timestamp
+            if (clearTimestamp != null) {
+              final parsed = DateTime.tryParse(createdAtStr);
+              if (parsed != null && parsed.isBefore(clearTimestamp)) {
+                continue;
+              }
+            }
+
             final localMsg = {
               'id': msgId,
               'messageId': msgId,
@@ -1363,9 +1393,7 @@ class SupabaseService {
               'text': typedMsg['text'],
               'mediaUrl': typedMsg['mediaUrl'],
               'mediaType': typedMsg['mediaType'],
-              'createdAt': typedMsg['timestamp'] != null
-                  ? DateTime.fromMillisecondsSinceEpoch(typedMsg['timestamp']).toIso8601String()
-                  : DateTime.now().toIso8601String(),
+              'createdAt': createdAtStr,
               'received': true,
             };
             localMessages.add(localMsg);
@@ -1407,6 +1435,21 @@ class SupabaseService {
 
     final messageId = event['messageId'] ?? event['id'];
     if (messageId == null) return;
+
+    // Skip if message was sent before local clear timestamp
+    final clearTimestampStr = await LocalStorageService().getCachedJson('clear_timestamp_$chatId') as String?;
+    if (clearTimestampStr != null) {
+      final clearTimestamp = DateTime.tryParse(clearTimestampStr);
+      if (clearTimestamp != null) {
+        final timestampVal = event['timestamp'];
+        final msgTime = timestampVal != null
+            ? DateTime.fromMillisecondsSinceEpoch((timestampVal as num).toInt())
+            : DateTime.now();
+        if (msgTime.isBefore(clearTimestamp)) {
+          return;
+        }
+      }
+    }
 
     try {
       final directory = await getApplicationDocumentsDirectory();
@@ -1922,5 +1965,87 @@ class SupabaseService {
 
   Future<void> removeGroupParticipant(String chatId, String userId) async {
     await client.from('chat_participants').delete().eq('chatId', chatId).eq('userId', userId);
+  }
+
+  // Fetch group metadata JSON from Supabase storage
+  Future<Map<String, dynamic>> getGroupMetadata(String chatId) async {
+    try {
+      final storagePath = 'group_metadata/$chatId.json';
+      final Uint8List bytes = await client.storage.from('media').download(storagePath);
+      final String jsonString = utf8.decode(bytes);
+      return jsonDecode(jsonString) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('No group metadata found for $chatId, returning default: $e');
+      return {
+        'description': '',
+        'admins': [],
+        'restrictions': {
+          'editGroupInfo': 'all', // 'all' or 'admins'
+          'sendMessages': 'all',  // 'all' or 'admins'
+        }
+      };
+    }
+  }
+
+  // Upload/save group metadata JSON to Supabase storage
+  Future<void> saveGroupMetadata(String chatId, Map<String, dynamic> metadata) async {
+    try {
+      final storagePath = 'group_metadata/$chatId.json';
+      final jsonString = jsonEncode(metadata);
+      final List<int> bytes = utf8.encode(jsonString);
+      
+      final directory = await getTemporaryDirectory();
+      final tempFile = File('${directory.path}/temp_$chatId.json');
+      await tempFile.writeAsBytes(bytes);
+      
+      await client.storage.from('media').upload(
+        storagePath,
+        tempFile,
+        fileOptions: const FileOptions(upsert: true),
+      );
+      
+      try {
+        await tempFile.delete();
+      } catch (_) {}
+    } catch (e) {
+      debugPrint('Failed to save group metadata: $e');
+      rethrow;
+    }
+  }
+
+  // Clear chat locally and set clear timestamp
+  Future<void> clearChatLocally(String chatId) async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/chats/${chatId}_messages.json');
+      await file.writeAsString(jsonEncode([]));
+      
+      final nowStr = DateTime.now().toUtc().toIso8601String();
+      await LocalStorageService().cacheJson('clear_timestamp_$chatId', nowStr);
+    } catch (e) {
+      debugPrint('Failed to clear chat locally: $e');
+    }
+  }
+
+  // Join group using code or invite link
+  Future<void> joinGroup(String inviteLinkOrId) async {
+    String chatId = inviteLinkOrId.trim();
+    if (chatId.contains('/join/')) {
+      chatId = chatId.split('/join/').last;
+    }
+    chatId = chatId.split('?').first.replaceAll('/', '').trim();
+
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    final chat = await client.from('chats').select('isGroup').eq('id', chatId).maybeSingle();
+    if (chat == null) {
+      throw Exception('Group not found');
+    }
+    if (chat['isGroup'] != true) {
+      throw Exception('This ID does not belong to a group chat');
+    }
+
+    await addGroupParticipant(chatId, myId);
   }
 }

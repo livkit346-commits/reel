@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:photo_manager/photo_manager.dart';
 import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/pages/chat/chat_video_viewer_page.dart';
 
@@ -8,6 +9,7 @@ class CachedMediaView extends StatefulWidget {
   final String mediaType; // 'image', 'video'
   final double? width;
   final double? height;
+  final String? chatId;
 
   const CachedMediaView({
     super.key,
@@ -15,6 +17,7 @@ class CachedMediaView extends StatefulWidget {
     required this.mediaType,
     this.width,
     this.height,
+    this.chatId,
   });
 
   @override
@@ -45,6 +48,7 @@ class _CachedMediaViewState extends State<CachedMediaView> {
           _cachedFile = file;
           _isLoading = false;
         });
+        _checkAndSaveToGallery(file);
       }
     } catch (e) {
       if (mounted) {
@@ -53,6 +57,43 @@ class _CachedMediaViewState extends State<CachedMediaView> {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  Future<void> _checkAndSaveToGallery(File file) async {
+    if (widget.chatId == null) return;
+
+    try {
+      // Check if media visibility is enabled for this chat
+      // Defaults to true if no value is cached
+      final isVisible = await _localStorage.getCachedJson('media_visibility_${widget.chatId}');
+      if (isVisible == false) return; // Explicitly disabled
+
+      // Check if already saved
+      final isSaved = await _localStorage.getCachedJson('saved_to_gallery_${widget.url}');
+      if (isSaved == true) return;
+
+      final ps = await PhotoManager.requestPermissionExtend();
+      if (ps.isAuth) {
+        if (widget.mediaType == 'image') {
+          final bytes = await file.readAsBytes();
+          final fileName = 'reel_${DateTime.now().millisecondsSinceEpoch}.jpg';
+          await PhotoManager.editor.saveImage(
+            bytes,
+            title: fileName,
+            filename: fileName,
+          );
+        } else if (widget.mediaType == 'video') {
+          await PhotoManager.editor.saveVideo(
+            file,
+            title: 'reel_${DateTime.now().millisecondsSinceEpoch}',
+          );
+        }
+        await _localStorage.cacheJson('saved_to_gallery_${widget.url}', true);
+        debugPrint('Saved media to gallery successfully: ${widget.url}');
+      }
+    } catch (e) {
+      debugPrint('Error saving media to gallery: $e');
     }
   }
 
