@@ -115,11 +115,20 @@ class LocalStorageService {
     } catch (_) {}
   }
 
+  String _safeKey(String key) {
+    if (key.contains('/') || key.contains(':') || key.contains('\\') || key.contains('?')) {
+      final bytes = utf8.encode(key);
+      final digest = sha256.convert(bytes);
+      return 'hash_${digest.toString()}';
+    }
+    return key;
+  }
+
   // Cache JSON string locally for offline viewability
   Future<void> cacheJson(String key, dynamic data) async {
     try {
       final path = await _localPath;
-      final file = File('$path/json_cache_$key.json');
+      final file = File('$path/json_cache_${_safeKey(key)}.json');
       await file.writeAsString(jsonEncode(data));
     } catch (_) {}
   }
@@ -128,7 +137,7 @@ class LocalStorageService {
   Future<dynamic> getCachedJson(String key) async {
     try {
       final path = await _localPath;
-      final file = File('$path/json_cache_$key.json');
+      final file = File('$path/json_cache_${_safeKey(key)}.json');
       if (await file.exists()) {
         final content = await file.readAsString();
         return jsonDecode(content);

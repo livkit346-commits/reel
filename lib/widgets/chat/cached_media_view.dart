@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:provider/provider.dart';
 import 'package:reel/services/local_storage_service.dart';
+import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/chat/chat_video_viewer_page.dart';
 
 class CachedMediaView extends StatefulWidget {
@@ -10,6 +12,8 @@ class CachedMediaView extends StatefulWidget {
   final double? width;
   final double? height;
   final String? chatId;
+  final String? messageId;
+  final bool deleteFromServer;
 
   const CachedMediaView({
     super.key,
@@ -18,6 +22,8 @@ class CachedMediaView extends StatefulWidget {
     this.width,
     this.height,
     this.chatId,
+    this.messageId,
+    this.deleteFromServer = false,
   });
 
   @override
@@ -49,6 +55,9 @@ class _CachedMediaViewState extends State<CachedMediaView> {
           _isLoading = false;
         });
         _checkAndSaveToGallery(file);
+      }
+      if (widget.deleteFromServer && widget.messageId != null && mounted) {
+        context.read<SupabaseService>().deleteMessageFromServer(widget.messageId!, deleteStorage: true);
       }
     } catch (e) {
       if (mounted) {

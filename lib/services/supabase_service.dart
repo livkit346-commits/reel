@@ -1312,6 +1312,9 @@ class SupabaseService {
     final myId = currentUser?.id;
     if (myId == null) return;
 
+    // Clean up expired media messages from the server
+    deleteExpiredMessagesFromServer();
+
     try {
       // 1. Find all active chats
       final participants = await client.from('chat_participants').select('chatId').eq('userId', myId);
@@ -1398,6 +1401,13 @@ class SupabaseService {
             };
             localMessages.add(localMsg);
             hasChanges = true;
+
+            if (typedMsg['senderId'] != myId) {
+              final mType = typedMsg['mediaType'] as String?;
+              if (mType != 'image' && mType != 'video' && mType != 'audio') {
+                deleteMessageFromServer(msgId, deleteStorage: false);
+              }
+            }
           }
         }
 
@@ -1543,6 +1553,9 @@ class SupabaseService {
         expiresAt = DateTime.now().add(const Duration(hours: 24));
       } else if (disappearingDuration == '48h') {
         expiresAt = DateTime.now().add(const Duration(hours: 48));
+      } else if (mediaType == 'image' || mediaType == 'video') {
+        // Automatically expire images/videos in 48 hours if not received
+        expiresAt = DateTime.now().add(const Duration(hours: 48));
       }
 
       final response = await client.from('messages').insert({
@@ -1636,11 +1649,57 @@ class SupabaseService {
   }
 
   // Delete message immediately from the server database (if manual cleanup is desired)
-  Future<void> deleteMessageFromServer(String messageId) async {
+  Future<void> deleteMessageFromServer(String messageId, {bool deleteStorage = false}) async {
     try {
+      if (deleteStorage) {
+        final msg = await client.from('messages').select('mediaUrl').eq('id', messageId).maybeSingle();
+        if (msg != null) {
+          final mediaUrl = msg['mediaUrl'] as String?;
+          if (mediaUrl != null && mediaUrl.contains('storage/v1/object/public/media/')) {
+            final parts = mediaUrl.split('storage/v1/object/public/media/');
+            if (parts.length > 1) {
+              final storagePath = parts[1];
+              await client.storage.from('media').remove([storagePath]);
+              debugPrint('Successfully deleted media from storage: $storagePath');
+            }
+          }
+        }
+      }
       await client.from('messages').delete().eq('id', messageId);
+      debugPrint('Successfully deleted message from DB: $messageId');
     } catch (e) {
-      // Ignore
+      debugPrint('Error deleting message from server: $e');
+    }
+  }
+
+  // Delete expired messages from the server (both database row and storage file)
+  Future<void> deleteExpiredMessagesFromServer() async {
+    try {
+      final nowStr = DateTime.now().toUtc().toIso8601String();
+      
+      // Fetch expired messages to clean up their storage files
+      final expiredMsgs = await client
+          .from('messages')
+          .select('id, mediaUrl')
+          .lt('expiresAt', nowStr);
+      
+      if (expiredMsgs.isNotEmpty) {
+        for (final msg in expiredMsgs) {
+          final messageId = msg['id'] as String;
+          final mediaUrl = msg['mediaUrl'] as String?;
+          if (mediaUrl != null && mediaUrl.contains('storage/v1/object/public/media/')) {
+            final parts = mediaUrl.split('storage/v1/object/public/media/');
+            if (parts.length > 1) {
+              final storagePath = parts[1];
+              await client.storage.from('media').remove([storagePath]);
+              debugPrint('Expired media deleted: $storagePath');
+            }
+          }
+          await client.from('messages').delete().eq('id', messageId);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error cleaning up expired messages from server: $e');
     }
   }
 

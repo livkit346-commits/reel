@@ -346,6 +346,13 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 'received': true,
               };
               _localMessages.add(localMsg);
+
+              if (typedMsg['senderId'] != myId) {
+                final mType = typedMsg['mediaType'] as String?;
+                if (mType != 'image' && mType != 'video' && mType != 'audio') {
+                  context.read<SupabaseService>().deleteMessageFromServer(msgId, deleteStorage: false);
+                }
+              }
             }
           }
 
@@ -436,6 +443,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           recipientId: senderId,
           status: 'received',
         );
+        final mType = event['mediaType'] as String?;
+        if (mType != 'image' && mType != 'video' && mType != 'audio') {
+          supabase.deleteMessageFromServer(messageId, deleteStorage: false);
+        }
       }
     }
   }
@@ -1789,6 +1800,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                           AudioMessagePlayer(
                                             url: mediaUrl,
                                             localFilePath: msg['mediaFilePath'],
+                                            messageId: msg['id'],
+                                            deleteFromServer: !isMe,
                                           )
                                         else if (msg['isPending'] == true && msg['mediaFilePath'] != null)
                                           ClipRRect(
@@ -1831,7 +1844,13 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                   ),
                                           )
                                         else
-                                          CachedMediaView(url: mediaUrl!, mediaType: mediaType, chatId: widget.chatId),
+                                          CachedMediaView(
+                                            url: mediaUrl!,
+                                            mediaType: mediaType,
+                                            chatId: widget.chatId,
+                                            messageId: msg['id'],
+                                            deleteFromServer: !isMe,
+                                          ),
                                         const SizedBox(height: 6),
                                       ],
                                       if (text != null && text.isNotEmpty)
@@ -2257,11 +2276,15 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 class AudioMessagePlayer extends StatefulWidget {
   final String? url;
   final String? localFilePath;
+  final String? messageId;
+  final bool deleteFromServer;
 
   const AudioMessagePlayer({
     super.key,
     this.url,
     this.localFilePath,
+    this.messageId,
+    this.deleteFromServer = false,
   });
 
   @override
@@ -2286,8 +2309,22 @@ class _AudioMessagePlayerState extends State<AudioMessagePlayer> {
 
   Future<void> _initAudio() async {
     try {
-      if (widget.localFilePath != null) {
-        await _audioPlayer.setSource(DeviceFileSource(widget.localFilePath!));
+      String? playPath = widget.localFilePath;
+
+      if (playPath == null && widget.url != null) {
+        final file = await LocalStorageService().getCachedFile(
+          widget.url!,
+          ttl: const Duration(hours: 48),
+        );
+        playPath = file.path;
+
+        if (widget.deleteFromServer && widget.messageId != null && mounted) {
+          context.read<SupabaseService>().deleteMessageFromServer(widget.messageId!, deleteStorage: true);
+        }
+      }
+
+      if (playPath != null) {
+        await _audioPlayer.setSource(DeviceFileSource(playPath));
       } else if (widget.url != null) {
         await _audioPlayer.setSource(UrlSource(widget.url!));
       }
