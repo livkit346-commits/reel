@@ -318,7 +318,9 @@ class _ChatListPageState extends State<ChatListPage> {
                                             ? '🎥 Video'
                                             : (chatMap['latestMessageType'] == 'audio'
                                                 ? '🎤 Voice Message'
-                                                : 'Tap to view encrypted ephemeral messages')))),
+                                                : (chatMap['latestMessageType'] == 'sticker'
+                                                    ? '👾 Sticker'
+                                                    : 'Tap to view encrypted ephemeral messages'))))),
                             style: TextStyle(
                               color: hasUnread ? const Color(0xFF00BFFF) : Colors.white38,
                               fontSize: 13,

@@ -13,6 +13,7 @@ import 'package:reel/services/websocket_service.dart';
 import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/chat/cached_media_view.dart';
+import 'package:reel/widgets/chat/sticker_picker.dart';
 import 'package:reel/pages/chat/forward_message_page.dart';
 import 'package:reel/pages/chat/chat_video_viewer_page.dart';
 import 'package:reel/pages/chat/group_info_page.dart';
@@ -80,6 +81,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   bool _canSendMessages = true;
+  bool _isStickerPickerActive = false;
   Map<String, dynamic> _metadata = {};
   String? _creatorId;
 
@@ -1732,22 +1734,24 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
                           child: Align(
                             alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-                            child: Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                              decoration: BoxDecoration(
-                                color: isDeleted 
-                                    ? Colors.transparent 
-                                    : (isMe ? const Color(0xFF7E1C31) : const Color(0xFF262626)),
-                                border: isDeleted ? Border.all(color: Colors.white24, width: 1) : null,
-                                borderRadius: BorderRadius.only(
-                                  topLeft: const Radius.circular(20),
-                                  topRight: const Radius.circular(20),
-                                  bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
-                                  bottomRight: isMe ? Radius.zero : const Radius.circular(20),
-                                ),
-                              ),
-                              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+                            child: mediaType == 'sticker' && !isDeleted
+                                ? _buildStickerMessage(msg, isMe, timeStr, received)
+                                : Container(
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: isDeleted 
+                                          ? Colors.transparent 
+                                          : (isMe ? const Color(0xFF7E1C31) : const Color(0xFF262626)),
+                                      border: isDeleted ? Border.all(color: Colors.white24, width: 1) : null,
+                                      borderRadius: BorderRadius.only(
+                                        topLeft: const Radius.circular(20),
+                                        topRight: const Radius.circular(20),
+                                        bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
+                                        bottomRight: isMe ? Radius.zero : const Radius.circular(20),
+                                      ),
+                                    ),
+                                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
                               child: IntrinsicWidth(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -1942,6 +1946,24 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       : Row(
                           children: [
                             GestureDetector(
+                              onTap: _isBlocked ? null : () {
+                                setState(() {
+                                  _isStickerPickerActive = !_isStickerPickerActive;
+                                });
+                                if (_isStickerPickerActive) {
+                                  FocusScope.of(context).unfocus();
+                                }
+                              },
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                child: Icon(
+                                  _isStickerPickerActive ? Icons.keyboard : Icons.sticky_note_2_outlined,
+                                  color: _isStickerPickerActive ? const Color(0xFF00BFFF) : Colors.white70,
+                                  size: 26,
+                                ),
+                              ),
+                            ),
+                            GestureDetector(
                               onTap: _isBlocked ? null : _sendVideo,
                               child: const Padding(
                                 padding: EdgeInsets.symmetric(horizontal: 8),
@@ -1968,6 +1990,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                       child: TextField(
                                         controller: _messageController,
                                         enabled: !_isBlocked,
+                                        onTap: () {
+                                          setState(() {
+                                            _isStickerPickerActive = false;
+                                          });
+                                        },
                                         style: const TextStyle(color: Colors.white, fontSize: 15),
                                         maxLines: null,
                                         decoration: InputDecoration(
@@ -2011,12 +2038,219 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           ],
                         ),
                 ),
+                if (_isStickerPickerActive)
+                  StickerPicker(
+                    onStickerSelected: _sendSticker,
+                  ),
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  Widget _buildStickerMessage(Map<String, dynamic> msg, bool isMe, String timeStr, bool received) {
+    final mediaUrl = msg['mediaUrl'] as String?;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+      child: Column(
+        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.isGroup && !isMe)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4, left: 4),
+              child: Text(
+                _participantNames[msg['senderId']] ?? 'User',
+                style: TextStyle(
+                  color: Colors.cyanAccent.shade400,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          GestureDetector(
+            onTap: () => _showStickerOptions(msg),
+            child: Stack(
+              children: [
+                Container(
+                  width: 130,
+                  height: 130,
+                  padding: const EdgeInsets.all(4),
+                  child: mediaUrl != null
+                      ? Image.network(
+                          mediaUrl,
+                          fit: BoxFit.contain,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5));
+                          },
+                          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 40),
+                        )
+                      : const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5)),
+                ),
+                Positioned(
+                  bottom: 4,
+                  right: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          timeStr,
+                          style: const TextStyle(color: Colors.white70, fontSize: 10),
+                        ),
+                        if (isMe) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            received ? Icons.done_all : Icons.done,
+                            color: received ? const Color(0xFF00BFFF) : Colors.white60,
+                            size: 11,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showStickerOptions(Map<String, dynamic> msg) {
+    final mediaUrl = msg['mediaUrl'] as String?;
+    if (mediaUrl == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[950],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 16),
+              const Text(
+                'Sticker Options',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.star_border, color: Color(0xFF00BFFF)),
+                title: const Text('Add to My Stickers', style: TextStyle(color: Colors.white)),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _saveReceivedSticker(mediaUrl);
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _saveReceivedSticker(String url) async {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (myId == null) return;
+
+    try {
+      final cached = await LocalStorageService().getCachedJson('custom_stickers_$myId');
+      final List<String> customList = cached != null ? List<String>.from(cached as List) : [];
+      
+      if (!customList.contains(url)) {
+        customList.insert(0, url);
+        await LocalStorageService().cacheJson('custom_stickers_$myId', customList);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sticker saved to My Stickers!')),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Sticker is already in your list.')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save sticker: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _sendSticker(String url) async {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (myId == null) return;
+
+    final tempId = 'pending_${myId}_${DateTime.now().millisecondsSinceEpoch}';
+    final tempMsg = {
+      'id': tempId,
+      'chatId': widget.chatId,
+      'senderId': myId,
+      'mediaUrl': url,
+      'mediaType': 'sticker',
+      'createdAt': DateTime.now().toIso8601String(),
+      'received': false,
+      'isPending': true,
+    };
+
+    setState(() {
+      _localMessages.add(tempMsg);
+      _isStickerPickerActive = false;
+    });
+    await _saveLocalMessages();
+
+    _attemptSendStickerPendingMessage(tempMsg);
+  }
+
+  Future<void> _attemptSendStickerPendingMessage(Map<String, dynamic> pendingMsg) async {
+    final tempId = pendingMsg['id'];
+    if (_sendingMessageIds.contains(tempId)) return;
+    _sendingMessageIds.add(tempId);
+
+    try {
+      final sent = WebSocketService().sendMessage(
+        chatId: widget.chatId,
+        recipientId: widget.otherUserId,
+        text: "",
+        mediaUrl: pendingMsg['mediaUrl'],
+        mediaType: 'sticker',
+        tempId: tempId,
+      );
+
+      if (!sent) {
+        throw Exception('WebSocket client is offline');
+      }
+    } catch (e) {
+      debugPrint('Failed to send pending sticker $tempId: $e');
+    } finally {
+      _sendingMessageIds.remove(tempId);
+    }
   }
 }
 

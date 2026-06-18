@@ -1510,13 +1510,13 @@ class SupabaseService {
       debugPrint('Error saving incoming message: $e');
     }
   }
-
   // Send a message
   Future<Map<String, dynamic>> sendMessage({
     required String chatId,
     String? text,
     File? mediaFile,
-    String? mediaType, // 'image', 'video'
+    String? mediaType, // 'image', 'video', 'sticker'
+    String? mediaUrl,
     String disappearingDuration = 'off', // 'off', '24h', '48h'
     String? replyToMessageId,
   }) async {
@@ -1524,16 +1524,16 @@ class SupabaseService {
     if (myId == null) throw Exception('User not authenticated');
 
     try {
-      String? mediaUrl;
-      if (mediaFile != null) {
+      String? finalMediaUrl = mediaUrl;
+      if (mediaFile != null && finalMediaUrl == null) {
         try {
-          mediaUrl = await uploadToR2(mediaFile);
+          finalMediaUrl = await uploadToR2(mediaFile);
         } catch (r2Error) {
           debugPrint('Chat media R2 upload failed, falling back to Supabase: $r2Error');
           final fileName = '${DateTime.now().millisecondsSinceEpoch}_${mediaFile.path.split(RegExp(r'[/\\]')).last}';
           final storagePath = 'chat_media/$chatId/$fileName';
           await client.storage.from('media').upload(storagePath, mediaFile);
-          mediaUrl = getMediaUrl('media', storagePath);
+          finalMediaUrl = getMediaUrl('media', storagePath);
         }
       }
 
@@ -1549,7 +1549,7 @@ class SupabaseService {
         'chatId': chatId,
         'senderId': myId,
         'text': text,
-        'mediaUrl': mediaUrl,
+        'mediaUrl': finalMediaUrl,
         'mediaType': mediaType,
         'expiresAt': expiresAt?.toIso8601String(),
         'received': false,

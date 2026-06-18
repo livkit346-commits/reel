@@ -119,30 +119,54 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
       List<AssetEntity> entities = [];
 
       if (_currentTabIndex == 0) {
-        // Fetch both images and videos master albums separately to bypass device-specific merge bugs
+        // Fetch both images and videos albums separately to bypass device-specific merge bugs
         final List<AssetPathEntity> imagePaths = await PhotoManager.getAssetPathList(
           type: RequestType.image,
-          onlyAll: true,
+          onlyAll: false,
         );
         final List<AssetPathEntity> videoPaths = await PhotoManager.getAssetPathList(
           type: RequestType.video,
-          onlyAll: true,
+          onlyAll: false,
         );
 
-        List<AssetEntity> imageEntities = [];
-        if (imagePaths.isNotEmpty) {
-          imageEntities = await imagePaths.first.getAssetListPaged(
-            page: 0,
-            size: 60,
-          );
+        // Find default/selected album if not set
+        if (_selectedAlbum == null) {
+          if (imagePaths.isNotEmpty) {
+            _selectedAlbum = imagePaths.firstWhere((p) => p.isAll, orElse: () => imagePaths.first);
+          }
         }
 
+        List<AssetEntity> imageEntities = [];
         List<AssetEntity> videoEntities = [];
-        if (videoPaths.isNotEmpty) {
-          videoEntities = await videoPaths.first.getAssetListPaged(
+
+        if (_selectedAlbum != null) {
+          imageEntities = await _selectedAlbum!.getAssetListPaged(
             page: 0,
-            size: 60,
+            size: 40,
           );
+          
+          // If it is the master album, we also fetch the master videos album
+          if (_selectedAlbum!.isAll) {
+            if (videoPaths.isNotEmpty) {
+              final masterVideo = videoPaths.firstWhere((p) => p.isAll, orElse: () => videoPaths.first);
+              videoEntities = await masterVideo.getAssetListPaged(
+                page: 0,
+                size: 40,
+              );
+            }
+          } else {
+            // Try to find matching video album with the same folder name
+            final matchingVideoAlbum = videoPaths.cast<AssetPathEntity?>().firstWhere(
+              (p) => p != null && p.name == _selectedAlbum!.name,
+              orElse: () => null,
+            );
+            if (matchingVideoAlbum != null) {
+              videoEntities = await matchingVideoAlbum.getAssetListPaged(
+                page: 0,
+                size: 40,
+              );
+            }
+          }
         }
 
         entities = [...imageEntities, ...videoEntities];
@@ -151,19 +175,22 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
 
         setState(() {
           _albums = imagePaths;
-          _selectedAlbum = imagePaths.isNotEmpty ? imagePaths.first : null;
         });
       } else {
         RequestType type = _currentTabIndex == 1 ? RequestType.image : RequestType.video;
         final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
           type: type,
-          onlyAll: true,
+          onlyAll: false,
         );
 
         if (paths.isNotEmpty) {
+          final hasSelected = _selectedAlbum != null && paths.any((p) => p.id == _selectedAlbum!.id);
+          if (!hasSelected) {
+            _selectedAlbum = paths.firstWhere((p) => p.isAll, orElse: () => paths.first);
+          }
+
           setState(() {
             _albums = paths;
-            _selectedAlbum = paths.first;
           });
 
           entities = await _selectedAlbum!.getAssetListPaged(
@@ -201,33 +228,43 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
       List<AssetEntity> entities = [];
 
       if (_currentTabIndex == 0) {
-        // Load next page of images and videos separately
-        final List<AssetPathEntity> imagePaths = await PhotoManager.getAssetPathList(
-          type: RequestType.image,
-          onlyAll: true,
-        );
-        final List<AssetPathEntity> videoPaths = await PhotoManager.getAssetPathList(
-          type: RequestType.video,
-          onlyAll: true,
-        );
-
-        List<AssetEntity> imageEntities = [];
-        if (imagePaths.isNotEmpty) {
-          imageEntities = await imagePaths.first.getAssetListPaged(
+        if (_selectedAlbum != null) {
+          entities = await _selectedAlbum!.getAssetListPaged(
             page: nextPage,
-            size: 60,
+            size: 40,
           );
+          
+          if (_selectedAlbum!.isAll) {
+            final List<AssetPathEntity> videoPaths = await PhotoManager.getAssetPathList(
+              type: RequestType.video,
+              onlyAll: false,
+            );
+            if (videoPaths.isNotEmpty) {
+              final masterVideo = videoPaths.firstWhere((p) => p.isAll, orElse: () => videoPaths.first);
+              final videoEntities = await masterVideo.getAssetListPaged(
+                page: nextPage,
+                size: 40,
+              );
+              entities.addAll(videoEntities);
+            }
+          } else {
+            final List<AssetPathEntity> videoPaths = await PhotoManager.getAssetPathList(
+              type: RequestType.video,
+              onlyAll: false,
+            );
+            final matchingVideoAlbum = videoPaths.cast<AssetPathEntity?>().firstWhere(
+              (p) => p != null && p.name == _selectedAlbum!.name,
+              orElse: () => null,
+            );
+            if (matchingVideoAlbum != null) {
+              final videoEntities = await matchingVideoAlbum.getAssetListPaged(
+                page: nextPage,
+                size: 40,
+              );
+              entities.addAll(videoEntities);
+            }
+          }
         }
-
-        List<AssetEntity> videoEntities = [];
-        if (videoPaths.isNotEmpty) {
-          videoEntities = await videoPaths.first.getAssetListPaged(
-            page: nextPage,
-            size: 60,
-          );
-        }
-
-        entities = [...imageEntities, ...videoEntities];
       } else {
         if (_selectedAlbum == null) return;
         entities = await _selectedAlbum!.getAssetListPaged(
@@ -251,7 +288,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
         _assets.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
         _currentPage = nextPage;
         _isLoadingMore = false;
-        if (entities.length < 80) {
+        if (entities.length < 40) {
           _hasMore = false;
         }
       });
@@ -428,6 +465,56 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
     );
   }
 
+  void _openSystemGalleryPicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[950],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 16),
+            const Text(
+              'Browse System Gallery',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.image, color: Colors.white),
+              title: const Text('Select Photo', style: TextStyle(color: Colors.white)),
+              onTap: () async {
+                Navigator.pop(context);
+                final picked = await _picker.pickImage(source: ImageSource.gallery);
+                if (picked != null) {
+                  _navigateToPreview(File(picked.path), 'image');
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library, color: Colors.white),
+              title: const Text('Select Video', style: TextStyle(color: Colors.white)),
+              onTap: () async {
+                Navigator.pop(context);
+                final picked = await _picker.pickVideo(source: ImageSource.gallery);
+                if (picked != null) {
+                  _navigateToPreview(File(picked.path), 'video');
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildPermissionDeniedView() {
     return Expanded(
       child: Center(
@@ -484,6 +571,18 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
                   'Enable Gallery Access',
                   style: TextStyle(
                     fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: _openSystemGalleryPicker,
+                child: const Text(
+                  'Browse System Gallery',
+                  style: TextStyle(
+                    color: Color(0xFF00BFFF),
+                    fontSize: 15,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -637,6 +736,27 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
                           Icon(Icons.flip_camera_ios, color: Colors.white, size: 28),
                           SizedBox(height: 4),
                           Text('Camera', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: _openSystemGalleryPicker,
+                    child: Container(
+                      height: 80,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF161616),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.photo_library, color: Colors.white, size: 28),
+                          SizedBox(height: 4),
+                          Text('Gallery', style: TextStyle(color: Colors.white70, fontSize: 13)),
                         ],
                       ),
                     ),
