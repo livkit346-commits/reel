@@ -68,9 +68,22 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   // Audio Recording states
   final AudioRecorder _audioRecorder = AudioRecorder();
   bool _isRecording = false;
+  bool _isPaused = false;
+  int _recordingSecondsElapsed = 0;
   String _recordingDurationStr = '00:00';
   Timer? _recordingTimer;
   DateTime? _recordingStartTime;
+
+  // Audio Preview states
+  String? _previewAudioPath;
+  bool _isPlayingPreview = false;
+  Duration _previewPosition = Duration.zero;
+  Duration _previewDuration = Duration.zero;
+  AudioPlayer? _previewPlayer;
+  StreamSubscription? _previewPositionSub;
+  StreamSubscription? _previewDurationSub;
+  StreamSubscription? _previewStateSub;
+  StreamSubscription? _previewCompleteSub;
 
   // Group chat details
   String? _groupIcon;
@@ -169,6 +182,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     _offlineRetryTimer?.cancel();
     _recordingTimer?.cancel();
     _audioRecorder.dispose();
+    _previewPlayer?.dispose();
+    _previewPositionSub?.cancel();
+    _previewDurationSub?.cancel();
+    _previewStateSub?.cancel();
+    _previewCompleteSub?.cancel();
     _messageController.dispose();
     _searchController.dispose();
     _scrollController.dispose();
@@ -186,26 +204,26 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           path: path,
         );
 
-        _recordingStartTime = DateTime.now();
-        _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-          if (_recordingStartTime != null) {
-            final elapsed = DateTime.now().difference(_recordingStartTime!);
-            final minutes = elapsed.inMinutes.toString().padLeft(2, '0');
-            final seconds = (elapsed.inSeconds % 60).toString().padLeft(2, '0');
-            if (mounted) {
-              setState(() {
-                _recordingDurationStr = '$minutes:$seconds';
-              });
-            }
-          }
-        });
-
         if (mounted) {
           setState(() {
             _isRecording = true;
+            _isPaused = false;
+            _recordingSecondsElapsed = 0;
             _recordingDurationStr = '00:00';
           });
         }
+
+        _recordingTimer?.cancel();
+        _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (!_isPaused && mounted) {
+            setState(() {
+              _recordingSecondsElapsed++;
+              final minutes = (_recordingSecondsElapsed ~/ 60).toString().padLeft(2, '0');
+              final seconds = (_recordingSecondsElapsed % 60).toString().padLeft(2, '0');
+              _recordingDurationStr = '$minutes:$seconds';
+            });
+          }
+        });
       } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -215,6 +233,32 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       }
     } catch (e) {
       debugPrint('Error starting audio recording: $e');
+    }
+  }
+
+  Future<void> _pauseRecording() async {
+    try {
+      await _audioRecorder.pause();
+      if (mounted) {
+        setState(() {
+          _isPaused = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error pausing audio recording: $e');
+    }
+  }
+
+  Future<void> _resumeRecording() async {
+    try {
+      await _audioRecorder.resume();
+      if (mounted) {
+        setState(() {
+          _isPaused = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error resuming audio recording: $e');
     }
   }
 
@@ -231,11 +275,34 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       if (mounted) {
         setState(() {
           _isRecording = false;
+          _isPaused = false;
+          _recordingSecondsElapsed = 0;
           _recordingDurationStr = '00:00';
         });
       }
     } catch (e) {
       debugPrint('Error cancelling audio recording: $e');
+    }
+  }
+
+  Future<void> _stopRecordingAndShowPreview() async {
+    try {
+      _recordingTimer?.cancel();
+      final path = await _audioRecorder.stop();
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+          _isPaused = false;
+          _recordingSecondsElapsed = 0;
+          _recordingDurationStr = '00:00';
+          _previewAudioPath = path;
+        });
+      }
+      if (path != null) {
+        await _initPreviewPlayer(path);
+      }
+    } catch (e) {
+      debugPrint('Error stopping and previewing audio recording: $e');
     }
   }
 
@@ -246,6 +313,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       if (mounted) {
         setState(() {
           _isRecording = false;
+          _isPaused = false;
+          _recordingSecondsElapsed = 0;
           _recordingDurationStr = '00:00';
         });
       }
@@ -259,6 +328,128 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     } catch (e) {
       debugPrint('Error stopping and sending audio recording: $e');
     }
+  }
+
+  Future<void> _initPreviewPlayer(String path) async {
+    _previewPlayer?.dispose();
+    _previewPositionSub?.cancel();
+    _previewDurationSub?.cancel();
+    _previewStateSub?.cancel();
+    _previewCompleteSub?.cancel();
+
+    final player = AudioPlayer();
+    _previewPlayer = player;
+    
+    try {
+      await player.setSource(DeviceFileSource(path));
+      
+      _previewDurationSub = player.onDurationChanged.listen((d) {
+        if (mounted) setState(() => _previewDuration = d);
+      });
+
+      _previewPositionSub = player.onPositionChanged.listen((p) {
+        if (mounted) setState(() => _previewPosition = p);
+      });
+
+      _previewStateSub = player.onPlayerStateChanged.listen((state) {
+        if (mounted) {
+          setState(() {
+            _isPlayingPreview = state == PlayerState.playing;
+          });
+        }
+      });
+
+      _previewCompleteSub = player.onPlayerComplete.listen((_) {
+        if (mounted) {
+          setState(() {
+            _previewPosition = Duration.zero;
+            _isPlayingPreview = false;
+          });
+        }
+      });
+    } catch (e) {
+      debugPrint('Error initializing preview player: $e');
+    }
+  }
+
+  Future<void> _togglePreviewPlay() async {
+    final player = _previewPlayer;
+    if (player == null) return;
+
+    try {
+      if (_isPlayingPreview) {
+        await player.pause();
+      } else {
+        await player.resume();
+      }
+    } catch (e) {
+      debugPrint('Error toggling preview playback: $e');
+    }
+  }
+
+  Future<void> _cancelPreview() async {
+    try {
+      _previewPlayer?.dispose();
+      _previewPlayer = null;
+      _previewPositionSub?.cancel();
+      _previewDurationSub?.cancel();
+      _previewStateSub?.cancel();
+      _previewCompleteSub?.cancel();
+
+      if (_previewAudioPath != null) {
+        final file = File(_previewAudioPath!);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error cancelling preview: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _previewAudioPath = null;
+          _isPlayingPreview = false;
+          _previewPosition = Duration.zero;
+          _previewDuration = Duration.zero;
+        });
+      }
+    }
+  }
+
+  Future<void> _sendPreviewRecording() async {
+    final path = _previewAudioPath;
+    if (path == null) return;
+
+    try {
+      _previewPlayer?.dispose();
+      _previewPlayer = null;
+      _previewPositionSub?.cancel();
+      _previewDurationSub?.cancel();
+      _previewStateSub?.cancel();
+      _previewCompleteSub?.cancel();
+
+      if (mounted) {
+        setState(() {
+          _previewAudioPath = null;
+          _isPlayingPreview = false;
+          _previewPosition = Duration.zero;
+          _previewDuration = Duration.zero;
+        });
+      }
+
+      final file = File(path);
+      if (await file.exists()) {
+        _sendMediaMessage(file, 'audio');
+      }
+    } catch (e) {
+      debugPrint('Error sending preview recording: $e');
+    }
+  }
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.toString().padLeft(2, '0');
+    final seconds = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
   }
 
   Future<void> _attemptSendPendingMessage(Map<String, dynamic> pendingMsg) async {
@@ -1990,17 +2181,106 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                             ),
                           ),
                         )
+                      : _previewAudioPath != null
+                          ? Row(
+                              children: [
+                                const SizedBox(width: 8),
+                                GestureDetector(
+                                  onTap: _togglePreviewPlay,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.white10,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      _isPlayingPreview ? Icons.pause : Icons.play_arrow,
+                                      color: const Color(0xFF00BFFF),
+                                      size: 24,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: LinearProgressIndicator(
+                                      value: _previewDuration.inMilliseconds > 0
+                                          ? _previewPosition.inMilliseconds / _previewDuration.inMilliseconds
+                                          : 0.0,
+                                      backgroundColor: Colors.white10,
+                                      valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF00BFFF)),
+                                      minHeight: 6,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  _formatDuration(_previewPosition) + ' / ' + _formatDuration(_previewDuration),
+                                  style: const TextStyle(color: Colors.white70, fontSize: 13, fontFamily: 'monospace'),
+                                ),
+                                const SizedBox(width: 12),
+                                GestureDetector(
+                                  onTap: _cancelPreview,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: const BoxDecoration(
+                                      color: Colors.white10,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                GestureDetector(
+                                  onTap: _sendPreviewRecording,
+                                  child: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFFFE2C55),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(Icons.send, color: Colors.white, size: 20),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                              ],
+                            )
                       : _isRecording
                           ? Row(
                           children: [
                             const SizedBox(width: 8),
-                            const Icon(Icons.fiber_manual_record, color: Colors.redAccent, size: 16),
+                            Icon(
+                              _isPaused ? Icons.pause_circle_filled : Icons.fiber_manual_record,
+                              color: _isPaused ? Colors.yellowAccent : Colors.redAccent,
+                              size: 16,
+                            ),
                             const SizedBox(width: 8),
                             Text(
-                              'Recording... $_recordingDurationStr',
+                              _isPaused ? 'Paused... $_recordingDurationStr' : 'Recording... $_recordingDurationStr',
                               style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
                             ),
                             const Spacer(),
+                            GestureDetector(
+                              onTap: _isPaused ? _resumeRecording : _pauseRecording,
+                              child: Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: _isPaused ? Colors.yellowAccent.withValues(alpha: 0.15) : Colors.white10,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: _isPaused ? Colors.yellowAccent : Colors.transparent,
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Icon(
+                                  _isPaused ? Icons.play_arrow : Icons.pause,
+                                  color: _isPaused ? Colors.yellowAccent : Colors.white70,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
                             GestureDetector(
                               onTap: _cancelRecording,
                               child: Container(
@@ -2014,14 +2294,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                             ),
                             const SizedBox(width: 12),
                             GestureDetector(
-                              onTap: _stopAndSendRecording,
+                              onTap: _stopRecordingAndShowPreview,
                               child: Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: const BoxDecoration(
                                   color: Color(0xFFFE2C55),
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(Icons.send, color: Colors.white, size: 20),
+                                child: const Icon(Icons.stop, color: Colors.white, size: 20),
                               ),
                             ),
                             const SizedBox(width: 4),
