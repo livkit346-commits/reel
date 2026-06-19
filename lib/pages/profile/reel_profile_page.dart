@@ -5,6 +5,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/auth/reel_auth_page.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
+import 'package:reel/pages/profile/edit_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
 
 class ReelProfilePage extends StatefulWidget {
@@ -309,105 +310,12 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
     }
   }
 
-  // Edit profile dialog
+  // Edit profile screen navigation
   Future<void> _editProfile(BuildContext context, Map<String, dynamic>? profile) async {
-    final nameController = TextEditingController(text: profile?['name']);
-    final phoneController = TextEditingController(text: profile?['phone']);
-    final bioController = TextEditingController(text: profile?['bio'] ?? '');
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[950],
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Edit Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Name',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: bioController,
-                maxLines: 2,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Bio',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: phoneController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'Phone',
-                  labelStyle: TextStyle(color: Colors.white54),
-                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final name = nameController.text.trim();
-              final phone = phoneController.text.trim();
-              final bio = bioController.text.trim();
-              if (name.isEmpty) return;
-
-              final supabase = context.read<SupabaseService>();
-              final user = supabase.currentUser;
-              if (user != null) {
-                try {
-                  showDialog(
-                    context: context,
-                    barrierDismissible: false,
-                    builder: (context) => const Center(child: CircularProgressIndicator()),
-                  );
-
-                  await supabase.client.from('users').update({
-                    'name': name,
-                    'phone': phone.isNotEmpty ? phone : null,
-                    'bio': bio.isNotEmpty ? bio : null,
-                  }).eq('id', user.id);
-                  supabase.clearProfileCache(user.id);
-                  
-                  if (context.mounted) {
-                    Navigator.pop(context); // Pop spinner
-                    Navigator.pop(context); // Pop dialog
-                    _loadProfile();
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to update profile: ${e.toString()}')),
-                    );
-                  }
-                }
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).primaryColor),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => EditProfilePage(profile: profile)),
+    ).then((_) => _loadProfile());
   }
 
   void _showSettingsBottomSheet(BuildContext context) {
