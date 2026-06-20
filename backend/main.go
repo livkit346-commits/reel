@@ -134,6 +134,7 @@ func main() {
 	// 5. Define HTTP endpoints
 	http.HandleFunc("/ws", handleWebSocket)
 	http.HandleFunc("/history", handleHistory)
+	http.HandleFunc("/mute", handleMute)
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
@@ -262,6 +263,30 @@ func (c *Client) readPump() {
 					if online {
 						senderClient.Send <- statusPayload
 					}
+				}
+			}
+			continue
+		}
+
+		// Handle deletion updates
+		if chatMsg.Type == "delete" {
+			recipients, err := getChatRecipients(chatMsg.ChatID, c.UserID)
+			if err != nil {
+				log.Printf("Error resolving recipients for delete in chat %s: %v", chatMsg.ChatID, err)
+				recipients = []string{chatMsg.RecipientID}
+			}
+
+			// Broadcast deletion to all online recipients
+			for _, recipientID := range recipients {
+				if recipientID == "" || recipientID == c.UserID {
+					continue
+				}
+				hub.mutex.RLock()
+				recipientClient, online := hub.clients[recipientID]
+				hub.mutex.RUnlock()
+				if online {
+					delPayload, _ := json.Marshal(chatMsg)
+					recipientClient.Send <- delPayload
 				}
 			}
 			continue
@@ -628,10 +653,100 @@ func handleHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(messages)
 }
 
+func handleMute(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	tokenStr := r.URL.Query().Get("token")
+	if tokenStr == "" {
+		authHeader := r.Header.Get("Authorization")
+		if len(authHeader) > 7 && authHeader[:7] == "Bearer " {
+			tokenStr = authHeader[7:]
+		}
+	}
+
+	if tokenStr == "" {
+		http.Error(w, "Unauthorized: missing token", http.StatusUnauthorized)
+		return
+	}
+
+	claims, err := ValidateJWT(tokenStr, getJWTSecret())
+	if err != nil {
+		log.Printf("Mute request rejected: invalid JWT: %v", err)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	userID := claims["sub"].(string)
+
+	if r.Method == "GET" {
+		mutedChats, err := getMutedChatsFromDynamoDB(userID)
+		if err != nil {
+			log.Printf("Error fetching muted chats from DynamoDB for user %s: %v", userID, err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(mutedChats)
+		return
+	} else if r.Method == "POST" {
+		var req struct {
+			ChatID  string `json:"chatId"`
+			IsMuted bool   `json:"isMuted"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			// Fallback to query params if JSON decoding fails
+			req.ChatID = r.URL.Query().Get("chatId")
+			if isMutedStr := r.URL.Query().Get("isMuted"); isMutedStr != "" {
+				req.IsMuted = isMutedStr == "true"
+			}
+		}
+
+		if req.ChatID == "" {
+			http.Error(w, "Missing chatId parameter", http.StatusBadRequest)
+			return
+		}
+
+		err = setChatMutedInDynamoDB(userID, req.ChatID, req.IsMuted)
+		if err != nil {
+			log.Printf("Error updating muted chat in DynamoDB: %v", err)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "success",
+			"chatId":  req.ChatID,
+			"isMuted": req.IsMuted,
+		})
+		return
+	} else {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+}
+
 // Fetch recipient FCM token and chat metadata from Supabase and send push notification via FCM
 func sendFcmNotification(recipientID, senderID, chatID, messageText string) {
 	if firebaseApp == nil || supabaseUrl == "" || supabaseKey == "" {
 		return
+	}
+
+	// Check if this chat is muted by the recipient
+	mutedChats, err := getMutedChatsFromDynamoDB(recipientID)
+	if err == nil {
+		for _, mutedChatID := range mutedChats {
+			if mutedChatID == chatID {
+				log.Printf("Chat %s is muted for user %s. Skipping push notification.", chatID, recipientID)
+				return
+			}
+		}
 	}
 
 	// 1. Fetch recipient's push token from Supabase REST API

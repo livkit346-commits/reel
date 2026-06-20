@@ -101,7 +101,10 @@ class SupabaseService {
       };
 
       final jsonStr = jsonEncode(sessionMap);
-      return await client.auth.recoverSession(jsonStr);
+      final res = await client.auth.recoverSession(jsonStr);
+      _loadMutedChats();
+      _loadArchivedChats();
+      return res;
     } catch (e) {
       debugPrint('Error in _setSessionOffline: $e');
       rethrow;
@@ -288,6 +291,10 @@ class SupabaseService {
       debugPrint('Error calling logout endpoint: $e');
     } finally {
       // Clear cache and sign out Supabase/Firebase clients
+      _mutedChatIds.clear();
+      _mutedChatsLoaded = false;
+      _archivedChatIds.clear();
+      _archivedChatsLoaded = false;
       await LocalStorageService().cacheJson('auth_tokens', null);
       await client.auth.signOut();
       try {
@@ -1257,6 +1264,11 @@ class SupabaseService {
           }
         } catch (_) {}
 
+        if (latestMsg == null && !isGroup) {
+          // Skip empty 1-on-1 chats
+          continue;
+        }
+
         if (latestMsg != null) {
           chatData['latestMessageText'] = latestMsg['text'];
           String? timeStr;
@@ -1505,6 +1517,12 @@ class SupabaseService {
         }
         await file.writeAsString(jsonEncode(localMessages));
         debugPrint('Saved incoming message $messageId to local cache for chat $chatId');
+
+        // Automatically unarchive the chat if a new message arrives
+        if (isChatArchived(chatId)) {
+          await toggleArchiveChat(chatId);
+          debugPrint('Chat $chatId automatically unarchived due to new message.');
+        }
 
         // Notify the server we received it so it gets deleted from DynamoDB
         if (senderId != myId && WebSocketService().isConnected) {
@@ -1973,7 +1991,26 @@ class SupabaseService {
         _mutedChatIds = list.map((e) => e.toString()).toSet();
       }
     } catch (e) {
-      debugPrint('Error loading muted chats: $e');
+      debugPrint('Error loading cached muted chats: $e');
+    }
+
+    try {
+      final token = await getValidAccessToken();
+      if (token != null) {
+        final uri = Uri.parse('$backendUrl/mute');
+        final response = await http.get(
+          uri,
+          headers: {'Authorization': 'Bearer $token'},
+        ).timeout(const Duration(seconds: 5));
+        
+        if (response.statusCode == 200) {
+          final List<dynamic> list = jsonDecode(response.body);
+          _mutedChatIds = list.map((e) => e.toString()).toSet();
+          await _saveMutedChats();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error syncing muted chats from backend: $e');
     }
     _mutedChatsLoaded = true;
   }
@@ -1997,12 +2034,80 @@ class SupabaseService {
 
   Future<void> toggleMuteChat(String chatId) async {
     await _loadMutedChats();
-    if (_mutedChatIds.contains(chatId)) {
+    final isMuted = _mutedChatIds.contains(chatId);
+    if (isMuted) {
       _mutedChatIds.remove(chatId);
     } else {
       _mutedChatIds.add(chatId);
     }
     await _saveMutedChats();
+
+    try {
+      final token = await getValidAccessToken();
+      if (token != null) {
+        final uri = Uri.parse('$backendUrl/mute');
+        await http.post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+          body: jsonEncode({
+            'chatId': chatId,
+            'isMuted': !isMuted,
+          }),
+        ).timeout(const Duration(seconds: 5));
+      }
+    } catch (e) {
+      debugPrint('Error syncing mute toggle to backend: $e');
+    }
+  }
+
+  // Local JSON-based archive persistence
+  Set<String> _archivedChatIds = {};
+  bool _archivedChatsLoaded = false;
+
+  Future<void> _loadArchivedChats() async {
+    if (_archivedChatsLoaded) return;
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/archived_chats.json');
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final list = jsonDecode(content) as List<dynamic>;
+        _archivedChatIds = list.map((e) => e.toString()).toSet();
+      }
+    } catch (e) {
+      debugPrint('Error loading archived chats: $e');
+    }
+    _archivedChatsLoaded = true;
+  }
+
+  Future<void> _saveArchivedChats() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/archived_chats.json');
+      await file.writeAsString(jsonEncode(_archivedChatIds.toList()));
+    } catch (e) {
+      debugPrint('Error saving archived chats: $e');
+    }
+  }
+
+  bool isChatArchived(String chatId) {
+    if (!_archivedChatsLoaded) {
+      _loadArchivedChats();
+    }
+    return _archivedChatIds.contains(chatId);
+  }
+
+  Future<void> toggleArchiveChat(String chatId) async {
+    await _loadArchivedChats();
+    if (_archivedChatIds.contains(chatId)) {
+      _archivedChatIds.remove(chatId);
+    } else {
+      _archivedChatIds.add(chatId);
+    }
+    await _saveArchivedChats();
   }
 
   // Group Management Methods

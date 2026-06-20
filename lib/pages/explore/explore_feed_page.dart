@@ -591,6 +591,21 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                             imageUrl,
                             fit: BoxFit.cover,
                             alignment: Alignment.center,
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return Container(
+                                width: double.infinity,
+                                height: 240,
+                                color: Colors.white.withOpacity(0.05),
+                              );
+                            },
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                width: double.infinity,
+                                height: 240,
+                                color: Colors.white.withOpacity(0.05),
+                              );
+                            },
                           ),
                         ),
                       ),

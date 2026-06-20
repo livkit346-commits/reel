@@ -173,6 +173,28 @@ class WebSocketService {
     }
   }
 
+  // Send a delete event (to notify recipients in real-time)
+  void sendDeleteMessage({
+    required String chatId,
+    required String messageId,
+    required String recipientId,
+  }) {
+    if (!isConnected) return;
+
+    try {
+      final payload = {
+        "type": "delete",
+        "chatId": chatId,
+        "messageId": messageId,
+        "recipientId": recipientId,
+      };
+
+      _channel!.sink.add(jsonEncode(payload));
+    } catch (e) {
+      debugPrint('Error sending delete message: $e');
+    }
+  }
+
   // Fetch history for a chat from DynamoDB since a specific message ID
   Future<List<dynamic>> fetchHistory(String chatId, {String? lastMessageId}) async {
     try {

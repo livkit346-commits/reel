@@ -4,12 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/pages/chat/select_friend_page.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
-import 'package:reel/pages/add/add_friends_page.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/services/websocket_service.dart';
 import 'package:reel/pages/chat/group_info_page.dart';
 import 'package:reel/widgets/user_avatar.dart';
+import 'package:reel/pages/chat/archived_chats_page.dart';
 
 class ChatListPage extends StatefulWidget {
   const ChatListPage({super.key});
@@ -24,6 +24,9 @@ class _ChatListPageState extends State<ChatListPage> {
   final Set<String> _selectedChats = {};
   StreamSubscription? _wsSubscription;
   StreamSubscription? _connSubscription;
+
+  int get archivedCount => _chats.where((chat) => context.read<SupabaseService>().isChatArchived(chat['chatId'] as String)).length;
+  List<dynamic> get activeChats => _chats.where((chat) => !context.read<SupabaseService>().isChatArchived(chat['chatId'] as String)).toList();
 
   void _toggleSelection(String chatId) {
     setState(() {
@@ -134,54 +137,7 @@ class _ChatListPageState extends State<ChatListPage> {
     }
   }
 
-  Future<void> _startChat(String otherUserId, String otherUserName) async {
-    final supabase = context.read<SupabaseService>();
-    try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
-      );
 
-      final chatId = await supabase.createOrGetChat(otherUserId);
-      
-      if (mounted) {
-        Navigator.pop(context); // Pop loading dialog
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => ChatRoomPage(
-              chatId: chatId,
-              otherUserId: otherUserId,
-              otherUserName: otherUserName,
-            ),
-          ),
-        ).then((_) => _loadChats());
-      }
-    } catch (e) {
-      if (mounted) {
-        Navigator.pop(context); // Pop loading dialog
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            backgroundColor: Colors.grey[950],
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Text('Mutual Friends Only', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-            content: Text(
-              'Reel Rule: Both you and $otherUserName must add each other as friends before sending private messages!',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK', style: TextStyle(color: Colors.indigoAccent, fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
-        );
-      }
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -209,9 +165,30 @@ class _ChatListPageState extends State<ChatListPage> {
                 ),
                 IconButton(
                   icon: const Icon(Icons.volume_off_outlined, color: Colors.white),
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chats Muted')));
-                    setState(() => _selectedChats.clear());
+                  onPressed: () async {
+                    final supabase = context.read<SupabaseService>();
+                    for (final id in _selectedChats) {
+                      await supabase.toggleMuteChat(id);
+                    }
+                    setState(() {
+                      _selectedChats.clear();
+                      _loadChats();
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chats Muted/Unmuted')));
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.archive_outlined, color: Colors.white),
+                  onPressed: () async {
+                    final supabase = context.read<SupabaseService>();
+                    for (final id in _selectedChats) {
+                      await supabase.toggleArchiveChat(id);
+                    }
+                    setState(() {
+                      _selectedChats.clear();
+                      _loadChats();
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chats Archived/Unarchived')));
                   },
                 ),
                 IconButton(
@@ -234,7 +211,7 @@ class _ChatListPageState extends State<ChatListPage> {
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: () async => _loadChats(),
-              child: _chats.isEmpty
+              child: activeChats.isEmpty && archivedCount == 0
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -254,9 +231,13 @@ class _ChatListPageState extends State<ChatListPage> {
                       ),
                     )
                   : ListView.builder(
-                      itemCount: _chats.length,
+                      itemCount: activeChats.length + (archivedCount > 0 ? 1 : 0),
                       itemBuilder: (context, index) {
-                        final chatMap = _chats[index] as Map<String, dynamic>;
+                        if (archivedCount > 0 && index == 0) {
+                          return _buildArchivedTile(context, archivedCount);
+                        }
+                        final chatIndex = archivedCount > 0 ? index - 1 : index;
+                        final chatMap = activeChats[chatIndex] as Map<String, dynamic>;
                         final chatId = chatMap['chatId'] as String;
                         final isGroup = chatMap['isGroup'] as bool? ?? false;
                         final chatName = chatMap['chatName'] as String? ?? 'Chat';
@@ -486,6 +467,18 @@ class _ChatListPageState extends State<ChatListPage> {
                                         const SnackBar(content: Text('Chat deleted successfully!')),
                                       );
                                     }
+                                  } else if (value == 'archive') {
+                                    await context.read<SupabaseService>().toggleArchiveChat(chatId);
+                                    _loadChats();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          context.read<SupabaseService>().isChatArchived(chatId)
+                                              ? 'Chat archived'
+                                              : 'Chat unarchived',
+                                        ),
+                                      ),
+                                    );
                                   }
                                 },
                                 itemBuilder: (context) => [
@@ -500,6 +493,15 @@ class _ChatListPageState extends State<ChatListPage> {
                                   const PopupMenuItem(
                                     value: 'clear',
                                     child: Text('Clear Chat', style: TextStyle(color: Colors.white)),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'archive',
+                                    child: Text(
+                                      context.read<SupabaseService>().isChatArchived(chatId)
+                                          ? 'Unarchive Chat'
+                                          : 'Archive Chat',
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
                                   ),
                                   PopupMenuItem(
                                     value: isGroup ? 'leave' : 'delete',
@@ -540,6 +542,51 @@ class _ChatListPageState extends State<ChatListPage> {
         backgroundColor: Theme.of(context).primaryColor,
         child: const Icon(Icons.chat, color: Colors.white),
       ),
+    );
+  }
+
+  Widget _buildArchivedTile(BuildContext context, int count) {
+    return ListTile(
+      leading: const SizedBox(
+        width: 52,
+        height: 52,
+        child: Center(
+          child: Icon(Icons.archive_outlined, color: Colors.cyanAccent, size: 24),
+        ),
+      ),
+      title: const Text(
+        'Archived',
+        style: TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.bold,
+          fontSize: 16,
+        ),
+      ),
+      trailing: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: Colors.cyanAccent.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          '$count',
+          style: const TextStyle(
+            color: Colors.cyanAccent,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+        ),
+      ),
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const ArchivedChatsPage(),
+          ),
+        ).then((_) {
+          _loadChats();
+        });
+      },
     );
   }
 }

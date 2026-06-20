@@ -47,6 +47,7 @@ func EnsureTablesExist() {
 		{"ReelUsers", "email", false},
 		{"ReelRefreshTokens", "token", true},
 		{"ReelMessages", "chatId", false}, // In case this table isn't created yet either
+		{"ReelMutedChats", "userId", false},
 	}
 
 	for _, t := range tables {
@@ -310,4 +311,91 @@ func revokeAllRefreshTokensForUserInDynamoDB(userID string) error {
 	}
 
 	return nil
+}
+
+// Retrieve muted chats for a user from ReelMutedChats table
+func getMutedChatsFromDynamoDB(userID string) ([]string, error) {
+	if dbClient == nil {
+		return nil, fmt.Errorf("DynamoDB client not initialized")
+	}
+
+	input := &dynamodb.GetItemInput{
+		TableName: aws.String("ReelMutedChats"),
+		Key: map[string]types.AttributeValue{
+			"userId": &types.AttributeValueMemberS{Value: userID},
+		},
+	}
+
+	result, err := dbClient.GetItem(context.TODO(), input)
+	if err != nil {
+		return nil, err
+	}
+	if result.Item == nil {
+		return []string{}, nil
+	}
+
+	var mutedChats []string
+	if val, ok := result.Item["mutedChats"]; ok {
+		if setVal, ok := val.(*types.AttributeValueMemberSS); ok {
+			mutedChats = setVal.Value
+		} else if listVal, ok := val.(*types.AttributeValueMemberL); ok {
+			for _, item := range listVal.Value {
+				if sItem, ok := item.(*types.AttributeValueMemberS); ok {
+					mutedChats = append(mutedChats, sItem.Value)
+				}
+			}
+		}
+	}
+
+	return mutedChats, nil
+}
+
+// Add/Remove a chat from the user's muted chats set in ReelMutedChats table
+func setChatMutedInDynamoDB(userID string, chatID string, isMuted bool) error {
+	if dbClient == nil {
+		return fmt.Errorf("DynamoDB client not initialized")
+	}
+
+	// First get current list
+	current, err := getMutedChatsFromDynamoDB(userID)
+	if err != nil {
+		current = []string{}
+	}
+
+	// Update list
+	updatedMap := make(map[string]bool)
+	for _, c := range current {
+		updatedMap[c] = true
+	}
+
+	if isMuted {
+		updatedMap[chatID] = true
+	} else {
+		delete(updatedMap, chatID)
+	}
+
+	var updated []string
+	for c := range updatedMap {
+		updated = append(updated, c)
+	}
+
+	// Save back as a String Set (SS) or List (L)
+	var attrVal types.AttributeValue
+	if len(updated) > 0 {
+		attrVal = &types.AttributeValueMemberSS{Value: updated}
+	} else {
+		// DynamoDB SS cannot be empty, so we store an empty list L instead
+		attrVal = &types.AttributeValueMemberL{Value: []types.AttributeValue{}}
+	}
+
+	input := &dynamodb.PutItemInput{
+		TableName: aws.String("ReelMutedChats"),
+		Item: map[string]types.AttributeValue{
+			"userId":     &types.AttributeValueMemberS{Value: userID},
+			"mutedChats": attrVal,
+		},
+	}
+
+	_, err = dbClient.PutItem(context.TODO(), input)
+	return err
 }

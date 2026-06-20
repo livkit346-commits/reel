@@ -63,6 +63,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   Timer? _offlineRetryTimer;
   bool _wasOffline = false;
   final Set<String> _sendingMessageIds = {};
+  Future<void>? _saveQueue;
   StreamSubscription? _wsSubscription;
 
   // Audio Recording states
@@ -145,6 +146,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     _loadChatSettings();
     if (widget.isGroup) {
+      _loadCachedGroupData();
       _loadGroupDetails();
       _loadGroupParticipants();
     } else {
@@ -504,6 +506,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       if (sent) {
         // WebSocket successfully accepted it, wait for 'ack' event to resolve isPending.
       } else {
+        _sendingMessageIds.remove(tempId);
         throw Exception('WebSocket client is offline');
       }
 
@@ -514,7 +517,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     } catch (e) {
       debugPrint('Failed to send pending message $tempId: $e');
       _wasOffline = true;
-    } finally {
       _sendingMessageIds.remove(tempId);
     }
   }
@@ -603,6 +605,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     if (type == 'ack') {
       final tempId = event['tempId'];
+      _sendingMessageIds.remove(tempId);
       final messageId = event['messageId'];
       final timestamp = event['timestamp'] as int?;
 
@@ -616,6 +619,18 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             _localMessages[index]['createdAt'] =
                 DateTime.fromMillisecondsSinceEpoch(timestamp).toIso8601String();
           }
+        }
+      });
+      _saveLocalMessages();
+    } else if (type == 'delete') {
+      final messageId = event['messageId'];
+      setState(() {
+        final index = _localMessages.indexWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
+        if (index != -1) {
+          _localMessages[index]['isDeleted'] = true;
+          _localMessages[index]['text'] = 'This message was deleted';
+          _localMessages[index]['mediaUrl'] = null;
+          _localMessages[index]['mediaType'] = null;
         }
       });
       _saveLocalMessages();
@@ -723,6 +738,15 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     // Update static in-memory cache
     _inMemoryMsgCache[widget.chatId] = List<Map<String, dynamic>>.from(_localMessages);
 
+    final completer = Completer<void>();
+    final previous = _saveQueue;
+    _saveQueue = completer.future;
+    if (previous != null) {
+      try {
+        await previous;
+      } catch (_) {}
+    }
+
     try {
       final directory = await getApplicationDocumentsDirectory();
       final dir = Directory('${directory.path}/chats');
@@ -731,7 +755,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       }
       final file = File('${dir.path}/${widget.chatId}_messages.json');
       await file.writeAsString(jsonEncode(_localMessages));
-    } catch (_) {}
+    } catch (_) {} finally {
+      completer.complete();
+    }
   }
 
   bool _mergeIncomingUserMessage(Map<String, dynamic> msg) {
@@ -1088,6 +1114,28 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     } catch (_) {}
   }
 
+  Future<void> _loadCachedGroupData() async {
+    if (!widget.isGroup) return;
+    try {
+      final cachedNames = await LocalStorageService().getCachedJson('group_participants_${widget.chatId}');
+      final cachedIcon = await LocalStorageService().getCachedJson('group_icon_${widget.chatId}') as String?;
+      final cachedCreator = await LocalStorageService().getCachedJson('group_creator_${widget.chatId}') as String?;
+      if (mounted) {
+        setState(() {
+          if (cachedNames != null && cachedNames is Map) {
+            _participantNames = Map<String, String>.from(cachedNames.map((k, v) => MapEntry(k.toString(), v.toString())));
+          }
+          if (cachedIcon != null) {
+            _groupIcon = cachedIcon;
+          }
+          if (cachedCreator != null) {
+            _creatorId = cachedCreator;
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
   Future<void> _loadGroupDetails() async {
     if (!widget.isGroup) return;
     final supabase = context.read<SupabaseService>();
@@ -1102,6 +1150,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           _groupIcon = res['groupIcon'] as String?;
           _creatorId = res['creatorId'] as String?;
         });
+        await LocalStorageService().cacheJson('group_icon_${widget.chatId}', _groupIcon);
+        await LocalStorageService().cacheJson('group_creator_${widget.chatId}', _creatorId);
         await _loadGroupMetadata();
       }
     } catch (e) {
@@ -1154,6 +1204,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         setState(() {
           _participantNames = names;
         });
+        await LocalStorageService().cacheJson('group_participants_${widget.chatId}', names);
       }
     } catch (e) {
       debugPrint('Error loading group participants: $e');
@@ -1422,7 +1473,15 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             onPressed: () async {
               Navigator.pop(context);
               try {
-                await context.read<SupabaseService>().deleteMessageForMe(msg['id']);
+                final messageId = msg['id'] ?? msg['messageId'];
+                if (messageId != null) {
+                  // Delete locally first
+                  _localMessages.removeWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
+                  await _saveLocalMessages();
+                  setState(() {});
+                  // Sync to Supabase
+                  await context.read<SupabaseService>().deleteMessageForMe(messageId);
+                }
               } catch (_) {}
             },
             child: const Text('DELETE FOR ME', style: TextStyle(color: Colors.redAccent)),
@@ -1432,7 +1491,30 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               onPressed: () async {
                 Navigator.pop(context);
                 try {
-                  await context.read<SupabaseService>().deleteMessageForEveryone(msg['id']);
+                  final messageId = msg['id'] ?? msg['messageId'];
+                  if (messageId != null) {
+                    // Update locally first
+                    final index = _localMessages.indexWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
+                    if (index != -1) {
+                      _localMessages[index]['isDeleted'] = true;
+                      _localMessages[index]['text'] = 'This message was deleted';
+                      _localMessages[index]['mediaUrl'] = null;
+                      _localMessages[index]['mediaType'] = null;
+                      await _saveLocalMessages();
+                      setState(() {});
+                    }
+
+                    // Sync to Supabase
+                    await context.read<SupabaseService>().deleteMessageForEveryone(messageId);
+
+                    // Broadcast via WebSocket
+                    final recipientId = widget.otherUserId ?? '';
+                    WebSocketService().sendDeleteMessage(
+                      chatId: widget.chatId,
+                      messageId: messageId,
+                      recipientId: recipientId,
+                    );
+                  }
                 } catch (_) {}
               },
               child: const Text('DELETE FOR EVERYONE', style: TextStyle(color: Colors.redAccent)),
@@ -1469,34 +1551,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     );
   }
 
-  void _showGroupMembersDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[950],
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('${widget.otherUserName} Members', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
-            children: _participantNames.entries.map((entry) {
-              return ListTile(
-                leading: UserAvatar(userId: entry.key, radius: 16),
-                title: Text(entry.value, style: const TextStyle(color: Colors.white)),
-              );
-            }).toList(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close', style: TextStyle(color: Colors.cyanAccent)),
-          ),
-        ],
-      ),
-    );
-  }
+
 
   void _confirmClearChat() {
     showDialog(
@@ -2058,7 +2113,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                             url: mediaUrl,
                                             localFilePath: msg['mediaFilePath'],
                                             messageId: msg['id'],
-                                            deleteFromServer: !isMe,
+                                            deleteFromServer: false,
                                           )
                                         else if (msg['isPending'] == true && msg['mediaFilePath'] != null)
                                           ClipRRect(
@@ -2106,7 +2161,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                             mediaType: mediaType,
                                             chatId: widget.chatId,
                                             messageId: msg['id'],
-                                            deleteFromServer: !isMe,
+                                            deleteFromServer: false,
                                           ),
                                         const SizedBox(height: 6),
                                       ],
@@ -2610,11 +2665,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       );
 
       if (!sent) {
+        _sendingMessageIds.remove(tempId);
         throw Exception('WebSocket client is offline');
       }
     } catch (e) {
       debugPrint('Failed to send pending sticker $tempId: $e');
-    } finally {
       _sendingMessageIds.remove(tempId);
     }
   }

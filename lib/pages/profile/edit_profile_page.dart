@@ -209,7 +209,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               gradient: LinearGradient(
                 colors: [
                   Colors.transparent,
-                  ReelTheme.accentColor,
+                  Color(0xFF00BFFF),
                   Colors.transparent,
                 ],
               ),
@@ -230,7 +230,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: ReelTheme.accentColor.withOpacity(0.15),
+                    color: const Color(0xFF00BFFF).withOpacity(0.15),
                     blurRadius: 100,
                   ),
                 ],
@@ -269,15 +269,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         Container(
                           width: 130,
                           height: 130,
-                          decoration: BoxDecoration(
+                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: ReelTheme.accentColor.withOpacity(0.8),
+                              color: const Color(0xFF00BFFF).withOpacity(0.8),
                               width: 3,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: ReelTheme.accentColor.withOpacity(0.3),
+                                color: const Color(0xFF00BFFF).withOpacity(0.3),
                                 blurRadius: 16,
                                 spreadRadius: 2,
                               ),
@@ -296,7 +296,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                                           color: Colors.white.withOpacity(0.05),
                                           child: const Center(
                                             child: CircularProgressIndicator(
-                                              color: ReelTheme.accentColor,
+                                              color: Color(0xFF00BFFF),
                                               strokeWidth: 2,
                                             ),
                                           ),
@@ -521,7 +521,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(
-                color: ReelTheme.accentColor,
+                color: Color(0xFF00BFFF),
                 width: 1.2,
               ),
             ),
