@@ -533,6 +533,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   Future<void> _fetchUndeliveredHistory() async {
     try {
+      final myId = context.read<SupabaseService>().currentUser?.id;
       String? lastMessageId;
       if (_localMessages.isNotEmpty) {
         final nonPending = _localMessages.where((m) => m['isPending'] != true).toList();
