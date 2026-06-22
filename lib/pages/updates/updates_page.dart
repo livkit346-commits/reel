@@ -40,6 +40,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
     final supabase = context.read<SupabaseService>();
     try {
       final statuses = await supabase.getActiveStatuses();
+      final viewedStatusIds = await supabase.getViewedStatusIds();
       
       final Map<String, List<dynamic>> groupedMap = {};
       final Map<String, String> userNames = {};
@@ -70,6 +71,15 @@ class _UpdatesPageState extends State<UpdatesPage> {
           final dateB = DateTime.parse(b['createdAt']);
           return dateA.compareTo(dateB);
         });
+
+        // Compute viewed count for this user
+        int viewedCount = 0;
+        for (var status in userStatuses) {
+          final statusId = (status['id'] ?? '').toString();
+          if (viewedStatusIds.contains(statusId)) {
+            viewedCount++;
+          }
+        }
         
         if (userId == myId) {
           myStatuses = userStatuses;
@@ -80,12 +90,21 @@ class _UpdatesPageState extends State<UpdatesPage> {
           'userId': userId,
           'userName': userNames[userId],
           'statuses': userStatuses,
+          'viewedCount': viewedCount,
+          'isFullyViewed': viewedCount == userStatuses.length,
           'latestUpdate': userStatuses.last['createdAt'], // For sorting users
         });
       }
       
-      // Sort users by who has the most recent status (descending)
+      // Sort users by unviewed first, viewed last, then chronological descending
       groupedList.sort((a, b) {
+        final isFullyViewedA = a['isFullyViewed'] as bool;
+        final isFullyViewedB = b['isFullyViewed'] as bool;
+
+        if (isFullyViewedA != isFullyViewedB) {
+          return isFullyViewedA ? 1 : -1; // unviewed (false) comes first
+        }
+
         final dateA = DateTime.parse(a['latestUpdate']);
         final dateB = DateTime.parse(b['latestUpdate']);
         return dateB.compareTo(dateA);
@@ -372,10 +391,10 @@ class _UpdatesPageState extends State<UpdatesPage> {
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                CustomPaint(
+                                 CustomPaint(
                                   painter: StatusRingPainter(
                                     statusCount: userStatuses.length,
-                                    viewedCount: 0, // Assume 0 viewed for now unless we add viewed tracking
+                                    viewedCount: group['viewedCount'] ?? 0,
                                     unviewedColor: const Color(0xFF00A884), // WhatsApp Green
                                     viewedColor: Colors.grey,
                                   ),

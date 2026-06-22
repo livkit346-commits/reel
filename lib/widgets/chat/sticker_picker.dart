@@ -25,9 +25,9 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
   List<String> _customStickers = [];
 
   static const List<String> _defaultStickers = [
-    'https://zvxrcwgvvubgqlxbcyov.supabase.co/storage/v1/object/public/media/default_stickers/smile.png',
-    'https://zvxrcwgvvubgqlxbcyov.supabase.co/storage/v1/object/public/media/default_stickers/skull.png',
-    'https://zvxrcwgvvubgqlxbcyov.supabase.co/storage/v1/object/public/media/default_stickers/heart.png',
+    'assets/cyber_neon_smile.png',
+    'assets/cyber_neon_skull.png',
+    'assets/cyber_neon_heart.png',
   ];
 
   @override
@@ -218,19 +218,25 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.white.withOpacity(0.05)),
             ),
-            child: Image.network(
-              actualUrl,
-              fit: BoxFit.contain,
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) return child;
-                return const Center(
-                  child: CircularProgressIndicator(
-                    color: Color(0xFF00BFFF),
-                    strokeWidth: 1.5,
+            child: actualUrl.startsWith('http')
+                ? Image.network(
+                    actualUrl,
+                    fit: BoxFit.contain,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF00BFFF),
+                          strokeWidth: 1.5,
+                        ),
+                      );
+                    },
+                    errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
+                  )
+                : Image.asset(
+                    actualUrl,
+                    fit: BoxFit.contain,
                   ),
-                );
-              },
-            ),
           ),
         );
       },

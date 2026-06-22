@@ -775,6 +775,29 @@ class SupabaseService {
     }
   }
 
+  // Get all status IDs viewed by the current user
+  Future<List<String>> getViewedStatusIds() async {
+    final myId = currentUser?.id;
+    if (myId == null) return [];
+    try {
+      final response = await client
+          .from('status_views')
+          .select('statusId')
+          .eq('userId', myId);
+      return (response as List).map<String>((e) => (e['statusId'] ?? '').toString()).toList();
+    } catch (_) {
+      try {
+        final response = await client
+            .from('status_views')
+            .select('statusid')
+            .eq('userid', myId);
+        return (response as List).map<String>((e) => (e['statusid'] ?? '').toString()).toList();
+      } catch (_) {
+        return [];
+      }
+    }
+  }
+
   // Status: Retrieve active statuses
   Future<List<dynamic>> getActiveStatuses() async {
     try {
@@ -1283,8 +1306,8 @@ class SupabaseService {
 
           // Compute hasUnread locally
           final isMe = latestMsg['senderId'] == myId;
-          final isReceived = latestMsg['received'] as bool? ?? false;
-          chatData['hasUnread'] = !isMe && !isReceived;
+          final isSeen = latestMsg['seen'] as bool? ?? false;
+          chatData['hasUnread'] = !isMe && !isSeen;
         } else {
           // Fallback: Query legacy messages
           chatData['latestMessageText'] = null;
@@ -1538,6 +1561,98 @@ class SupabaseService {
       debugPrint('Error saving incoming message: $e');
     }
   }
+
+  // Save incoming WebSocket status update to the local cache
+  Future<void> saveIncomingStatus(Map<String, dynamic> event) async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+
+    final chatId = event['chatId'];
+    final messageId = event['messageId'] ?? event['id'];
+    final status = event['status'];
+    final fromUserId = event['senderId']; // Added by Go backend when forwarding status
+
+    if (chatId == null || messageId == null || status == null) return;
+
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/chats/${chatId}_messages.json');
+      if (!await file.exists()) return;
+
+      List<Map<String, dynamic>> localMessages = [];
+      try {
+        final content = await file.readAsString();
+        final List<dynamic> decoded = jsonDecode(content);
+        localMessages = decoded.map((m) => Map<String, dynamic>.from(m)).toList();
+      } catch (_) {
+        return;
+      }
+
+      final index = localMessages.indexWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
+      if (index == -1) return;
+
+      final msg = localMessages[index];
+
+      // Retrieve isGroup from cached active chats
+      bool isGroup = false;
+      final cached = await LocalStorageService().getCachedJson('active_chats_$myId');
+      if (cached != null && cached is List) {
+        final chat = cached.firstWhere((c) => c['chatId'] == chatId, orElse: () => null);
+        if (chat != null) {
+          isGroup = chat['isGroup'] as bool? ?? false;
+        }
+      }
+
+      if (!isGroup) {
+        msg['received'] = (status == 'received' || status == 'seen');
+        msg['seen'] = (status == 'seen');
+      } else {
+        // Group chat status update tracking
+        List<String> receivedList = List<String>.from(msg['receivedParticipants'] ?? []);
+        List<String> seenList = List<String>.from(msg['seenParticipants'] ?? []);
+
+        if (fromUserId != null) {
+          if (status == 'received') {
+            if (!receivedList.contains(fromUserId)) {
+              receivedList.add(fromUserId);
+            }
+          } else if (status == 'seen') {
+            if (!receivedList.contains(fromUserId)) {
+              receivedList.add(fromUserId);
+            }
+            if (!seenList.contains(fromUserId)) {
+              seenList.add(fromUserId);
+            }
+          }
+        }
+
+        msg['receivedParticipants'] = receivedList;
+        msg['seenParticipants'] = seenList;
+
+        // Resolve group participants from local storage cache
+        final participantCacheKey = 'group_participants_$chatId';
+        final cachedParticipants = await LocalStorageService().getCachedJson(participantCacheKey);
+        List<String> otherMembers = [];
+        if (cachedParticipants != null && cachedParticipants is List) {
+          otherMembers = cachedParticipants.map((p) => p.toString()).where((uid) => uid != myId).toList();
+        }
+
+        if (otherMembers.isNotEmpty) {
+          msg['received'] = otherMembers.any((uid) => receivedList.contains(uid));
+          msg['seen'] = otherMembers.every((uid) => seenList.contains(uid));
+        } else {
+          msg['received'] = (status == 'received' || status == 'seen');
+          msg['seen'] = (status == 'seen');
+        }
+      }
+
+      await file.writeAsString(jsonEncode(localMessages));
+      debugPrint('Saved status update ($status) for message $messageId in chat $chatId');
+    } catch (e) {
+      debugPrint('Error saving incoming status: $e');
+    }
+  }
+
   // Send a message
   Future<Map<String, dynamic>> sendMessage({
     required String chatId,

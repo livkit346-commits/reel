@@ -58,9 +58,71 @@ class FcmService {
         debugPrint('Got a message whilst in the foreground!');
         debugPrint('Message data: ${message.data}');
 
+        final chatId = message.data['chatId'];
+        if (chatId != null && chatId == _supabaseService.activeChatId) {
+          // User is actively in this chat, do not show notification banner
+          return;
+        }
+
         if (message.notification != null) {
-          debugPrint('Message also contained a notification: ${message.notification!.title}');
-          // You could display an in-app banner here or play a sound
+          final title = message.notification!.title ?? 'New Message';
+          final body = message.notification!.body ?? '';
+
+          if (navigatorKey.currentContext != null) {
+            ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
+              SnackBar(
+                behavior: SnackBarBehavior.floating,
+                backgroundColor: Colors.grey[950],
+                duration: const Duration(seconds: 4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: Color(0xFF00BFFF), width: 1),
+                ),
+                margin: const EdgeInsets.all(12),
+                content: Row(
+                  children: [
+                    const Icon(Icons.chat_bubble_outline, color: Color(0xFF00BFFF)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            body,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                action: SnackBarAction(
+                  label: 'View',
+                  textColor: const Color(0xFF00BFFF),
+                  onPressed: () {
+                    if (chatId != null) {
+                      _navigateToChat(chatId);
+                    }
+                  },
+                ),
+              ),
+            );
+          }
         }
       });
 

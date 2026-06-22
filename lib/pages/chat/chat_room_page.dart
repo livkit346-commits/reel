@@ -589,6 +589,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           });
         });
         await _saveLocalMessages();
+        _markAllMessagesAsSeen();
       }
     } catch (e) {
       debugPrint('Error manual syncing incoming history: $e');
@@ -637,11 +638,48 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     } else if (type == 'status') {
       final messageId = event['messageId'];
       final status = event['status'];
+      final fromUserId = event['senderId'];
+      final myId = context.read<SupabaseService>().currentUser?.id;
 
       setState(() {
         final index = _localMessages.indexWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
         if (index != -1) {
-          _localMessages[index]['received'] = (status == 'received');
+          final msg = _localMessages[index];
+          if (!widget.isGroup) {
+            msg['received'] = (status == 'received' || status == 'seen');
+            msg['seen'] = (status == 'seen');
+          } else {
+            // Group chat status update tracking
+            List<String> receivedList = List<String>.from(msg['receivedParticipants'] ?? []);
+            List<String> seenList = List<String>.from(msg['seenParticipants'] ?? []);
+
+            if (fromUserId != null) {
+              if (status == 'received') {
+                if (!receivedList.contains(fromUserId)) {
+                  receivedList.add(fromUserId);
+                }
+              } else if (status == 'seen') {
+                if (!receivedList.contains(fromUserId)) {
+                  receivedList.add(fromUserId);
+                }
+                if (!seenList.contains(fromUserId)) {
+                  seenList.add(fromUserId);
+                }
+              }
+            }
+
+            msg['receivedParticipants'] = receivedList;
+            msg['seenParticipants'] = seenList;
+
+            final otherMembers = _participantNames.keys.where((uid) => uid != myId).toList();
+            if (otherMembers.isNotEmpty) {
+              msg['received'] = otherMembers.any((uid) => receivedList.contains(uid));
+              msg['seen'] = otherMembers.every((uid) => seenList.contains(uid));
+            } else {
+              msg['received'] = (status == 'received' || status == 'seen');
+              msg['seen'] = (status == 'seen');
+            }
+          }
         }
       });
       _saveLocalMessages();
@@ -660,15 +698,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         final localMsg = {
           'id': messageId,
           'messageId': messageId,
-          'chatId': event['chatId'],
+          'chatId': event['chatId'] ?? widget.chatId,
           'senderId': senderId,
           'text': event['text'],
           'mediaUrl': event['mediaUrl'],
           'mediaType': event['mediaType'],
           'createdAt': event['timestamp'] != null
-              ? DateTime.fromMillisecondsSinceEpoch(event['timestamp']).toIso8601String()
+              ? DateTime.fromMillisecondsSinceEpoch((event['timestamp'] as num).toInt()).toIso8601String()
               : DateTime.now().toIso8601String(),
           'received': true,
+          'seen': true, // actively in chat room, so it is read immediately
         };
         _localMessages.add(localMsg);
       });
@@ -682,11 +721,19 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       }
 
       if (senderId != myId) {
+        // Send received status
         WebSocketService().sendStatusUpdate(
           chatId: widget.chatId,
           messageId: messageId,
           recipientId: senderId,
           status: 'received',
+        );
+        // Send seen status
+        WebSocketService().sendStatusUpdate(
+          chatId: widget.chatId,
+          messageId: messageId,
+          recipientId: senderId,
+          status: 'seen',
         );
         final mType = event['mediaType'] as String?;
         if (mType != 'image' && mType != 'video' && mType != 'audio') {
@@ -722,6 +769,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           }).toList();
           _isLoadingLocal = false;
         });
+        _markAllMessagesAsSeen();
       } else {
         setState(() {
           _isLoadingLocal = false;
@@ -731,6 +779,37 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       setState(() {
         _isLoadingLocal = false;
       });
+    }
+  }
+
+  void _markAllMessagesAsSeen() {
+    final myId = context.read<SupabaseService>().currentUser?.id;
+    if (myId == null) return;
+
+    bool hasChanges = false;
+    for (int i = 0; i < _localMessages.length; i++) {
+      final msg = _localMessages[i];
+      if (msg['senderId'] != myId && msg['seen'] != true) {
+        msg['seen'] = true;
+        msg['received'] = true;
+        hasChanges = true;
+
+        final messageId = msg['id'] ?? msg['messageId'];
+        final senderId = msg['senderId'];
+        if (messageId != null && senderId != null) {
+          WebSocketService().sendStatusUpdate(
+            chatId: widget.chatId,
+            messageId: messageId,
+            recipientId: senderId,
+            status: 'seen',
+          );
+        }
+      }
+    }
+
+    if (hasChanges) {
+      setState(() {});
+      _saveLocalMessages();
     }
   }
 
@@ -2060,147 +2139,273 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                             child: mediaType == 'sticker' && !isDeleted
                                 ? _buildStickerMessage(msg, isMe, timeStr, received)
                                 : Container(
-                                    margin: const EdgeInsets.only(bottom: 8),
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                    decoration: BoxDecoration(
-                                      color: isDeleted 
-                                          ? Colors.transparent 
-                                          : (isMe ? const Color(0xFF7E1C31) : const Color(0xFF262626)),
-                                      border: isDeleted ? Border.all(color: Colors.white24, width: 1) : null,
-                                      borderRadius: BorderRadius.only(
-                                        topLeft: const Radius.circular(20),
-                                        topRight: const Radius.circular(20),
-                                        bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
-                                        bottomRight: isMe ? Radius.zero : const Radius.circular(20),
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      padding: (isDeleted || (text != null && text.trim().isNotEmpty) || (mediaType != 'image' && mediaType != 'video'))
+                                          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
+                                          : EdgeInsets.zero,
+                                      decoration: BoxDecoration(
+                                        color: isDeleted 
+                                            ? Colors.transparent 
+                                            : (isMe ? const Color(0xFF7E1C31) : const Color(0xFF262626)),
+                                        border: isDeleted ? Border.all(color: Colors.white24, width: 1) : null,
+                                        borderRadius: BorderRadius.only(
+                                          topLeft: const Radius.circular(20),
+                                          topRight: const Radius.circular(20),
+                                          bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
+                                          bottomRight: isMe ? Radius.zero : const Radius.circular(20),
+                                        ),
                                       ),
-                                    ),
-                                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
-                              child: IntrinsicWidth(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (msg['replyToMessageId'] != null)
-                                      _buildReplyBubble(msg, myId),
-                                    if (isDeleted)
-                                      const Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.block, color: Colors.white30, size: 16),
-                                          SizedBox(width: 6),
-                                          Text('This message was deleted', style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic)),
-                                        ],
-                                      )
-                                    else ...[
-                                      if (widget.isGroup && !isMe)
-                                        Align(
-                                          alignment: Alignment.topLeft,
-                                          child: Padding(
-                                            padding: const EdgeInsets.only(bottom: 6),
-                                            child: Text(
-                                              _participantNames[msg['senderId']] ?? 'User',
-                                              style: TextStyle(
-                                                color: Colors.cyanAccent.shade400,
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      if ((mediaUrl != null || msg['mediaFilePath'] != null) && mediaType != null) ...[
-                                        if (mediaType == 'audio')
-                                          AudioMessagePlayer(
-                                            url: mediaUrl,
-                                            localFilePath: msg['mediaFilePath'],
-                                            messageId: msg['id'],
-                                            deleteFromServer: false,
-                                          )
-                                        else if (msg['isPending'] == true && msg['mediaFilePath'] != null)
-                                          ClipRRect(
-                                            borderRadius: BorderRadius.circular(16),
-                                            child: mediaType == 'image'
-                                                ? Image.file(
-                                                    File(msg['mediaFilePath']),
-                                                    width: 200,
-                                                    height: 200,
-                                                    fit: BoxFit.cover,
-                                                  )
-                                                : GestureDetector(
-                                                    onTap: () {
-                                                      Navigator.push(
-                                                        context,
-                                                        MaterialPageRoute(
-                                                          builder: (context) => ChatVideoViewerPage(videoPath: msg['mediaFilePath']),
-                                                        ),
-                                                      );
-                                                    },
-                                                    child: Stack(
-                                                      alignment: Alignment.center,
-                                                      children: [
-                                                        Container(
-                                                          width: 200,
-                                                          height: 200,
-                                                          color: Colors.white.withOpacity(0.1),
-                                                          child: const Icon(Icons.video_library_outlined, color: Colors.white54, size: 40),
-                                                        ),
-                                                        Container(
-                                                          padding: const EdgeInsets.all(8),
-                                                          decoration: const BoxDecoration(
-                                                            color: Colors.black54,
-                                                            shape: BoxShape.circle,
-                                                          ),
-                                                          child: const Icon(Icons.play_arrow, color: Colors.white, size: 28),
-                                                        ),
-                                                      ],
-                                                    ),
-                                                  ),
-                                          )
-                                        else
-                                          CachedMediaView(
-                                            url: mediaUrl!,
-                                            mediaType: mediaType,
-                                            chatId: widget.chatId,
-                                            messageId: msg['id'],
-                                            deleteFromServer: false,
-                                          ),
-                                        const SizedBox(height: 6),
-                                      ],
-                                      if (text != null && text.isNotEmpty)
-                                        Align(
-                                          alignment: Alignment.topLeft,
-                                          child: Text(
-                                            text,
-                                            style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
-                                          ),
-                                        ),
-                                    ],
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        if (msg['is_pinned'] == true)
-                                          const Padding(
-                                            padding: EdgeInsets.only(right: 4),
-                                            child: Icon(Icons.push_pin, size: 12, color: Colors.white70),
-                                          ),
-                                        Text(
-                                          timeStr,
-                                          style: const TextStyle(color: Colors.white38, fontSize: 9),
-                                        ),
-                                        if (isMe) ...[
-                                          const SizedBox(width: 4),
-                                          Icon(
-                                            msg['isPending'] == true ? Icons.access_time : Icons.done_all,
-                                            size: 13,
-                                            color: msg['isPending'] == true ? Colors.white38 : (received ? Colors.lightBlueAccent : Colors.white30),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
+                                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+                               child: IntrinsicWidth(
+                                 child: Column(
+                                   crossAxisAlignment: CrossAxisAlignment.end,
+                                   mainAxisSize: MainAxisSize.min,
+                                   children: [
+                                     if (msg['replyToMessageId'] != null)
+                                       _buildReplyBubble(msg, myId),
+                                     if (isDeleted)
+                                       const Row(
+                                         mainAxisSize: MainAxisSize.min,
+                                         children: [
+                                           Icon(Icons.block, color: Colors.white30, size: 16),
+                                           SizedBox(width: 6),
+                                           Text('This message was deleted', style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic)),
+                                         ],
+                                       )
+                                     else ...[
+                                       if (widget.isGroup && !isMe)
+                                         Align(
+                                           alignment: Alignment.topLeft,
+                                           child: Padding(
+                                             padding: EdgeInsets.only(
+                                               bottom: 6,
+                                               left: (text == null || text.trim().isEmpty) && (mediaType == 'image' || mediaType == 'video') ? 12 : 0,
+                                               top: (text == null || text.trim().isEmpty) && (mediaType == 'image' || mediaType == 'video') ? 8 : 0,
+                                               right: 12,
+                                             ),
+                                             child: Text(
+                                               _participantNames[msg['senderId']] ?? 'User',
+                                               style: TextStyle(
+                                                 color: Colors.cyanAccent.shade400,
+                                                 fontWeight: FontWeight.bold,
+                                                 fontSize: 12,
+                                               ),
+                                             ),
+                                           ),
+                                         ),
+                                       if ((mediaUrl != null || msg['mediaFilePath'] != null) && mediaType != null) ...[
+                                         if (mediaType == 'audio')
+                                           AudioMessagePlayer(
+                                             url: mediaUrl,
+                                             localFilePath: msg['mediaFilePath'],
+                                             messageId: msg['id'],
+                                             deleteFromServer: false,
+                                           )
+                                         else if (text == null || text.trim().isEmpty)
+                                           // Overlay layout for caption-less media bubble
+                                           Stack(
+                                             children: [
+                                               ClipRRect(
+                                                 borderRadius: BorderRadius.only(
+                                                   topLeft: const Radius.circular(20),
+                                                   topRight: const Radius.circular(20),
+                                                   bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
+                                                   bottomRight: isMe ? Radius.zero : const Radius.circular(20),
+                                                 ),
+                                                 child: msg['isPending'] == true && msg['mediaFilePath'] != null
+                                                     ? (mediaType == 'image'
+                                                         ? Image.file(
+                                                             File(msg['mediaFilePath']),
+                                                             width: 200,
+                                                             height: 200,
+                                                             fit: BoxFit.cover,
+                                                           )
+                                                         : GestureDetector(
+                                                             onTap: () {
+                                                               Navigator.push(
+                                                                 context,
+                                                                 MaterialPageRoute(
+                                                                   builder: (context) => ChatVideoViewerPage(videoPath: msg['mediaFilePath']),
+                                                                 ),
+                                                               );
+                                                             },
+                                                             child: Stack(
+                                                               alignment: Alignment.center,
+                                                               children: [
+                                                                 Container(
+                                                                   width: 200,
+                                                                   height: 200,
+                                                                   color: Colors.white.withOpacity(0.1),
+                                                                   child: const Icon(Icons.video_library_outlined, color: Colors.white54, size: 40),
+                                                                 ),
+                                                                 Container(
+                                                                   padding: const EdgeInsets.all(8),
+                                                                   decoration: const BoxDecoration(
+                                                                     color: Colors.black54,
+                                                                     shape: BoxShape.circle,
+                                                                   ),
+                                                                   child: const Icon(Icons.play_arrow, color: Colors.white, size: 28),
+                                                                 ),
+                                                               ],
+                                                             ),
+                                                           ))
+                                                     : CachedMediaView(
+                                                         url: mediaUrl!,
+                                                         mediaType: mediaType,
+                                                         chatId: widget.chatId,
+                                                         messageId: msg['id'],
+                                                         deleteFromServer: false,
+                                                         width: 200,
+                                                         height: 200,
+                                                       ),
+                                               ),
+                                               // Overlaid timestamp & receipt checks in bottom-right corner
+                                               Positioned(
+                                                 bottom: 8,
+                                                 right: 8,
+                                                 child: Container(
+                                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                   decoration: BoxDecoration(
+                                                     color: Colors.black.withOpacity(0.5),
+                                                     borderRadius: BorderRadius.circular(10),
+                                                   ),
+                                                   child: Row(
+                                                     mainAxisSize: MainAxisSize.min,
+                                                     children: [
+                                                       if (msg['is_pinned'] == true)
+                                                         const Padding(
+                                                           padding: EdgeInsets.only(right: 4),
+                                                           child: Icon(Icons.push_pin, size: 10, color: Colors.white70),
+                                                         ),
+                                                       Text(
+                                                         timeStr,
+                                                         style: const TextStyle(color: Colors.white, fontSize: 9),
+                                                       ),
+                                                       if (isMe) ...[
+                                                         const SizedBox(width: 4),
+                                                         Icon(
+                                                           msg['isPending'] == true 
+                                                               ? Icons.access_time 
+                                                               : (msg['seen'] == true || msg['received'] == true ? Icons.done_all : Icons.done),
+                                                           size: 11,
+                                                           color: msg['isPending'] == true 
+                                                               ? Colors.white38 
+                                                               : (msg['seen'] == true 
+                                                                   ? Colors.lightBlueAccent 
+                                                                   : (msg['received'] == true ? Colors.white70 : Colors.white30)),
+                                                         ),
+                                                       ],
+                                                     ],
+                                                   ),
+                                                 ),
+                                               ),
+                                             ],
+                                           )
+                                         else ...[
+                                           // Legacy media bubble (with caption text below)
+                                           if (msg['isPending'] == true && msg['mediaFilePath'] != null)
+                                             ClipRRect(
+                                               borderRadius: BorderRadius.circular(16),
+                                               child: mediaType == 'image'
+                                                   ? Image.file(
+                                                       File(msg['mediaFilePath']),
+                                                       width: 200,
+                                                       height: 200,
+                                                       fit: BoxFit.cover,
+                                                     )
+                                                   : GestureDetector(
+                                                       onTap: () {
+                                                         Navigator.push(
+                                                           context,
+                                                           MaterialPageRoute(
+                                                             builder: (context) => ChatVideoViewerPage(videoPath: msg['mediaFilePath']),
+                                                           ),
+                                                         );
+                                                       },
+                                                       child: Stack(
+                                                         alignment: Alignment.center,
+                                                         children: [
+                                                           Container(
+                                                             width: 200,
+                                                             height: 200,
+                                                             color: Colors.white.withOpacity(0.1),
+                                                             child: const Icon(Icons.video_library_outlined, color: Colors.white54, size: 40),
+                                                           ),
+                                                           Container(
+                                                             padding: const EdgeInsets.all(8),
+                                                             decoration: const BoxDecoration(
+                                                               color: Colors.black54,
+                                                               shape: BoxShape.circle,
+                                                             ),
+                                                             child: const Icon(Icons.play_arrow, color: Colors.white, size: 28),
+                                                           ),
+                                                         ],
+                                                       ),
+                                                     ),
+                                             )
+                                           else
+                                             CachedMediaView(
+                                               url: mediaUrl!,
+                                               mediaType: mediaType,
+                                               chatId: widget.chatId,
+                                               messageId: msg['id'],
+                                               deleteFromServer: false,
+                                               width: 200,
+                                               height: 200,
+                                             ),
+                                           const SizedBox(height: 6),
+                                         ],
+                                       ],
+                                       if (text != null && text.isNotEmpty)
+                                         Align(
+                                           alignment: Alignment.topLeft,
+                                           child: Padding(
+                                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                                             child: Text(
+                                               text,
+                                               style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
+                                             ),
+                                           ),
+                                         ),
+                                     ],
+                                     if (isDeleted || (text != null && text.trim().isNotEmpty) || (mediaType != 'image' && mediaType != 'video')) ...[
+                                       const SizedBox(height: 4),
+                                       Padding(
+                                         padding: const EdgeInsets.only(right: 14, bottom: 8),
+                                         child: Row(
+                                           mainAxisAlignment: MainAxisAlignment.end,
+                                           mainAxisSize: MainAxisSize.min,
+                                           children: [
+                                             if (msg['is_pinned'] == true)
+                                               const Padding(
+                                                 padding: EdgeInsets.only(right: 4),
+                                                 child: Icon(Icons.push_pin, size: 12, color: Colors.white70),
+                                               ),
+                                             Text(
+                                               timeStr,
+                                               style: const TextStyle(color: Colors.white38, fontSize: 9),
+                                             ),
+                                             if (isMe) ...[
+                                               const SizedBox(width: 4),
+                                               Icon(
+                                                 msg['isPending'] == true 
+                                                     ? Icons.access_time 
+                                                     : (msg['seen'] == true || msg['received'] == true ? Icons.done_all : Icons.done),
+                                                 size: 13,
+                                                 color: msg['isPending'] == true 
+                                                     ? Colors.white38 
+                                                     : (msg['seen'] == true 
+                                                         ? Colors.lightBlueAccent 
+                                                         : (msg['received'] == true ? Colors.white54 : Colors.white30)),
+                                               ),
+                                             ],
+                                           ],
+                                         ),
+                                       ),
+                                     ],
+                                   ],
+                                 ),
+                               ),
                             ),
                           ),
                         ),
@@ -2501,15 +2706,20 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   height: 130,
                   padding: const EdgeInsets.all(4),
                   child: mediaUrl != null
-                      ? Image.network(
-                          mediaUrl,
-                          fit: BoxFit.contain,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5));
-                          },
-                          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 40),
-                        )
+                      ? (mediaUrl.startsWith('http')
+                          ? Image.network(
+                              mediaUrl,
+                              fit: BoxFit.contain,
+                              loadingBuilder: (context, child, progress) {
+                                if (progress == null) return child;
+                                return const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5));
+                              },
+                              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 40),
+                            )
+                          : Image.asset(
+                              mediaUrl,
+                              fit: BoxFit.contain,
+                            ))
                       : const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5)),
                 ),
                 Positioned(
@@ -2528,11 +2738,17 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           timeStr,
                           style: const TextStyle(color: Colors.white70, fontSize: 10),
                         ),
-                        if (isMe) ...[
+                         if (isMe) ...[
                           const SizedBox(width: 4),
                           Icon(
-                            received ? Icons.done_all : Icons.done,
-                            color: received ? const Color(0xFF00BFFF) : Colors.white60,
+                            msg['isPending'] == true 
+                                ? Icons.access_time 
+                                : (msg['seen'] == true || msg['received'] == true ? Icons.done_all : Icons.done),
+                            color: msg['isPending'] == true 
+                                ? Colors.white38 
+                                : (msg['seen'] == true 
+                                    ? Colors.lightBlueAccent 
+                                    : (msg['received'] == true ? Colors.white70 : Colors.white30)),
                             size: 11,
                           ),
                         ],

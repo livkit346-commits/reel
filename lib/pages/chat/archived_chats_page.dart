@@ -152,20 +152,18 @@ class _ArchivedChatsPageState extends State<ArchivedChatsPage> {
                               fontSize: 16,
                             ),
                           ),
-                          subtitle: Text(
-                            hasUnread
-                                ? 'New secure message received!'
-                                : (chatMap['latestMessageText'] != null && chatMap['latestMessageText'].toString().isNotEmpty
-                                    ? chatMap['latestMessageText'].toString()
-                                    : (chatMap['latestMessageType'] == 'image'
-                                        ? '📷 Photo'
-                                        : (chatMap['latestMessageType'] == 'video'
-                                            ? '🎥 Video'
-                                            : (chatMap['latestMessageType'] == 'audio'
-                                                ? '🎤 Voice Message'
-                                                : (chatMap['latestMessageType'] == 'sticker'
-                                                    ? '👾 Sticker'
-                                                    : 'Tap to view encrypted ephemeral messages'))))),
+                           subtitle: Text(
+                            (chatMap['latestMessageText'] != null && chatMap['latestMessageText'].toString().isNotEmpty
+                                ? chatMap['latestMessageText'].toString()
+                                : (chatMap['latestMessageType'] == 'image'
+                                    ? '📷 Photo'
+                                    : (chatMap['latestMessageType'] == 'video'
+                                        ? '🎥 Video'
+                                        : (chatMap['latestMessageType'] == 'audio'
+                                            ? '🎤 Voice Message'
+                                            : (chatMap['latestMessageType'] == 'sticker'
+                                                ? '👾 Sticker'
+                                                : 'Tap to view encrypted ephemeral messages'))))),
                             style: TextStyle(
                               color: hasUnread ? const Color(0xFF00BFFF) : Colors.white38,
                               fontSize: 13,

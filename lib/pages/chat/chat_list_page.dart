@@ -44,12 +44,17 @@ class _ChatListPageState extends State<ChatListPage> {
     WebSocketService().connect();
     _initChats();
     
-    // Listen to real-time incoming messages
+    // Listen to real-time incoming messages and status updates
     _wsSubscription = WebSocketService().messageStream.listen((event) async {
       final type = event['type'] ?? 'message';
+      final supabase = context.read<SupabaseService>();
       if (type == 'message') {
-        final supabase = context.read<SupabaseService>();
         await supabase.saveIncomingMessage(event);
+        if (mounted) {
+          _loadChats();
+        }
+      } else if (type == 'status') {
+        await supabase.saveIncomingStatus(event);
         if (mounted) {
           _loadChats();
         }
@@ -288,20 +293,18 @@ class _ChatListPageState extends State<ChatListPage> {
                               fontSize: 16,
                             ),
                           ),
-                          subtitle: Text(
-                            hasUnread
-                                ? 'New secure message received!'
-                                : (chatMap['latestMessageText'] != null && chatMap['latestMessageText'].toString().isNotEmpty
-                                    ? chatMap['latestMessageText'].toString()
-                                    : (chatMap['latestMessageType'] == 'image'
-                                        ? '📷 Photo'
-                                        : (chatMap['latestMessageType'] == 'video'
-                                            ? '🎥 Video'
-                                            : (chatMap['latestMessageType'] == 'audio'
-                                                ? '🎤 Voice Message'
-                                                : (chatMap['latestMessageType'] == 'sticker'
-                                                    ? '👾 Sticker'
-                                                    : 'Tap to view encrypted ephemeral messages'))))),
+                           subtitle: Text(
+                            (chatMap['latestMessageText'] != null && chatMap['latestMessageText'].toString().isNotEmpty
+                                ? chatMap['latestMessageText'].toString()
+                                : (chatMap['latestMessageType'] == 'image'
+                                    ? '📷 Photo'
+                                    : (chatMap['latestMessageType'] == 'video'
+                                        ? '🎥 Video'
+                                        : (chatMap['latestMessageType'] == 'audio'
+                                            ? '🎤 Voice Message'
+                                            : (chatMap['latestMessageType'] == 'sticker'
+                                                ? '👾 Sticker'
+                                                : 'Tap to view encrypted ephemeral messages'))))),
                             style: TextStyle(
                               color: hasUnread ? const Color(0xFF00BFFF) : Colors.white38,
                               fontSize: 13,

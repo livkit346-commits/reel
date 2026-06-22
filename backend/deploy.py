@@ -21,7 +21,6 @@ def main():
         "scp",
         "-i", "reel-key.pem",
         "-o", "StrictHostKeyChecking=no",
-        "-l", "4000",
         local_gz,
         "ubuntu@54.205.149.147:/home/ubuntu/reel-backend.gz"
     ]

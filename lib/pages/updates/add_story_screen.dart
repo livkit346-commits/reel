@@ -37,6 +37,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
       if (_tabController.index != _currentTabIndex) {
         setState(() {
           _currentTabIndex = _tabController.index;
+          _selectedAlbum = null; // Reset folder selection when switching tabs
         });
         if (_permissionState.isAuth) {
           _loadAssets();
@@ -116,64 +117,43 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
     });
 
     try {
+      RequestType type;
+      if (_currentTabIndex == 0) {
+        type = RequestType.common;
+      } else if (_currentTabIndex == 1) {
+        type = RequestType.image;
+      } else {
+        type = RequestType.video;
+      }
+
+      final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
+        type: type,
+        onlyAll: false,
+      );
+
       List<AssetEntity> entities = [];
 
-      if (_currentTabIndex == 0) {
-        final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
-          type: RequestType.common,
-          onlyAll: false,
-        );
-
-        if (paths.isNotEmpty) {
-          final matchIndex = _selectedAlbum == null ? -1 : paths.indexWhere((p) => p.id == _selectedAlbum!.id);
-          if (matchIndex != -1) {
-            _selectedAlbum = paths[matchIndex];
-          } else {
-            _selectedAlbum = paths.firstWhere((p) => p.isAll, orElse: () => paths.first);
-          }
-
-          if (_selectedAlbum != null) {
-            entities = await _selectedAlbum!.getAssetListPaged(
-              page: 0,
-              size: 80,
-            );
-            entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
-          }
+      if (paths.isNotEmpty) {
+        final matchIndex = _selectedAlbum == null ? -1 : paths.indexWhere((p) => p.id == _selectedAlbum!.id);
+        if (matchIndex != -1) {
+          _selectedAlbum = paths[matchIndex];
+        } else {
+          _selectedAlbum = paths.firstWhere((p) => p.isAll, orElse: () => paths.first);
         }
 
-        setState(() {
-          _albums = paths;
-        });
-      } else {
-        RequestType type = _currentTabIndex == 1 ? RequestType.image : RequestType.video;
-        final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
-          type: type,
-          onlyAll: false,
-        );
-
-        if (paths.isNotEmpty) {
-          final matchIndex = _selectedAlbum == null ? -1 : paths.indexWhere((p) => p.id == _selectedAlbum!.id);
-          if (matchIndex != -1) {
-            _selectedAlbum = paths[matchIndex];
-          } else {
-            _selectedAlbum = paths.firstWhere((p) => p.isAll, orElse: () => paths.first);
-          }
-
-          setState(() {
-            _albums = paths;
-          });
-
-          if (_selectedAlbum != null) {
-            entities = await _selectedAlbum!.getAssetListPaged(
-              page: 0,
-              size: 80,
-            );
-            entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
-          }
+        if (_selectedAlbum != null) {
+          entities = await _selectedAlbum!.getAssetListPaged(
+            page: 0,
+            size: 80,
+          );
+          // Filter to only include image and video assets
+          entities = entities.where((e) => e.type == AssetType.image || e.type == AssetType.video).toList();
+          entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
         }
       }
 
       setState(() {
+        _albums = paths;
         _assets = entities;
         _isLoading = false;
         if (entities.length < 80) {
@@ -204,6 +184,8 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
           page: nextPage,
           size: 80,
         );
+        // Filter to only include image and video assets
+        entities = entities.where((e) => e.type == AssetType.image || e.type == AssetType.video).toList();
       }
 
       if (entities.isEmpty) {
