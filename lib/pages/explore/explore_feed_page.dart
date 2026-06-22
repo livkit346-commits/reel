@@ -344,6 +344,10 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                                   cTimeStr = '${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}';
                                 } catch (_) {}
                               }
+                              final myId = context.read<SupabaseService>().currentUser?.id;
+                              final isCommentOwner = cUserId == myId;
+                              final isPostOwner = (widget.post['userId'] ?? widget.post['userid']) == myId;
+
                               return Padding(
                                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                                 child: Row(
@@ -378,6 +382,38 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                                         ],
                                       ),
                                     ),
+                                    if (isCommentOwner || isPostOwner)
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline, color: Colors.white30, size: 18),
+                                        onPressed: () async {
+                                          final confirm = await showDialog<bool>(
+                                            context: context,
+                                            builder: (context) => AlertDialog(
+                                              backgroundColor: Colors.grey[950],
+                                              title: const Text('Delete Reply', style: TextStyle(color: Colors.white)),
+                                              content: const Text('Are you sure you want to delete this reply?', style: TextStyle(color: Colors.white70)),
+                                              actions: [
+                                                TextButton(
+                                                  onPressed: () => Navigator.pop(context, false),
+                                                  child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                                ),
+                                                TextButton(
+                                                  onPressed: () => Navigator.pop(context, true),
+                                                  child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                          if (confirm == true) {
+                                            await context.read<SupabaseService>().deleteComment((comment['id'] ?? '').toString());
+                                            setSheetState(() {});
+                                            _loadCommentsCount();
+                                            if (widget.onPostUpdated != null) {
+                                              widget.onPostUpdated!();
+                                            }
+                                          }
+                                        },
+                                      ),
                                   ],
                                 ),
                               );

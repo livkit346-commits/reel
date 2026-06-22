@@ -1984,10 +1984,38 @@ class SupabaseService {
     }
   }
 
-  // Posts: Delete post
+  // Posts: Delete post (clearing comments and reports first to avoid foreign key violations)
   Future<void> deletePost(String postId) async {
     try {
+      // Delete comments first
+      await client.from('comments').delete().eq('postId', postId);
+    } catch (_) {
+      try {
+        await client.from('comments').delete().eq('postid', postId);
+      } catch (_) {}
+    }
+
+    try {
+      // Delete reports first
+      await client.from('reports').delete().eq('postId', postId);
+    } catch (_) {
+      try {
+        await client.from('reports').delete().eq('postid', postId);
+      } catch (_) {}
+    }
+
+    try {
+      // Delete the post
       await client.from('posts').delete().eq('id', postId);
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Comments: Delete comment
+  Future<void> deleteComment(String commentId) async {
+    try {
+      await client.from('comments').delete().eq('id', commentId);
     } catch (e) {
       rethrow;
     }
