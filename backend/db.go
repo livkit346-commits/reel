@@ -48,6 +48,7 @@ func EnsureTablesExist() {
 		{"ReelRefreshTokens", "token", true},
 		{"ReelMessages", "chatId", false}, // In case this table isn't created yet either
 		{"ReelMutedChats", "userId", false},
+		{"ReelVerificationCodes", "email", true},
 	}
 
 	for _, t := range tables {
@@ -397,5 +398,79 @@ func setChatMutedInDynamoDB(userID string, chatID string, isMuted bool) error {
 	}
 
 	_, err = dbClient.PutItem(context.TODO(), input)
+	return err
+}
+
+// Save verification code in ReelVerificationCodes table
+func saveVerificationCode(email, code string, expiresAt int64) error {
+	if dbClient == nil {
+		return fmt.Errorf("DynamoDB client not initialized")
+	}
+
+	input := &dynamodb.PutItemInput{
+		TableName: aws.String("ReelVerificationCodes"),
+		Item: map[string]types.AttributeValue{
+			"email":     &types.AttributeValueMemberS{Value: email},
+			"code":      &types.AttributeValueMemberS{Value: code},
+			"expiresAt": &types.AttributeValueMemberN{Value: strconv.FormatInt(expiresAt, 10)},
+		},
+	}
+	_, err := dbClient.PutItem(context.TODO(), input)
+	return err
+}
+
+// Retrieve verification code from ReelVerificationCodes table
+func getVerificationCode(email string) (string, int64, error) {
+	if dbClient == nil {
+		return "", 0, fmt.Errorf("DynamoDB client not initialized")
+	}
+
+	input := &dynamodb.GetItemInput{
+		TableName: aws.String("ReelVerificationCodes"),
+		Key: map[string]types.AttributeValue{
+			"email": &types.AttributeValueMemberS{Value: email},
+		},
+	}
+
+	resp, err := dbClient.GetItem(context.TODO(), input)
+	if err != nil {
+		return "", 0, err
+	}
+
+	if resp.Item == nil {
+		return "", 0, nil
+	}
+
+	codeVal, ok := resp.Item["code"].(*types.AttributeValueMemberS)
+	if !ok {
+		return "", 0, fmt.Errorf("invalid code attribute type")
+	}
+
+	expiresVal, ok := resp.Item["expiresAt"].(*types.AttributeValueMemberN)
+	if !ok {
+		return "", 0, fmt.Errorf("invalid expiresAt attribute type")
+	}
+
+	expiresAt, err := strconv.ParseInt(expiresVal.Value, 10, 64)
+	if err != nil {
+		return "", 0, err
+	}
+
+	return codeVal.Value, expiresAt, nil
+}
+
+// Delete verification code from ReelVerificationCodes table
+func deleteVerificationCode(email string) error {
+	if dbClient == nil {
+		return fmt.Errorf("DynamoDB client not initialized")
+	}
+
+	input := &dynamodb.DeleteItemInput{
+		TableName: aws.String("ReelVerificationCodes"),
+		Key: map[string]types.AttributeValue{
+			"email": &types.AttributeValueMemberS{Value: email},
+		},
+	}
+	_, err := dbClient.DeleteItem(context.TODO(), input)
 	return err
 }

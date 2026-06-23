@@ -132,8 +132,14 @@ CREATE POLICY "Chats updatable by everyone" ON public.chats FOR UPDATE USING (tr
 CREATE TABLE IF NOT EXISTS public.chat_participants (
   "chatId" UUID REFERENCES public.chats(id) ON DELETE CASCADE NOT NULL,
   "userId" UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+  "joinedAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  "lastReceivedMessageId" TEXT,
   PRIMARY KEY ("chatId", "userId")
 );
+
+-- Alter table statements in case columns don't exist yet
+ALTER TABLE public.chat_participants ADD COLUMN IF NOT EXISTS "joinedAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL;
+ALTER TABLE public.chat_participants ADD COLUMN IF NOT EXISTS "lastReceivedMessageId" TEXT;
 
 -- Enable RLS for chat_participants
 ALTER TABLE public.chat_participants ENABLE ROW LEVEL SECURITY;

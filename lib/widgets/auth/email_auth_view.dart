@@ -20,6 +20,28 @@ class _EmailAuthViewState extends State<EmailAuthView> {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
     if (email.isEmpty || password.isEmpty) return;
+
+    // Validate email format
+    final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$');
+    if (!emailRegex.hasMatch(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid email address'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    if (_isSignUp && password.length < 9) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Password must be at least 9 characters long'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
     
     setState(() => _isLoading = true);
     try {

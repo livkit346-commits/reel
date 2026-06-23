@@ -59,6 +59,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   String? _selectedMessageId;
   Map<String, dynamic>? _replyingToMessage;
+  DateTime? _joinedAt;
 
   Timer? _offlineRetryTimer;
   bool _wasOffline = false;
@@ -545,12 +546,51 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         }
       }
 
+      // Fetch participant details for join time filter and fresh install bootstrap
+      final details = await context.read<SupabaseService>().getChatParticipantDetails(widget.chatId);
+      if (details != null) {
+        if (lastMessageId == null) {
+          lastMessageId = details['lastReceivedMessageId'] as String?;
+        }
+        if (details['joinedAt'] != null) {
+          _joinedAt = DateTime.tryParse(details['joinedAt']);
+        }
+      }
+
       final history = await WebSocketService().fetchHistory(widget.chatId, lastMessageId: lastMessageId);
       if (history.isNotEmpty) {
+        final bool isFreshInstallEmpty = _localMessages.isEmpty && lastMessageId == null;
+
+        if (isFreshInstallEmpty) {
+          final sortedHistory = List<Map<String, dynamic>>.from(history);
+          sortedHistory.sort((a, b) {
+            final idA = (a['messageId'] ?? a['id'] ?? '') as String;
+            final idB = (b['messageId'] ?? b['id'] ?? '') as String;
+            return idA.compareTo(idB);
+          });
+          final latestId = sortedHistory.last['messageId'] ?? sortedHistory.last['id'];
+          if (latestId != null) {
+            context.read<SupabaseService>().updateLastReceivedMessageId(widget.chatId, latestId);
+          }
+        }
+
         setState(() {
           for (final msg in history) {
+            if (isFreshInstallEmpty) {
+              continue;
+            }
             final typedMsg = Map<String, dynamic>.from(msg);
             final msgId = typedMsg['messageId'] ?? typedMsg['id'];
+
+            // Skip messages sent before user joined the chat/group
+            if (_joinedAt != null) {
+              final msgTime = typedMsg['timestamp'] != null
+                  ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
+                  : DateTime.tryParse(typedMsg['createdAt'] ?? '');
+              if (msgTime != null && msgTime.isBefore(_joinedAt!)) {
+                continue;
+              }
+            }
 
             final exists = _localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
             if (!exists) {
@@ -590,6 +630,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         });
         await _saveLocalMessages();
         _markAllMessagesAsSeen();
+
+        // Sync the latest received message ID back to Supabase
+        final nonPending = _localMessages.where((m) => m['isPending'] != true).toList();
+        if (nonPending.isNotEmpty) {
+          nonPending.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+          final latestId = nonPending.last['id'];
+          context.read<SupabaseService>().updateLastReceivedMessageId(widget.chatId, latestId);
+        }
       }
     } catch (e) {
       debugPrint('Error manual syncing incoming history: $e');
@@ -694,6 +742,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
       if (_mergeIncomingUserMessage(event)) return;
 
+      // Skip messages sent before user joined the chat/group
+      if (_joinedAt != null) {
+        final msgTime = event['timestamp'] != null
+            ? DateTime.fromMillisecondsSinceEpoch((event['timestamp'] as num).toInt())
+            : DateTime.tryParse(event['createdAt'] ?? '');
+        if (msgTime != null && msgTime.isBefore(_joinedAt!)) {
+          return;
+        }
+      }
+
       setState(() {
         final localMsg = {
           'id': messageId,
@@ -739,6 +797,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         if (mType != 'image' && mType != 'video' && mType != 'audio') {
           supabase.deleteMessageFromServer(messageId, deleteStorage: false);
         }
+      }
+
+      // Sync last received message ID back to Supabase
+      if (messageId != null) {
+        supabase.updateLastReceivedMessageId(widget.chatId, messageId);
       }
     }
   }
@@ -1692,6 +1755,22 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               ),
               title: const Text('1', style: TextStyle(color: Colors.white, fontSize: 18)),
               actions: [
+                Builder(
+                  builder: (context) {
+                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
+                    final isImage = selectedMsg.isNotEmpty && selectedMsg['mediaType'] == 'image' && selectedMsg['mediaUrl'] != null;
+                    if (!isImage) return const SizedBox.shrink();
+                    return IconButton(
+                      icon: const Icon(Icons.face, color: Colors.white),
+                      tooltip: 'Save as Sticker',
+                      onPressed: () async {
+                        final mediaUrl = selectedMsg['mediaUrl'] as String;
+                        setState(() { _selectedMessageId = null; });
+                        await _saveReceivedSticker(mediaUrl);
+                      },
+                    );
+                  },
+                ),
                 IconButton(
                   icon: const Icon(Icons.reply, color: Colors.white),
                   onPressed: () {
@@ -2719,6 +2798,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           : Image.asset(
                               mediaUrl,
                               fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 40),
                             ))
                       : const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5)),
                 ),

@@ -247,6 +247,65 @@ func sendWelcomeEmail(recipientEmail, recipientName string) error {
 	return nil
 }
 
+// Brevo Verification Code Email sender
+func sendVerificationCodeEmail(recipientEmail, code string) error {
+	apiKey := os.Getenv("BREVO_API_KEY")
+	senderEmail := os.Getenv("BREVO_SENDER_EMAIL")
+	senderName := os.Getenv("BREVO_SENDER_NAME")
+
+	if apiKey == "" || senderEmail == "" {
+		log.Println("Brevo Email API is not configured (missing key/sender email). Skipping verification email.")
+		return nil
+	}
+
+	if senderName == "" {
+		senderName = "Reel App"
+	}
+
+	payload := map[string]interface{}{
+		"sender": map[string]string{
+			"name":  senderName,
+			"email": senderEmail,
+		},
+		"to": []map[string]string{
+			{
+				"email": recipientEmail,
+				"name":  "Reel User",
+			},
+		},
+		"subject":     "Confirm your email address - Reel",
+		"htmlContent": fmt.Sprintf("<html><body><h1>Confirm your email address</h1><p>Thank you for signing up for Reel! Please use the following 6-digit code to verify your email address:</p><h2>%s</h2><p>This code is valid for 10 minutes. If you did not request this code, you can safely ignore this email.</p></body></html>", code),
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", "https://api.brevo.com/v3/smtp/email", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("api-key", apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("brevo API error (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.Printf("Verification code email sent via Brevo to %s", recipientEmail)
+	return nil
+}
+
 // Helper to generate a random 32-character refresh token
 func generateRefreshToken() string {
 	b := make([]byte, 24)

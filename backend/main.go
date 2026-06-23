@@ -23,6 +23,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"google.golang.org/api/option"
+	"math/rand"
+	"regexp"
 )
 
 // Unified Message payload format
@@ -141,6 +143,7 @@ func main() {
 	})
 
 	// Custom authentication endpoints
+	http.HandleFunc("/auth/send-code", handleSendVerificationCode)
 	http.HandleFunc("/auth/register", handleRegister)
 	http.HandleFunc("/auth/login", handleLogin)
 	http.HandleFunc("/auth/refresh", handleRefresh)
@@ -844,6 +847,85 @@ func sendFcmNotification(recipientID, senderID, chatID, messageText string) {
 	}
 }
 
+// Helper to validate email formatting
+func isValidEmail(email string) bool {
+	emailRegex := regexp.MustCompile(`^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,4}$`)
+	return emailRegex.MatchString(strings.ToLower(email))
+}
+
+// Verification Code Request endpoint
+func handleSendVerificationCode(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Email string `json:"email"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" {
+		http.Error(w, "Email is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate email format
+	if !isValidEmail(email) {
+		http.Error(w, "Invalid email address format", http.StatusBadRequest)
+		return
+	}
+
+	// Check if user already exists
+	existingUser, err := getUserFromDynamoDB(email)
+	if err != nil {
+		log.Printf("Error checking existing user: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if existingUser != nil {
+		http.Error(w, "Email already registered", http.StatusBadRequest)
+		return
+	}
+
+	// Generate 6-digit OTP code
+	code := fmt.Sprintf("%06d", rand.Intn(1000000))
+	expiresAt := time.Now().Add(10 * time.Minute).Unix() // 10 minutes from now
+
+	// Save code to DynamoDB
+	err = saveVerificationCode(email, code, expiresAt)
+	if err != nil {
+		log.Printf("Error saving verification code to DynamoDB: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Send verification email via Brevo
+	err = sendVerificationCodeEmail(email, code)
+	if err != nil {
+		log.Printf("Error sending verification email: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Verification code sent successfully",
+	})
+}
+
 // User Registration endpoint
 func handleRegister(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -864,6 +946,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 		Name     string `json:"name"`
 		PhotoURL string `json:"photoUrl"`
+		Code     string `json:"code"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -881,6 +964,40 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	if req.Email == "" || req.Name == "" {
 		http.Error(w, "Email and Name are required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate email format
+	if !isValidEmail(req.Email) {
+		http.Error(w, "Invalid email address format", http.StatusBadRequest)
+		return
+	}
+
+	// Enforce verification code check
+	if req.Code == "" {
+		http.Error(w, "Verification code is required", http.StatusBadRequest)
+		return
+	}
+
+	savedCode, expiresAt, err := getVerificationCode(req.Email)
+	if err != nil {
+		log.Printf("Error getting verification code: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if savedCode == "" {
+		http.Error(w, "No verification code sent or code expired. Please request a new code.", http.StatusBadRequest)
+		return
+	}
+
+	if time.Now().Unix() > expiresAt {
+		http.Error(w, "Verification code has expired. Please request a new code.", http.StatusBadRequest)
+		return
+	}
+
+	if savedCode != req.Code {
+		http.Error(w, "Incorrect verification code", http.StatusBadRequest)
 		return
 	}
 
@@ -924,6 +1041,9 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("Warning: Failed to sync user to Supabase: %v", err)
 	}
+
+	// Delete verification code
+	_ = deleteVerificationCode(req.Email)
 
 	// Send Welcome Email asynchronously via Brevo API
 	go func() {

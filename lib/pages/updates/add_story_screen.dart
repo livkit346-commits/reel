@@ -28,6 +28,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   // Real album selection configuration
   List<AssetPathEntity> _albums = [];
   AssetPathEntity? _selectedAlbum;
+  bool _isLoadingAlbums = false;
 
   @override
   void initState() {
@@ -38,6 +39,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
         setState(() {
           _currentTabIndex = _tabController.index;
           _selectedAlbum = null; // Reset folder selection when switching tabs
+          _albums = []; // Clear folders list on tab switch
         });
         if (_permissionState.isAuth) {
           _loadAssets();
@@ -108,6 +110,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   }
 
   Future<void> _loadAssets() async {
+    final loadingTabIndex = _currentTabIndex;
     setState(() {
       _isLoading = true;
       _currentPage = 0;
@@ -118,42 +121,43 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
 
     try {
       RequestType type;
-      if (_currentTabIndex == 0) {
-        type = RequestType.common;
-      } else if (_currentTabIndex == 1) {
+      if (loadingTabIndex == 0) {
+        type = RequestType.common; // Query images and videos, excluding audio
+      } else if (loadingTabIndex == 1) {
         type = RequestType.image;
       } else {
         type = RequestType.video;
       }
 
-      final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
-        type: type,
-        onlyAll: false,
-      );
-
-      List<AssetEntity> entities = [];
-
-      if (paths.isNotEmpty) {
-        final matchIndex = _selectedAlbum == null ? -1 : paths.indexWhere((p) => p.id == _selectedAlbum!.id);
-        if (matchIndex != -1) {
-          _selectedAlbum = paths[matchIndex];
-        } else {
-          _selectedAlbum = paths.firstWhere((p) => p.isAll, orElse: () => paths.first);
-        }
-
-        if (_selectedAlbum != null) {
-          entities = await _selectedAlbum!.getAssetListPaged(
-            page: 0,
-            size: 80,
-          );
-          // Filter to only include image and video assets
-          entities = entities.where((e) => e.type == AssetType.image || e.type == AssetType.video).toList();
-          entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+      AssetPathEntity? targetAlbum = _selectedAlbum;
+      if (targetAlbum == null) {
+        // Fetch only the "All/Recent" virtual album for instant load times
+        final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
+          type: type,
+          onlyAll: true,
+        );
+        if (!mounted || _currentTabIndex != loadingTabIndex) return;
+        if (paths.isNotEmpty) {
+          targetAlbum = paths.first;
         }
       }
 
+      List<AssetEntity> entities = [];
+      if (targetAlbum != null) {
+        entities = await targetAlbum.getAssetListPaged(
+          page: 0,
+          size: 80,
+        );
+        
+        if (!mounted || _currentTabIndex != loadingTabIndex) return;
+
+        // Filter to only include image and video assets
+        entities = entities.where((e) => e.type == AssetType.image || e.type == AssetType.video).toList();
+        entities.sort((a, b) => b.createDateTime.compareTo(a.createDateTime));
+      }
+
       setState(() {
-        _albums = paths;
+        _selectedAlbum = targetAlbum;
         _assets = entities;
         _isLoading = false;
         if (entities.length < 80) {
@@ -161,6 +165,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
         }
       });
     } catch (e) {
+      if (!mounted || _currentTabIndex != loadingTabIndex) return;
       setState(() {
         _isLoading = false;
         _hasMore = false;
@@ -171,6 +176,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   Future<void> _loadMoreAssets() async {
     if (_isLoadingMore || !_hasMore) return;
 
+    final loadingTabIndex = _currentTabIndex;
     setState(() {
       _isLoadingMore = true;
     });
@@ -184,6 +190,9 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
           page: nextPage,
           size: 80,
         );
+        
+        if (!mounted || _currentTabIndex != loadingTabIndex) return;
+        
         // Filter to only include image and video assets
         entities = entities.where((e) => e.type == AssetType.image || e.type == AssetType.video).toList();
       }
@@ -208,6 +217,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
         }
       });
     } catch (e) {
+      if (!mounted || _currentTabIndex != loadingTabIndex) return;
       setState(() {
         _isLoadingMore = false;
       });
@@ -229,65 +239,110 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 16),
-              const Text(
-                'Select Folder',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            // Load folders asynchronously when sheet opens, if they haven't been loaded yet
+            if (_albums.length <= 1 && !_isLoadingAlbums) {
+              _isLoadingAlbums = true;
+              
+              RequestType type;
+              if (_currentTabIndex == 0) {
+                type = RequestType.common;
+              } else if (_currentTabIndex == 1) {
+                type = RequestType.image;
+              } else {
+                type = RequestType.video;
+              }
+              
+              PhotoManager.getAssetPathList(
+                type: type,
+                onlyAll: false,
+              ).then((paths) {
+                if (mounted) {
+                  setState(() {
+                    _albums = paths;
+                    _isLoadingAlbums = false;
+                  });
+                  setModalState(() {});
+                }
+              }).catchError((e) {
+                if (mounted) {
+                  setState(() {
+                    _isLoadingAlbums = false;
+                  });
+                  setModalState(() {});
+                }
+              });
+            }
+
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Select Folder',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_isLoadingAlbums)
+                    const Expanded(
+                      child: Center(
+                        child: CircularProgressIndicator(color: Colors.white),
+                      ),
+                    )
+                  else
+                    Expanded(
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: _albums.length,
+                        itemBuilder: (context, index) {
+                          final album = _albums[index];
+                          final isSelected = album.id == _selectedAlbum?.id;
+                          return FutureBuilder<int>(
+                            future: album.assetCountAsync,
+                            builder: (context, snapshot) {
+                              final count = snapshot.data ?? 0;
+                              return ListTile(
+                                leading: Icon(
+                                  album.isAll ? Icons.photo_library : Icons.folder,
+                                  color: isSelected ? const Color(0xFF00BFFF) : Colors.white70,
+                                ),
+                                title: Text(
+                                  album.name,
+                                  style: TextStyle(
+                                    color: isSelected ? const Color(0xFF00BFFF) : Colors.white,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '$count items',
+                                  style: const TextStyle(color: Colors.white30, fontSize: 12),
+                                ),
+                                trailing: isSelected
+                                    ? const Icon(Icons.check_circle, color: Color(0xFF00BFFF))
+                                    : null,
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  setState(() {
+                                    _selectedAlbum = album;
+                                  });
+                                  _loadAssets();
+                                },
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                ],
               ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: _albums.length,
-                  itemBuilder: (context, index) {
-                    final album = _albums[index];
-                    final isSelected = album.id == _selectedAlbum?.id;
-                    return FutureBuilder<int>(
-                      future: album.assetCountAsync,
-                      builder: (context, snapshot) {
-                        final count = snapshot.data ?? 0;
-                        return ListTile(
-                          leading: Icon(
-                            album.isAll ? Icons.photo_library : Icons.folder,
-                            color: isSelected ? const Color(0xFF00BFFF) : Colors.white70,
-                          ),
-                          title: Text(
-                            album.name,
-                            style: TextStyle(
-                              color: isSelected ? const Color(0xFF00BFFF) : Colors.white,
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                            ),
-                          ),
-                          subtitle: Text(
-                            '$count items',
-                            style: const TextStyle(color: Colors.white30, fontSize: 12),
-                          ),
-                          trailing: isSelected
-                              ? const Icon(Icons.check_circle, color: Color(0xFF00BFFF))
-                              : null,
-                          onTap: () {
-                            Navigator.pop(context);
-                            setState(() {
-                              _selectedAlbum = album;
-                            });
-                            _loadAssets();
-                          },
-                        );
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );

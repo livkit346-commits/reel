@@ -193,8 +193,28 @@ class SupabaseService {
     }
   }
 
+  // Auth: Send verification code to email via Go backend
+  Future<void> sendVerificationCode(String email) async {
+    try {
+      final uri = Uri.parse('$backendUrl/auth/send-code');
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception(response.body.isNotEmpty ? response.body : 'Failed to send verification code');
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   // Auth: Sign Up with Email via Go backend and auto-login
-  Future<AuthResponse> signUpWithEmail(String email, String password) async {
+  Future<AuthResponse> signUpWithEmail(String email, String password, String code) async {
     try {
       final uri = Uri.parse('$backendUrl/auth/register');
       // Use email prefix as a placeholder display name
@@ -208,6 +228,7 @@ class SupabaseService {
           'password': password,
           'name': defaultName,
           'photoUrl': '',
+          'code': code,
         }),
       );
 
@@ -1342,6 +1363,35 @@ class SupabaseService {
     }
   }
 
+  // Fetch chat participant details (join time and last received message ID)
+  Future<Map<String, dynamic>?> getChatParticipantDetails(String chatId) async {
+    final myId = currentUser?.id;
+    if (myId == null) return null;
+    try {
+      final response = await client
+          .from('chat_participants')
+          .select('joinedAt, lastReceivedMessageId')
+          .eq('chatId', chatId)
+          .eq('userId', myId)
+          .maybeSingle();
+      return response;
+    } catch (_) {}
+    return null;
+  }
+
+  // Update user's last received message ID for a chat
+  Future<void> updateLastReceivedMessageId(String chatId, String messageId) async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+    try {
+      await client
+          .from('chat_participants')
+          .update({'lastReceivedMessageId': messageId})
+          .eq('chatId', chatId)
+          .eq('userId', myId);
+    } catch (_) {}
+  }
+
   // Sync offline/undelivered messages for all active chats
   Future<void> syncOfflineMessages() async {
     final myId = currentUser?.id;
@@ -1401,13 +1451,51 @@ class SupabaseService {
           }
         }
 
+        // Fetch participant details to override lastMessageId if empty, and get join time
+        final details = await getChatParticipantDetails(cid);
+        DateTime? joinedAt;
+        if (details != null) {
+          if (lastMessageId == null) {
+            lastMessageId = details['lastReceivedMessageId'] as String?;
+          }
+          if (details['joinedAt'] != null) {
+            joinedAt = DateTime.tryParse(details['joinedAt']);
+          }
+        }
+
         final history = await WebSocketService().fetchHistory(cid, lastMessageId: lastMessageId);
         if (history.isEmpty) continue;
+
+        // Discard old history if this is a fresh install/reinstall and we have no lastReceivedMessageId
+        final bool isFreshInstallEmpty = localMessages.isEmpty && lastMessageId == null;
+        if (isFreshInstallEmpty) {
+          final sortedHistory = List<Map<String, dynamic>>.from(history);
+          sortedHistory.sort((a, b) {
+            final idA = (a['messageId'] ?? a['id'] ?? '') as String;
+            final idB = (b['messageId'] ?? b['id'] ?? '') as String;
+            return idA.compareTo(idB);
+          });
+          final latestId = sortedHistory.last['messageId'] ?? sortedHistory.last['id'];
+          if (latestId != null) {
+            await updateLastReceivedMessageId(cid, latestId);
+          }
+          continue;
+        }
 
         bool hasChanges = false;
         for (final msg in history) {
           final typedMsg = Map<String, dynamic>.from(msg);
           final msgId = typedMsg['messageId'] ?? typedMsg['id'];
+
+          // Skip messages sent before the user joined
+          if (joinedAt != null) {
+            final msgTime = typedMsg['timestamp'] != null
+                ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
+                : DateTime.tryParse(typedMsg['createdAt'] ?? '');
+            if (msgTime != null && msgTime.isBefore(joinedAt)) {
+              continue;
+            }
+          }
 
           final exists = localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
           if (!exists) {
@@ -1460,6 +1548,14 @@ class SupabaseService {
             await dir.create(recursive: true);
           }
           await file.writeAsString(jsonEncode(localMessages));
+
+          // Sync the latest received message ID back to the server
+          final nonPending = localMessages.where((m) => m['isPending'] != true).toList();
+          if (nonPending.isNotEmpty) {
+            nonPending.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+            final latestId = nonPending.last['id'];
+            updateLastReceivedMessageId(cid, latestId);
+          }
         }
       }
     } catch (e) {

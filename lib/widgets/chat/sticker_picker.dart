@@ -97,7 +97,7 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
         fileOptions: const FileOptions(contentType: 'image/png'),
       );
 
-      final url = supabase.client.storage.from('media').getPublicUrl(storagePath);
+      final url = supabase.getMediaUrl('media', storagePath);
 
       setState(() {
         _customStickers.insert(0, url);
@@ -236,6 +236,7 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
                 : Image.asset(
                     actualUrl,
                     fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
                   ),
           ),
         );
