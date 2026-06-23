@@ -281,6 +281,10 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
 
   void _showCommentsBottomSheet(BuildContext context) {
     final textController = TextEditingController();
+    final FocusNode commentFocusNode = FocusNode();
+    Map<String, dynamic>? replyTarget; // {'parentId': String, 'userName': String}
+    final Map<String, bool> expandedReplies = {};
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -291,6 +295,143 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
+            Widget buildCommentItem(Map<String, dynamic> comment, {required bool isReply}) {
+              final cId = (comment['id'] ?? '').toString();
+              final cUser = comment['userName'] ?? 'User';
+              final cText = comment['text'] ?? '';
+              final cUserId = comment['userId'] ?? '';
+              final cCreatedAtStr = (comment['createdAt'] ?? comment['createdat']) as String?;
+              final replyTo = comment['replyToUserName'] ?? comment['replytousername'] as String?;
+              
+              String cTimeStr = '';
+              if (cCreatedAtStr != null) {
+                try {
+                  final parsed = DateTime.parse(cCreatedAtStr).toLocal();
+                  cTimeStr = '${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}';
+                } catch (_) {}
+              }
+              
+              final myId = context.read<SupabaseService>().currentUser?.id;
+              final isCommentOwner = cUserId == myId;
+              final isPostOwner = (widget.post['userId'] ?? widget.post['userid']) == myId;
+
+              return Padding(
+                padding: EdgeInsets.symmetric(
+                  vertical: 6.0,
+                  horizontal: isReply ? 0.0 : 16.0,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    UserAvatar(userId: cUserId, radius: isReply ? 12 : 16),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                cUser,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: isReply ? 12 : 13,
+                                ),
+                              ),
+                              if (cTimeStr.isNotEmpty) ...[
+                                const SizedBox(width: 6),
+                                Text(
+                                  '• $cTimeStr',
+                                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          RichText(
+                            text: TextSpan(
+                              style: const TextStyle(color: Colors.white70, fontSize: 14),
+                              children: [
+                                if (isReply && replyTo != null && replyTo.isNotEmpty) ...[
+                                  TextSpan(
+                                    text: '@$replyTo ',
+                                    style: const TextStyle(
+                                      color: Color(0xFF00BFFF),
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                                TextSpan(text: cText),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              GestureDetector(
+                                onTap: () {
+                                  setSheetState(() {
+                                    replyTarget = {
+                                      'parentId': comment['parentId'] ?? comment['parentid'] ?? comment['id'],
+                                      'userName': cUser,
+                                    };
+                                  });
+                                  commentFocusNode.requestFocus();
+                                },
+                                child: const Text(
+                                  'Reply',
+                                  style: TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (isCommentOwner || isPostOwner)
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.white30, size: 18),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              backgroundColor: Colors.grey[950],
+                              title: const Text('Delete Reply', style: TextStyle(color: Colors.white)),
+                              content: const Text('Are you sure you want to delete this reply?', style: TextStyle(color: Colors.white70)),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context, false),
+                                  child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) {
+                            await context.read<SupabaseService>().deleteComment(cId);
+                            setSheetState(() {});
+                            _loadCommentsCount();
+                            if (widget.onPostUpdated != null) {
+                              widget.onPostUpdated!();
+                            }
+                          }
+                        },
+                      ),
+                  ],
+                ),
+              );
+            }
+
             return Padding(
               padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
               child: Container(
@@ -319,8 +460,8 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                           if (snapshot.connectionState == ConnectionState.waiting) {
                             return const Center(child: CircularProgressIndicator());
                           }
-                          final comments = snapshot.data ?? [];
-                          if (comments.isEmpty) {
+                          final allComments = snapshot.data ?? [];
+                          if (allComments.isEmpty) {
                             return const Center(
                               child: Text(
                                 'Be the first to reply!',
@@ -328,100 +469,103 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                               ),
                             );
                           }
-                          return ListView.builder(
-                            itemCount: comments.length,
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            itemBuilder: (context, idx) {
-                              final comment = comments[idx];
-                              final cUser = comment['userName'] ?? 'User';
-                              final cText = comment['text'] ?? '';
-                              final cUserId = comment['userId'] ?? '';
-                              final cCreatedAtStr = (comment['createdAt'] ?? comment['createdat']) as String?;
-                              String cTimeStr = '';
-                              if (cCreatedAtStr != null) {
-                                try {
-                                  final parsed = DateTime.parse(cCreatedAtStr).toLocal();
-                                  cTimeStr = '${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}';
-                                } catch (_) {}
-                              }
-                              final myId = context.read<SupabaseService>().currentUser?.id;
-                              final isCommentOwner = cUserId == myId;
-                              final isPostOwner = (widget.post['userId'] ?? widget.post['userid']) == myId;
 
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    UserAvatar(userId: cUserId, radius: 16),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Text(
-                                                cUser,
-                                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          // Group comments: parents and child replies
+                          final parentComments = allComments
+                              .where((c) => c['parentId'] == null && c['parentid'] == null)
+                              .toList();
+                          final childReplies = <String, List<dynamic>>{};
+                          for (var c in allComments) {
+                            final parentIdVal = c['parentId'] ?? c['parentid'];
+                            if (parentIdVal != null) {
+                              final pIdStr = parentIdVal.toString();
+                              childReplies.putIfAbsent(pIdStr, () => []).add(c);
+                            }
+                          }
+
+                          return ListView.builder(
+                            itemCount: parentComments.length,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            itemBuilder: (context, idx) {
+                              final parent = parentComments[idx];
+                              final pId = (parent['id'] ?? '').toString();
+                              final replies = childReplies[pId] ?? [];
+                              final isExpanded = expandedReplies[pId] ?? false;
+
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  buildCommentItem(parent, isReply: false),
+                                  if (replies.isNotEmpty) ...[
+                                    Padding(
+                                      padding: const EdgeInsets.only(left: 58.0, bottom: 4.0),
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          setSheetState(() {
+                                            expandedReplies[pId] = !isExpanded;
+                                          });
+                                        },
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              width: 24,
+                                              height: 1,
+                                              color: Colors.white24,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              isExpanded
+                                                  ? 'Hide replies'
+                                                  : 'View replies (${replies.length})',
+                                              style: const TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
                                               ),
-                                              if (cTimeStr.isNotEmpty) ...[
-                                                const SizedBox(width: 6),
-                                                Text(
-                                                  '• $cTimeStr',
-                                                  style: const TextStyle(color: Colors.white38, fontSize: 11),
-                                                ),
-                                              ],
-                                            ],
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            cText,
-                                            style: const TextStyle(color: Colors.white70, fontSize: 14),
-                                          ),
-                                        ],
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
-                                    if (isCommentOwner || isPostOwner)
-                                      IconButton(
-                                        icon: const Icon(Icons.delete_outline, color: Colors.white30, size: 18),
-                                        onPressed: () async {
-                                          final confirm = await showDialog<bool>(
-                                            context: context,
-                                            builder: (context) => AlertDialog(
-                                              backgroundColor: Colors.grey[950],
-                                              title: const Text('Delete Reply', style: TextStyle(color: Colors.white)),
-                                              content: const Text('Are you sure you want to delete this reply?', style: TextStyle(color: Colors.white70)),
-                                              actions: [
-                                                TextButton(
-                                                  onPressed: () => Navigator.pop(context, false),
-                                                  child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
-                                                ),
-                                                TextButton(
-                                                  onPressed: () => Navigator.pop(context, true),
-                                                  child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
-                                                ),
-                                              ],
-                                            ),
-                                          );
-                                          if (confirm == true) {
-                                            await context.read<SupabaseService>().deleteComment((comment['id'] ?? '').toString());
-                                            setSheetState(() {});
-                                            _loadCommentsCount();
-                                            if (widget.onPostUpdated != null) {
-                                              widget.onPostUpdated!();
-                                            }
-                                          }
-                                        },
+                                    if (isExpanded)
+                                      Padding(
+                                        padding: const EdgeInsets.only(left: 40.0),
+                                        child: Column(
+                                          children: replies
+                                              .map((r) => buildCommentItem(r, isReply: true))
+                                              .toList(),
+                                        ),
                                       ),
                                   ],
-                                ),
+                                ],
                               );
                             },
                           );
                         },
                       ),
                     ),
+                    if (replyTarget != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        color: Colors.white.withOpacity(0.05),
+                        child: Row(
+                          children: [
+                            Text(
+                              'Replying to @${replyTarget!['userName']}',
+                              style: const TextStyle(color: Color(0xFF00BFFF), fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: () {
+                                setSheetState(() {
+                                  replyTarget = null;
+                                });
+                              },
+                              child: const Icon(Icons.close, color: Colors.white54, size: 16),
+                            ),
+                          ],
+                        ),
+                      ),
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -433,10 +577,13 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                           Expanded(
                             child: TextField(
                               controller: textController,
+                              focusNode: commentFocusNode,
                               style: const TextStyle(color: Colors.white),
-                              decoration: const InputDecoration(
-                                hintText: 'Post your reply...',
-                                hintStyle: TextStyle(color: Colors.white38),
+                              decoration: InputDecoration(
+                                hintText: replyTarget != null
+                                    ? 'Reply to @${replyTarget!['userName']}...'
+                                    : 'Post your reply...',
+                                hintStyle: const TextStyle(color: Colors.white38),
                                 border: InputBorder.none,
                               ),
                             ),
@@ -446,9 +593,16 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                             onPressed: () async {
                               final text = textController.text.trim();
                               if (text.isEmpty) return;
-                              await context.read<SupabaseService>().addComment(widget.post['id'], text);
+                              await context.read<SupabaseService>().addComment(
+                                widget.post['id'],
+                                text,
+                                parentId: replyTarget?['parentId'],
+                                replyToUserName: replyTarget?['userName'],
+                              );
                               textController.clear();
-                              setSheetState(() {});
+                              setSheetState(() {
+                                replyTarget = null;
+                              });
                               _loadCommentsCount();
                               if (widget.onPostUpdated != null) {
                                 widget.onPostUpdated!();
@@ -465,7 +619,10 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
           },
         );
       },
-    );
+    ).then((_) {
+      commentFocusNode.dispose();
+      textController.dispose();
+    });
   }
 
   @override

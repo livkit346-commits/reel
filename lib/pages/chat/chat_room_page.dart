@@ -21,6 +21,7 @@ import 'package:swipe_to/swipe_to.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:reel/theme/reel_theme.dart';
+import 'package:reel/pages/chat/chat_image_viewer_page.dart';
 
 class ChatRoomPage extends StatefulWidget {
   final String chatId;
@@ -1492,6 +1493,71 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     }
   }
 
+  void _showCameraOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[950],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 16),
+            const Text(
+              'Camera Options',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.camera_alt, color: Colors.white),
+              title: const Text('Take Photo', style: TextStyle(color: Colors.white)),
+              onTap: () async {
+                Navigator.pop(context);
+                final picked = await _picker.pickImage(
+                  source: ImageSource.camera,
+                  imageQuality: 60,
+                  maxWidth: 1080,
+                );
+                if (picked != null) {
+                  _sendMediaMessage(File(picked.path), 'image');
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam, color: Colors.white),
+              title: const Text('Record Video', style: TextStyle(color: Colors.white)),
+              onTap: () async {
+                Navigator.pop(context);
+                final picked = await _picker.pickVideo(
+                  source: ImageSource.camera,
+                  maxDuration: const Duration(seconds: 30),
+                );
+                if (picked != null) {
+                  _sendMediaMessage(File(picked.path), 'video');
+                }
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library, color: Colors.white),
+              title: const Text('Select Video from Gallery', style: TextStyle(color: Colors.white)),
+              onTap: () async {
+                Navigator.pop(context);
+                _sendVideo();
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _sendVideo() async {
     final pickedFile = await _picker.pickVideo(
       source: ImageSource.gallery,
@@ -2179,7 +2245,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                     if (createdAtStr != null) {
                       try {
                         final parsed = DateTime.parse(createdAtStr).toLocal();
-                        timeStr = '${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}';
+                        final hour = parsed.hour;
+                        final minute = parsed.minute.toString().padLeft(2, '0');
+                        final period = hour >= 12 ? 'PM' : 'AM';
+                        final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+                        timeStr = '$displayHour:$minute $period';
                       } catch (_) {}
                     }
 
@@ -2328,15 +2398,30 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                                ],
                                                              ),
                                                            ))
-                                                     : CachedMediaView(
-                                                         url: mediaUrl!,
-                                                         mediaType: mediaType,
-                                                         chatId: widget.chatId,
-                                                         messageId: msg['id'],
-                                                         deleteFromServer: false,
-                                                         width: 200,
-                                                         height: 200,
-                                                       ),
+                                                     : GestureDetector(
+                                                          onTap: mediaType == 'image'
+                                                              ? () {
+                                                                  Navigator.push(
+                                                                    context,
+                                                                    MaterialPageRoute(
+                                                                      builder: (context) => ChatImageViewerPage(
+                                                                        url: mediaUrl,
+                                                                        localPath: msg['mediaFilePath'],
+                                                                      ),
+                                                                    ),
+                                                                  );
+                                                                }
+                                                              : null,
+                                                          child: CachedMediaView(
+                                                            url: mediaUrl!,
+                                                            mediaType: mediaType,
+                                                            chatId: widget.chatId,
+                                                            messageId: msg['id'],
+                                                            deleteFromServer: false,
+                                                            width: 200,
+                                                            height: 200,
+                                                          ),
+                                                        ),
                                                ),
                                                // Overlaid timestamp & receipt checks in bottom-right corner
                                                Positioned(
@@ -2422,8 +2507,22 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                        ),
                                                      ),
                                              )
-                                           else
-                                             CachedMediaView(
+                                            else
+                                              GestureDetector(
+                                                onTap: mediaType == 'image'
+                                                    ? () {
+                                                        Navigator.push(
+                                                          context,
+                                                          MaterialPageRoute(
+                                                            builder: (context) => ChatImageViewerPage(
+                                                              url: mediaUrl,
+                                                              localPath: msg['mediaFilePath'],
+                                                            ),
+                                                          ),
+                                                        );
+                                                      }
+                                                    : null,
+                                                child: CachedMediaView(
                                                url: mediaUrl!,
                                                mediaType: mediaType,
                                                chatId: widget.chatId,
@@ -2650,8 +2749,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       : Row(
                           children: [
                             GestureDetector(
-                              onTap: _isBlocked ? null : _sendVideo,
-                              child: const Padding(
+                               onTap: _isBlocked ? null : () => _showCameraOptions(context),
+                               child: const Padding(
                                 padding: EdgeInsets.symmetric(horizontal: 8),
                                 child: Icon(Icons.camera_alt, color: Colors.white70, size: 28),
                               ),

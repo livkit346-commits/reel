@@ -55,7 +55,7 @@ class _SelectFriendPageState extends State<SelectFriendPage> {
       
       if (mounted) {
         Navigator.pop(context); // Pop loading dialog
-        Navigator.pushReplacement(
+        Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ChatRoomPage(
@@ -64,7 +64,11 @@ class _SelectFriendPageState extends State<SelectFriendPage> {
               otherUserName: otherUserName,
             ),
           ),
-        );
+        ).then((_) {
+          if (mounted) {
+            Navigator.pop(context, true); // Return true to trigger refresh on ChatListPage
+          }
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -151,7 +155,7 @@ class _SelectFriendPageState extends State<SelectFriendPage> {
                         .maybeSingle();
                     final groupName = chatData != null ? chatData['name'] as String? ?? 'Group' : 'Group';
 
-                    Navigator.pushReplacement(
+                    Navigator.push(
                       context,
                       MaterialPageRoute(
                         builder: (context) => ChatRoomPage(
@@ -161,7 +165,11 @@ class _SelectFriendPageState extends State<SelectFriendPage> {
                           isGroup: true,
                         ),
                       ),
-                    );
+                    ).then((_) {
+                      if (mounted) {
+                        Navigator.pop(context, true); // Return true to trigger refresh on ChatListPage
+                      }
+                    });
                   }
                 } catch (e) {
                   if (mounted) {
@@ -257,7 +265,11 @@ class _SelectFriendPageState extends State<SelectFriendPage> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => const AddFriendsPage()),
-                    );
+                    ).then((result) {
+                      if (result == true && mounted) {
+                        Navigator.pop(context, true);
+                      }
+                    });
                   },
                 ),
                 // Option: Join Group via Link/ID

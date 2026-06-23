@@ -1308,11 +1308,6 @@ class SupabaseService {
           }
         } catch (_) {}
 
-        if (latestMsg == null && !isGroup) {
-          // Skip empty 1-on-1 chats
-          continue;
-        }
-
         if (latestMsg != null) {
           chatData['latestMessageText'] = latestMsg['text'];
           String? timeStr;
@@ -2147,19 +2142,26 @@ class SupabaseService {
   }
 
   // Comments: Add comment
-  Future<void> addComment(String postId, String text) async {
+  Future<void> addComment(String postId, String text, {String? parentId, String? replyToUserName}) async {
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
     try {
       final profile = await getUserProfile(myId);
       final userName = profile?['name'] ?? 'User';
-      await client.from('comments').insert({
+      final Map<String, dynamic> insertData = {
         'postId': postId,
         'userId': myId,
         'userName': userName,
         'text': text,
         'createdAt': DateTime.now().toIso8601String(),
-      });
+      };
+      if (parentId != null) {
+        insertData['parentId'] = parentId;
+      }
+      if (replyToUserName != null) {
+        insertData['replyToUserName'] = replyToUserName;
+      }
+      await client.from('comments').insert(insertData);
     } catch (e) {
       rethrow;
     }

@@ -263,7 +263,11 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
               otherUserName: otherUserName,
             ),
           ),
-        );
+        ).then((_) {
+          if (mounted) {
+            Navigator.pop(context, true);
+          }
+        });
       }
     } catch (e) {
       if (mounted) {

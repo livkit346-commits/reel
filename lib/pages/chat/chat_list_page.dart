@@ -129,9 +129,11 @@ class _ChatListPageState extends State<ChatListPage> {
       final dateToCheck = DateTime(dateTime.year, dateTime.month, dateTime.day);
 
       if (dateToCheck == today) {
-        final hour = dateTime.hour.toString().padLeft(2, '0');
+        final hour = dateTime.hour;
         final minute = dateTime.minute.toString().padLeft(2, '0');
-        return '$hour:$minute';
+        final period = hour >= 12 ? 'PM' : 'AM';
+        final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+        return '$displayHour:$minute $period';
       } else if (dateToCheck == yesterday) {
         return 'Yesterday';
       } else {
@@ -282,7 +284,7 @@ class _ChatListPageState extends State<ChatListPage> {
                                       MaterialPageRoute(
                                         builder: (context) => ReelProfilePage(userId: otherUserId),
                                       ),
-                                    );
+                                    ).then((_) => _loadChats());
                                   },
                                 ),
                           title: Text(

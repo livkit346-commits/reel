@@ -191,7 +191,11 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
               otherUserName: otherUserName,
             ),
           ),
-        );
+        ).then((_) {
+          if (mounted) {
+            Navigator.pop(context, true);
+          }
+        });
       }
     } catch (e) {
       if (mounted) {

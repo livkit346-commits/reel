@@ -318,7 +318,7 @@ ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS reposts INTEGER DEFAULT 0 NOT 
 CREATE TABLE IF NOT EXISTS public.reports (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "reporterId" UUID REFERENCES public.users(id) ON DELETE CASCADE,
-  "postId" UUID,
+  "postId" UUID REFERENCES public.posts(id) ON DELETE CASCADE,
   "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 ALTER TABLE public.reports ENABLE ROW LEVEL SECURITY;
@@ -334,10 +334,43 @@ CREATE TABLE IF NOT EXISTS public.comments (
   "userId" UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
   "userName" TEXT NOT NULL,
   "text" TEXT NOT NULL,
-  "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  "parentId" UUID REFERENCES public.comments(id) ON DELETE CASCADE,
+  "replyToUserName" TEXT
 );
 ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Comments viewable by everyone" ON public.comments;
 DROP POLICY IF EXISTS "Comments insertable by everyone" ON public.comments;
 CREATE POLICY "Comments viewable by everyone" ON public.comments FOR SELECT USING (true);
 CREATE POLICY "Comments insertable by everyone" ON public.comments FOR INSERT WITH CHECK (true);
+
+-- Migration statements for existing databases:
+ALTER TABLE public.comments ADD COLUMN IF NOT EXISTS "parentId" UUID REFERENCES public.comments(id) ON DELETE CASCADE;
+ALTER TABLE public.comments ADD COLUMN IF NOT EXISTS "replyToUserName" TEXT;
+
+-- Add cascade delete constraint on reports postId
+ALTER TABLE public.reports DROP CONSTRAINT IF EXISTS fk_reports_post;
+ALTER TABLE public.reports 
+  ADD CONSTRAINT fk_reports_post 
+  FOREIGN KEY ("postId") 
+  REFERENCES public.posts(id) 
+  ON DELETE CASCADE;
+
+-- Delete policies
+DROP POLICY IF EXISTS "Users can delete their own posts" ON public.posts;
+CREATE POLICY "Users can delete their own posts" ON public.posts
+  FOR DELETE USING (auth.uid() = "userId");
+
+DROP POLICY IF EXISTS "Users can delete their own comments or comments on their posts" ON public.comments;
+CREATE POLICY "Users can delete their own comments or comments on their posts" ON public.comments
+  FOR DELETE USING (
+    auth.uid() = "userId" OR 
+    auth.uid() IN (SELECT "userId" FROM public.posts WHERE id = "postId")
+  );
+
+DROP POLICY IF EXISTS "Post owners can delete reports on their posts" ON public.reports;
+CREATE POLICY "Post owners can delete reports on their posts" ON public.reports
+  FOR DELETE USING (
+    auth.uid() IN (SELECT "userId" FROM public.posts WHERE id = "postId")
+  );
+

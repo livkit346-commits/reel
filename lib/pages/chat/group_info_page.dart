@@ -642,6 +642,7 @@ class _GroupInfoPageState extends State<GroupInfoPage> {
                       final dmChatId = await supabase.createOrGetChat(member['id']);
                       if (mounted) {
                         Navigator.pop(context); // Pop loading dialog
+                        Navigator.popUntil(context, (route) => route.isFirst);
                         Navigator.push(
                           context,
                           MaterialPageRoute(
