@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -19,6 +20,12 @@ class SupabaseService {
 
   // Track active chat room ID to avoid race conditions with background listeners
   String? activeChatId;
+
+  // Future lock to prevent duplicate concurrent refresh requests
+  Future<String?>? _activeRefreshFuture;
+
+  // Status upload progress tracking notifier (0.0 to 1.0)
+  final ValueNotifier<double?> statusUploadProgress = ValueNotifier<double?>(null);
 
   // In-session liked posts cache to persist hearts across scroll/navigation
   final Set<String> _likedPostIds = {};
@@ -136,6 +143,13 @@ class SupabaseService {
 
   // Call the refresh endpoint to obtain new tokens
   Future<String?> _refreshTokens(String refreshToken) async {
+    if (_activeRefreshFuture != null) {
+      return _activeRefreshFuture;
+    }
+
+    final completer = Completer<String?>();
+    _activeRefreshFuture = completer.future;
+
     try {
       final uri = Uri.parse('$backendUrl/auth/refresh');
       final response = await http.post(
@@ -157,17 +171,24 @@ class SupabaseService {
           
           // Apply to Supabase client offline
           await _setSessionOffline(newAccessToken, newRefreshToken);
+          completer.complete(newAccessToken);
           return newAccessToken;
         }
+      } else if (response.statusCode == 400 || response.statusCode == 401) {
+        // If refresh fails due to invalid/expired refresh token, clear local tokens
+        await LocalStorageService().cacheJson('auth_tokens', null);
+        await client.auth.signOut();
+        completer.complete(null);
+        return null;
       }
-      
-      // If refresh fails (e.g. token compromised or expired refresh token), clear local tokens
-      await LocalStorageService().cacheJson('auth_tokens', null);
-      await client.auth.signOut();
+      completer.complete(null);
       return null;
     } catch (e) {
       debugPrint('Error refreshing tokens: $e');
+      completer.complete(null);
       return null;
+    } finally {
+      _activeRefreshFuture = null;
     }
   }
 
@@ -179,12 +200,19 @@ class SupabaseService {
         final accessToken = cached['accessToken'] as String?;
         final refreshToken = cached['refreshToken'] as String?;
         if (accessToken != null && refreshToken != null) {
-          if (!_isTokenExpired(accessToken)) {
-            await _setSessionOffline(accessToken, refreshToken);
-            debugPrint('Successfully restored user session from cached custom JWT.');
-          } else {
-            // Try to refresh
-            await _refreshTokens(refreshToken);
+          // Always restore session offline first so the user is immediately logged in
+          await _setSessionOffline(accessToken, refreshToken);
+          debugPrint('Restored user session offline on startup.');
+          
+          if (_isTokenExpired(accessToken)) {
+            // Try to refresh in the background
+            _refreshTokens(refreshToken).then((newAccess) {
+              if (newAccess != null) {
+                debugPrint('Successfully refreshed token in background on startup.');
+              }
+            }).catchError((err) {
+              debugPrint('Failed background token refresh on startup: $err');
+            });
           }
         }
       }
@@ -385,15 +413,33 @@ class SupabaseService {
       final String uploadUrl = data['uploadUrl'];
       final String publicUrl = data['publicUrl'] ?? '';
 
-      // 2. Perform direct HTTP PUT request to Cloudflare R2
+      // 2. Perform direct HTTP PUT request to Cloudflare R2 with progress tracking
       final fileBytes = await file.readAsBytes();
-      final uploadResponse = await http.put(
-        Uri.parse(uploadUrl),
-        headers: {
-          'Content-Type': contentType,
-        },
-        body: fileBytes,
-      );
+      final totalBytes = fileBytes.length;
+      
+      final request = http.StreamedRequest('PUT', Uri.parse(uploadUrl));
+      request.headers['Content-Type'] = contentType;
+      request.contentLength = totalBytes;
+
+      int uploadedBytes = 0;
+      final chunkSize = 64 * 1024; // 64 KB chunks
+      
+      Future.microtask(() async {
+        for (int i = 0; i < totalBytes; i += chunkSize) {
+          final end = (i + chunkSize < totalBytes) ? i + chunkSize : totalBytes;
+          request.sink.add(fileBytes.sublist(i, end));
+          uploadedBytes += (end - i);
+          
+          final progress = uploadedBytes / totalBytes;
+          if (statusUploadProgress.value != null) {
+            statusUploadProgress.value = progress;
+          }
+        }
+        await request.sink.close();
+      });
+
+      final responseStream = await request.send();
+      final uploadResponse = await http.Response.fromStream(responseStream);
 
       if (uploadResponse.statusCode != 200) {
         throw Exception('Cloudflare R2 upload failed with code ${uploadResponse.statusCode}');
@@ -570,7 +616,10 @@ class SupabaseService {
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
 
+    statusUploadProgress.value = 0.0;
+
     try {
+      try {
       final userProfile = await getUserProfile(myId);
       final userName = userProfile?['name'] ?? 'User';
 
@@ -723,6 +772,9 @@ class SupabaseService {
       });
     } catch (e) {
       rethrow;
+    }
+    } finally {
+      statusUploadProgress.value = null;
     }
   }
 

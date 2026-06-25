@@ -215,7 +215,30 @@ func sendWelcomeEmail(recipientEmail, recipientName string) error {
 			},
 		},
 		"subject":     "Welcome to Reel!",
-		"htmlContent": fmt.Sprintf("<html><body><h1>Welcome to Reel, %s!</h1><p>Your account has been successfully created. Enjoy secure messaging!</p></body></html>", recipientName),
+		"textContent": fmt.Sprintf("Welcome to Reel, %s!\n\nYour account has been successfully created. Enjoy secure messaging!", recipientName),
+		"htmlContent": fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Welcome to Reel!</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f6f9fc; margin: 0; padding: 0;">
+  <table border="0" cellpadding="0" cellspacing="0" width="100%%" style="background-color: #f6f9fc; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border: 1px solid #e8ebf0; border-radius: 8px; overflow: hidden; padding: 40px; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
+          <tr>
+            <td>
+              <h1 style="color: #1e293b; font-size: 24px; font-weight: 700; margin-top: 0; margin-bottom: 16px;">Welcome to Reel, %s!</h1>
+              <p style="color: #64748b; font-size: 16px; line-height: 24px; margin-top: 0; margin-bottom: 0;">Your account has been successfully created. Enjoy secure messaging!</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`, recipientName),
 	}
 
 	payloadBytes, err := json.Marshal(payload)
@@ -274,7 +297,34 @@ func sendVerificationCodeEmail(recipientEmail, code string) error {
 			},
 		},
 		"subject":     "Confirm your email address - Reel",
-		"htmlContent": fmt.Sprintf("<html><body><h1>Confirm your email address</h1><p>Thank you for signing up for Reel! Please use the following 6-digit code to verify your email address:</p><h2>%s</h2><p>This code is valid for 10 minutes. If you did not request this code, you can safely ignore this email.</p></body></html>", code),
+		"textContent": fmt.Sprintf("Confirm your email address\n\nThank you for signing up for Reel! Please use the following 6-digit code to verify your email address:\n\n%s\n\nThis code is valid for 10 minutes. If you did not request this code, you can safely ignore this email.", code),
+		"htmlContent": fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Confirm your email address - Reel</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f6f9fc; margin: 0; padding: 0;">
+  <table border="0" cellpadding="0" cellspacing="0" width="100%%" style="background-color: #f6f9fc; padding: 20px 0;">
+    <tr>
+      <td align="center">
+        <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border: 1px solid #e8ebf0; border-radius: 8px; overflow: hidden; padding: 40px; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
+          <tr>
+            <td>
+              <h1 style="color: #1e293b; font-size: 24px; font-weight: 700; margin-top: 0; margin-bottom: 16px;">Confirm your email address</h1>
+              <p style="color: #64748b; font-size: 16px; line-height: 24px; margin-top: 0; margin-bottom: 24px;">Thank you for signing up for Reel! Please use the following 6-digit code to verify your email address:</p>
+              <div style="background-color: #f1f5f9; border-radius: 6px; padding: 16px; text-align: center; margin-bottom: 24px;">
+                <span style="font-size: 32px; font-weight: 700; letter-spacing: 6px; color: #7e1c31; font-family: monospace;">%s</span>
+              </div>
+              <p style="color: #64748b; font-size: 14px; line-height: 20px; margin-top: 0; margin-bottom: 0;">This code is valid for 10 minutes. If you did not request this code, you can safely ignore this email.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`, code),
 	}
 
 	payloadBytes, err := json.Marshal(payload)

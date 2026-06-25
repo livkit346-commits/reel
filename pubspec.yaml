@@ -81,6 +81,9 @@ flutter:
 
   assets:
     - assets/
+    - assets/cyber_neon_smile.png
+    - assets/cyber_neon_skull.png
+    - assets/cyber_neon_heart.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

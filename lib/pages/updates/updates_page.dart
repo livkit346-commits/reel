@@ -28,6 +28,30 @@ class _UpdatesPageState extends State<UpdatesPage> {
   void initState() {
     super.initState();
     _loadAllUpdates();
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<SupabaseService>().statusUploadProgress.addListener(_onUploadProgressChanged);
+    });
+  }
+
+  @override
+  void dispose() {
+    try {
+      context.read<SupabaseService>().statusUploadProgress.removeListener(_onUploadProgressChanged);
+    } catch (_) {}
+    super.dispose();
+  }
+
+  void _onUploadProgressChanged() {
+    if (mounted) {
+      final progress = context.read<SupabaseService>().statusUploadProgress.value;
+      setState(() {
+        _uploadingStatus = progress != null;
+      });
+      if (progress == null) {
+        _loadStatuses();
+      }
+    }
   }
 
   void _loadAllUpdates() {
@@ -285,7 +309,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
                           children: [
                             Stack(
                               children: [
-                                _uploadingStatus
+                                 _uploadingStatus
                                     ? Container(
                                         width: 64,
                                         height: 64,
@@ -293,11 +317,15 @@ class _UpdatesPageState extends State<UpdatesPage> {
                                           color: Colors.white10,
                                           shape: BoxShape.circle,
                                         ),
-                                        child: const Center(
+                                        child: Center(
                                           child: SizedBox(
-                                            width: 20,
-                                            height: 20,
-                                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00BFFF)),
+                                            width: 32,
+                                            height: 32,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 3,
+                                              color: const Color(0xFF00BFFF),
+                                              value: context.read<SupabaseService>().statusUploadProgress.value,
+                                            ),
                                           ),
                                         ),
                                       )
@@ -346,9 +374,15 @@ class _UpdatesPageState extends State<UpdatesPage> {
                               ],
                             ),
                             const SizedBox(height: 6),
-                            const Text(
-                              'My Story',
-                              style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
+                            Text(
+                              _uploadingStatus
+                                  ? 'Sending (${((context.read<SupabaseService>().statusUploadProgress.value ?? 0.0) * 100).toStringAsFixed(0)}%)'
+                                  : 'My Story',
+                              style: TextStyle(
+                                color: _uploadingStatus ? const Color(0xFF00BFFF) : Colors.white70,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ],
                         ),

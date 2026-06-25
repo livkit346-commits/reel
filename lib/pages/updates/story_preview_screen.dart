@@ -224,34 +224,31 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
         finalMediaFile = await _renderEditedImage();
       }
 
-      await supabase.createCustomStatus(
+      // Pop immediately back to updates page (returning true to indicate an upload has started)
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+
+      // Run upload in background
+      supabase.createCustomStatus(
         text: text.isNotEmpty ? text : null,
         mediaFile: finalMediaFile,
         mediaType: widget.mediaType == 'text' ? null : widget.mediaType,
         trimStart: widget.mediaType == 'video' ? _trimStart : null,
         trimEnd: widget.mediaType == 'video' ? _trimEnd : null,
-      );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Story posted successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        Navigator.pop(context, true);
-      }
+      ).then((_) {
+        // Handled by updates_page listening to the progress notifier
+      }).catchError((e) {
+        debugPrint('Error uploading story in background: $e');
+      });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to post story: ${e.toString()}'),
+            content: Text('Failed to prepare story: ${e.toString()}'),
             backgroundColor: Colors.redAccent,
           ),
         );
-      }
-    } finally {
-      if (mounted) {
         setState(() => _isUploading = false);
       }
     }
