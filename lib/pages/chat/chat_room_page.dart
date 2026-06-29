@@ -2885,21 +2885,15 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   height: 130,
                   padding: const EdgeInsets.all(4),
                   child: mediaUrl != null
-                      ? (mediaUrl.startsWith('http')
-                          ? Image.network(
-                              mediaUrl,
-                              fit: BoxFit.contain,
-                              loadingBuilder: (context, child, progress) {
-                                if (progress == null) return child;
-                                return const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5));
-                              },
-                              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 40),
-                            )
-                          : Image.asset(
-                              mediaUrl,
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 40),
-                            ))
+                      ? Image.network(
+                          mediaUrl,
+                          fit: BoxFit.contain,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5));
+                          },
+                          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 40),
+                        )
                       : const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5)),
                 ),
                 Positioned(

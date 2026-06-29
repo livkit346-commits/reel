@@ -129,6 +129,15 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
         type = RequestType.video;
       }
 
+      final filterOption = FilterOptionGroup(
+        orders: [
+          const OrderOption(
+            type: OrderOptionType.createDate,
+            asc: false,
+          ),
+        ],
+      );
+
       AssetPathEntity? targetAlbum = _selectedAlbum;
       List<AssetEntity> entities = [];
 
@@ -136,10 +145,11 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
         final List<AssetPathEntity> paths = await PhotoManager.getAssetPathList(
           type: type,
           onlyAll: false,
+          filterOption: filterOption,
         );
         if (!mounted || _currentTabIndex != loadingTabIndex) return;
         if (paths.isNotEmpty) {
-          targetAlbum = paths.first;
+          targetAlbum = paths.firstWhere((p) => p.isAll, orElse: () => paths.first);
           entities = await targetAlbum.getAssetListPaged(page: 0, size: 80);
         }
       } else {
@@ -240,44 +250,29 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
             if (_albums.length <= 1 && !_isLoadingAlbums) {
               _isLoadingAlbums = true;
               
+              RequestType type;
               if (_currentTabIndex == 0) {
-                Future.wait([
-                  PhotoManager.getAssetPathList(type: RequestType.image, onlyAll: false),
-                  PhotoManager.getAssetPathList(type: RequestType.video, onlyAll: false),
-                ]).then((results) {
-                  final imgPaths = results[0];
-                  final vidPaths = results[1];
-                  final Map<String, AssetPathEntity> merged = {};
-                  for (var path in imgPaths) {
-                    merged[path.name] = path;
-                  }
-                  for (var path in vidPaths) {
-                    if (!merged.containsKey(path.name)) {
-                      merged[path.name] = path;
-                    }
-                  }
-                  final combinedPaths = merged.values.toList();
-                  if (mounted) {
-                    setState(() {
-                      _albums = combinedPaths;
-                      _isLoadingAlbums = false;
-                    });
-                    setModalState(() {});
-                  }
-                }).catchError((e) {
-                  if (mounted) {
-                    setState(() {
-                      _isLoadingAlbums = false;
-                    });
-                    setModalState(() {});
-                  }
-                });
+                type = RequestType.all;
+              } else if (_currentTabIndex == 1) {
+                type = RequestType.image;
               } else {
-                RequestType type = _currentTabIndex == 1 ? RequestType.image : RequestType.video;
-                PhotoManager.getAssetPathList(
-                  type: type,
-                  onlyAll: false,
-                ).then((paths) {
+                type = RequestType.video;
+              }
+
+              final filterOption = FilterOptionGroup(
+                orders: [
+                  const OrderOption(
+                    type: OrderOptionType.createDate,
+                    asc: false,
+                  ),
+                ],
+              );
+
+              PhotoManager.getAssetPathList(
+                type: type,
+                onlyAll: false,
+                filterOption: filterOption,
+              ).then((paths) {
                 if (mounted) {
                   setState(() {
                     _albums = paths;
@@ -294,7 +289,6 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
                 }
               });
             }
-          }
 
           return SafeArea(
               child: Column(
