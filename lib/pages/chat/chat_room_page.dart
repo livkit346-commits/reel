@@ -62,7 +62,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   List<Map<String, dynamic>> _localMessages = [];
   bool _isLoadingLocal = true;
 
-  String? _selectedMessageId;
+  final Set<String> _selectedMessageIds = {};
   Map<String, dynamic>? _replyingToMessage;
   DateTime? _joinedAt;
 
@@ -1746,6 +1746,66 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     );
   }
 
+  void _showMultiDeleteOptions(BuildContext context, Set<String> messageIds, bool allMe) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: Text('Delete ${messageIds.length} messages?', style: const TextStyle(color: Colors.white)),
+        content: const Text('This action cannot be undone.', style: TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('CANCEL', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              try {
+                final supabase = context.read<SupabaseService>();
+                for (final messageId in messageIds) {
+                  _localMessages.removeWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
+                  await supabase.deleteMessageForMe(messageId);
+                }
+                await _saveLocalMessages();
+                setState(() {});
+              } catch (_) {}
+            },
+            child: const Text('DELETE FOR ME', style: TextStyle(color: Colors.redAccent)),
+          ),
+          if (allMe)
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                try {
+                  final supabase = context.read<SupabaseService>();
+                  for (final messageId in messageIds) {
+                    final index = _localMessages.indexWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
+                    if (index != -1) {
+                      _localMessages[index]['isDeleted'] = true;
+                      _localMessages[index]['text'] = 'This message was deleted';
+                      _localMessages[index]['mediaUrl'] = null;
+                      _localMessages[index]['mediaType'] = null;
+                    }
+                    await supabase.deleteMessageForEveryone(messageId);
+                    final recipientId = widget.otherUserId ?? '';
+                    WebSocketService().sendDeleteMessage(
+                      chatId: widget.chatId,
+                      messageId: messageId,
+                      recipientId: recipientId,
+                    );
+                  }
+                  await _saveLocalMessages();
+                  setState(() {});
+                } catch (_) {}
+              },
+              child: const Text('DELETE FOR EVERYONE', style: TextStyle(color: Colors.redAccent)),
+            ),
+        ],
+      ),
+    );
+  }
+
 
 
   void _showLeaveGroupConfirmation() {
@@ -1822,95 +1882,111 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: _selectedMessageId != null
+      appBar: _selectedMessageIds.isNotEmpty
           ? AppBar(
               backgroundColor: const Color(0xFF00A884), // WhatsApp green selection color
               leading: IconButton(
                 icon: const Icon(Icons.arrow_back, color: Colors.white),
                 onPressed: () {
                   setState(() {
-                    _selectedMessageId = null;
+                    _selectedMessageIds.clear();
                   });
                 },
               ),
-              title: const Text('1', style: TextStyle(color: Colors.white, fontSize: 18)),
+              title: Text('${_selectedMessageIds.length}', style: const TextStyle(color: Colors.white, fontSize: 18)),
               actions: [
-                Builder(
-                  builder: (context) {
-                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
-                    final isImage = selectedMsg.isNotEmpty && selectedMsg['mediaType'] == 'image' && selectedMsg['mediaUrl'] != null;
-                    if (!isImage) return const SizedBox.shrink();
-                    return IconButton(
-                      icon: const Icon(Icons.face, color: Colors.white),
-                      tooltip: 'Save as Sticker',
-                      onPressed: () async {
-                        final mediaUrl = selectedMsg['mediaUrl'] as String;
-                        setState(() { _selectedMessageId = null; });
-                        await _saveReceivedSticker(mediaUrl);
-                      },
-                    );
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.reply, color: Colors.white),
-                  onPressed: () {
-                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
-                    setState(() {
-                      _replyingToMessage = selectedMsg.isNotEmpty ? selectedMsg : null;
-                      _selectedMessageId = null;
-                    });
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.push_pin, color: Colors.white),
-                  onPressed: () async {
-                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
-                    if (selectedMsg.isEmpty) return;
-                    final isPinned = selectedMsg['is_pinned'] == true;
-                    try {
-                      await supabase.pinMessage(_selectedMessageId!, !isPinned);
+                if (_selectedMessageIds.length == 1)
+                  Builder(
+                    builder: (context) {
+                      final singleId = _selectedMessageIds.first;
+                      final selectedMsg = _localMessages.firstWhere((m) => m['id'] == singleId, orElse: () => {});
+                      final isImage = selectedMsg.isNotEmpty && selectedMsg['mediaType'] == 'image' && selectedMsg['mediaUrl'] != null;
+                      if (!isImage) return const SizedBox.shrink();
+                      return IconButton(
+                        icon: const Icon(Icons.face, color: Colors.white),
+                        tooltip: 'Save as Sticker',
+                        onPressed: () async {
+                          final mediaUrl = selectedMsg['mediaUrl'] as String;
+                          setState(() { _selectedMessageIds.clear(); });
+                          await _saveReceivedSticker(mediaUrl);
+                        },
+                      );
+                    },
+                  ),
+                if (_selectedMessageIds.length == 1)
+                  IconButton(
+                    icon: const Icon(Icons.reply, color: Colors.white),
+                    onPressed: () {
+                      final singleId = _selectedMessageIds.first;
+                      final selectedMsg = _localMessages.firstWhere((m) => m['id'] == singleId, orElse: () => {});
                       setState(() {
-                        _selectedMessageId = null;
+                        _replyingToMessage = selectedMsg.isNotEmpty ? selectedMsg : null;
+                        _selectedMessageIds.clear();
                       });
-                    } catch (_) {}
-                  },
-                ),
+                    },
+                  ),
+                if (_selectedMessageIds.length == 1)
+                  IconButton(
+                    icon: const Icon(Icons.push_pin, color: Colors.white),
+                    onPressed: () async {
+                      final singleId = _selectedMessageIds.first;
+                      final selectedMsg = _localMessages.firstWhere((m) => m['id'] == singleId, orElse: () => {});
+                      if (selectedMsg.isEmpty) return;
+                      final isPinned = selectedMsg['is_pinned'] == true;
+                      try {
+                        await supabase.pinMessage(singleId, !isPinned);
+                        setState(() {
+                          _selectedMessageIds.clear();
+                        });
+                      } catch (_) {}
+                    },
+                  ),
                 IconButton(
                   icon: const Icon(Icons.delete, color: Colors.white),
                   onPressed: () {
-                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
-                    if (selectedMsg.isEmpty) return;
-                    final isMe = selectedMsg['senderId'] == myId;
-                    setState(() { _selectedMessageId = null; });
-                    _showDeleteOptions(context, selectedMsg, isMe);
+                    final selectedMsgs = _localMessages.where((m) => _selectedMessageIds.contains(m['id'])).toList();
+                    final allMe = selectedMsgs.every((m) => m['senderId'] == myId);
+                    final idsToDelete = Set<String>.from(_selectedMessageIds);
+                    setState(() { _selectedMessageIds.clear(); });
+                    _showMultiDeleteOptions(context, idsToDelete, allMe);
                   },
                 ),
                 IconButton(
                   icon: const Icon(Icons.copy, color: Colors.white),
                   onPressed: () {
-                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
-                    if (selectedMsg.isNotEmpty && selectedMsg['text'] != null) {
-                      Clipboard.setData(ClipboardData(text: selectedMsg['text']));
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied')));
+                    final texts = <String>[];
+                    for (final id in _selectedMessageIds) {
+                      final msg = _localMessages.firstWhere((m) => m['id'] == id, orElse: () => {});
+                      if (msg.isNotEmpty && msg['text'] != null) {
+                        texts.add(msg['text'] as String);
+                      }
                     }
-                    setState(() { _selectedMessageId = null; });
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.turn_right, color: Colors.white),
-                  onPressed: () {
-                    final selectedMsg = _localMessages.firstWhere((m) => m['id'] == _selectedMessageId, orElse: () => {});
-                    setState(() { _selectedMessageId = null; });
-                    if (selectedMsg.isNotEmpty) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ForwardMessagePage(messageToForward: selectedMsg),
-                        ),
+                    if (texts.isNotEmpty) {
+                      Clipboard.setData(ClipboardData(text: texts.join('\n')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('${texts.length} messages copied')),
                       );
                     }
+                    setState(() { _selectedMessageIds.clear(); });
                   },
                 ),
+                if (_selectedMessageIds.length == 1)
+                  IconButton(
+                    icon: const Icon(Icons.turn_right, color: Colors.white),
+                    onPressed: () {
+                      final singleId = _selectedMessageIds.first;
+                      final selectedMsg = _localMessages.firstWhere((m) => m['id'] == singleId, orElse: () => {});
+                      setState(() { _selectedMessageIds.clear(); });
+                      if (selectedMsg.isNotEmpty) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ForwardMessagePage(messageToForward: selectedMsg),
+                          ),
+                        );
+                      }
+                    },
+                  ),
               ],
             )
           : AppBar(
@@ -2269,7 +2345,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
                     final isDeleted = msg['isDeleted'] as bool? ?? false;
 
-                    final isSelected = msg['id'] == _selectedMessageId;
+                    final isSelected = _selectedMessageIds.contains(msg['id']);
 
                     return SwipeTo(
                       onRightSwipe: (details) {
@@ -2283,14 +2359,18 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         onLongPress: () {
                           if (!isDeleted) {
                             setState(() {
-                              _selectedMessageId = msg['id'];
+                              _selectedMessageIds.add(msg['id']);
                             });
                           }
                         },
                         onTap: () {
-                          if (_selectedMessageId != null) {
+                          if (_selectedMessageIds.isNotEmpty) {
                             setState(() {
-                              _selectedMessageId = _selectedMessageId == msg['id'] ? null : msg['id'];
+                              if (_selectedMessageIds.contains(msg['id'])) {
+                                _selectedMessageIds.remove(msg['id']);
+                              } else if (!isDeleted) {
+                                _selectedMessageIds.add(msg['id']);
+                              }
                             });
                           }
                         },
