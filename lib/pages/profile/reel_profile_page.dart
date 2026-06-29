@@ -370,6 +370,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                   Navigator.pop(context);
                   final supabase = context.read<SupabaseService>();
                   await supabase.signOut();
+                  ChatRoomPage.clearAllCache();
                   if (context.mounted) {
                     Navigator.pushAndRemoveUntil(
                       context,

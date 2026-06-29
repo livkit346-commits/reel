@@ -41,6 +41,10 @@ class ChatRoomPage extends StatefulWidget {
     _ChatRoomPageState._inMemoryMsgCache.remove(chatId);
   }
 
+  static void clearAllCache() {
+    _ChatRoomPageState._inMemoryMsgCache.clear();
+  }
+
   @override
   State<ChatRoomPage> createState() => _ChatRoomPageState();
 }
@@ -554,7 +558,17 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           lastMessageId = details['lastReceivedMessageId'] as String?;
         }
         if (details['joinedAt'] != null) {
-          _joinedAt = DateTime.tryParse(details['joinedAt']);
+          final joinedTime = DateTime.tryParse(details['joinedAt']);
+          if (joinedTime != null) {
+            _joinedAt = joinedTime;
+            // Filter out existing local messages sent before the user joined
+            _localMessages.removeWhere((m) {
+              final msgTime = m['timestamp'] != null
+                  ? DateTime.fromMillisecondsSinceEpoch((m['timestamp'] as num).toInt())
+                  : DateTime.tryParse(m['createdAt'] ?? '');
+              return msgTime != null && msgTime.isBefore(joinedTime);
+            });
+          }
         }
       }
 

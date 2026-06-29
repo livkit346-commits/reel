@@ -176,6 +176,7 @@ class SupabaseService {
         }
       } else if (response.statusCode == 400 || response.statusCode == 401) {
         // If refresh fails due to invalid/expired refresh token, clear local tokens
+        await clearLocalChatCache();
         await LocalStorageService().cacheJson('auth_tokens', null);
         await client.auth.signOut();
         completer.complete(null);
@@ -344,11 +345,26 @@ class SupabaseService {
       _mutedChatsLoaded = false;
       _archivedChatIds.clear();
       _archivedChatsLoaded = false;
+      await clearLocalChatCache();
       await LocalStorageService().cacheJson('auth_tokens', null);
       await client.auth.signOut();
       try {
         await fb.FirebaseAuth.instance.signOut();
       } catch (_) {}
+    }
+  }
+
+  // Clear local JSON chat cache from disk
+  Future<void> clearLocalChatCache() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final chatsDir = Directory('${directory.path}/chats');
+      if (await chatsDir.exists()) {
+        await chatsDir.delete(recursive: true);
+        debugPrint('Cleared local chat cache directory.');
+      }
+    } catch (e) {
+      debugPrint('Error clearing local chat cache: $e');
     }
   }
 
