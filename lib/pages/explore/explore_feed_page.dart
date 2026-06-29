@@ -229,20 +229,61 @@ class ExplorePostItem extends StatefulWidget {
   State<ExplorePostItem> createState() => _ExplorePostItemState();
 }
 
+
+
 class _ExplorePostItemState extends State<ExplorePostItem> {
   int _commentsCount = 0;
   bool _isLiked = false;
+  bool _isSaved = false;
   late int _likesCount;
   late int _repostsCount;
+
+  Map<String, dynamic>? _quotedPost;
+  bool _loadingQuotedPost = false;
 
   @override
   void initState() {
     super.initState();
     _likesCount = widget.post['likes'] ?? 0;
     _repostsCount = widget.post['reposts'] ?? 0;
-    // Check if the current post is in the liked posts cache
-    _isLiked = context.read<SupabaseService>().likedPostIds.contains(widget.post['id']);
+    final supabase = context.read<SupabaseService>();
+    _isLiked = supabase.likedPostIds.contains(widget.post['id']);
+    _isSaved = supabase.savedPostIds.contains(widget.post['id']);
     _loadCommentsCount();
+    _loadQuotedPost();
+  }
+
+  Future<void> _loadQuotedPost() async {
+    final String text = widget.post['text'] ?? '';
+    String? originalPostId;
+    if (text.startsWith('[QUOTE:')) {
+      final startIndex = text.indexOf('[QUOTE:') + 7;
+      final endIndex = text.indexOf(']');
+      if (endIndex != -1) {
+        originalPostId = text.substring(startIndex, endIndex);
+      }
+    } else if (text.startsWith('[REPOST:')) {
+      final startIndex = text.indexOf('[REPOST:') + 8;
+      final endIndex = text.indexOf(']');
+      if (endIndex != -1) {
+        originalPostId = text.substring(startIndex, endIndex);
+      }
+    }
+
+    if (originalPostId != null) {
+      if (mounted) {
+        setState(() {
+          _loadingQuotedPost = true;
+        });
+      }
+      final post = await context.read<SupabaseService>().getPostById(originalPostId);
+      if (mounted) {
+        setState(() {
+          _quotedPost = post;
+          _loadingQuotedPost = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadCommentsCount() async {
@@ -268,15 +309,105 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     } catch (_) {}
   }
 
+  Future<void> _toggleSave() async {
+    setState(() {
+      _isSaved = !_isSaved;
+    });
+    try {
+      await context.read<SupabaseService>().toggleSavePost(widget.post['id']);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_isSaved ? 'Post saved to Bookmarks' : 'Post removed from Bookmarks'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
   Future<void> _repost() async {
+    final quoteText = await showDialog<String?>(
+      context: context,
+      builder: (context) {
+        final controller = TextEditingController();
+        return AlertDialog(
+          backgroundColor: const Color(0xFF161618),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: Colors.white12),
+          ),
+          title: const Text('Repost or Quote?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Add your thoughts (Quote) or leave empty for a normal Repost:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                maxLines: 3,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: "What's on your mind?",
+                  hintStyle: const TextStyle(color: Colors.white30),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.05),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+              onPressed: () {
+                Navigator.pop(context, controller.text.trim());
+              },
+              child: const Text('Share'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (quoteText == null) return; // Cancelled
+
     setState(() {
       _repostsCount++;
     });
+
     try {
-      await context.read<SupabaseService>().repostPost(widget.post['id'], widget.post['reposts'] ?? 0);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Post shared successfully')),
-      );
+      final supabase = context.read<SupabaseService>();
+      final myId = supabase.currentUser?.id;
+      if (myId != null) {
+        if (quoteText.isEmpty) {
+          final userProfile = await supabase.getUserProfile(myId);
+          final userName = userProfile?['name'] ?? 'User';
+          await supabase.createPost(myId, userName, '[REPOST:${widget.post['id']}]', null);
+          await supabase.repostPost(widget.post['id'], widget.post['reposts'] ?? 0);
+        } else {
+          final userProfile = await supabase.getUserProfile(myId);
+          final userName = userProfile?['name'] ?? 'User';
+          await supabase.createPost(myId, userName, '[QUOTE:${widget.post['id']}] $quoteText', null);
+          await supabase.repostPost(widget.post['id'], widget.post['reposts'] ?? 0);
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Shared successfully')),
+          );
+          if (widget.onPostUpdated != null) {
+            widget.onPostUpdated!();
+          }
+        }
+      }
     } catch (_) {}
   }
 
@@ -690,6 +821,76 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     });
   }
 
+  Widget _buildQuotedPostWidget(Map<String, dynamic> qPost) {
+    final qUserName = qPost['userName'] ?? qPost['username'] ?? 'User';
+    final qText = qPost['text'] ?? '';
+    final qImageUrl = qPost['imageUrl'] ?? qPost['imageurl'];
+    final qUserId = qPost['userId'] ?? qPost['userid'] ?? '';
+
+    String displayQText = qText;
+    if (qText.startsWith('[QUOTE:')) {
+      final endIndex = qText.indexOf(']');
+      if (endIndex != -1 && endIndex + 1 < qText.length) {
+        displayQText = qText.substring(endIndex + 1).trim();
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white10),
+        color: Colors.white.withOpacity(0.02),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              UserAvatar(userId: qUserId, radius: 10),
+              const SizedBox(width: 6),
+              Text(
+                qUserName,
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '@${qUserName.toLowerCase().replaceAll(' ', '')}',
+                style: const TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          if (qText.startsWith('[REPOST:'))
+            const Text(
+              '♻️ Repost',
+              style: TextStyle(color: Colors.white54, fontSize: 13, fontStyle: FontStyle.italic),
+            )
+          else
+            Text(
+              displayQText,
+              style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+          if (qImageUrl != null) ...[
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                qImageUrl,
+                maxHeight: 150,
+                width: double.infinity,
+                fit: BoxFit.cover,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final String text = widget.post['text'] ?? '';
@@ -697,204 +898,295 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     final String? imageUrl = widget.post['imageUrl'] ?? widget.post['imageurl'];
     final String userId = widget.post['userId'] ?? widget.post['userid'] ?? 'unknown';
 
+    final isRepost = text.startsWith('[REPOST:');
+    final isQuote = text.startsWith('[QUOTE:');
+
+    // Extract actual display fields if this is a repost
+    String displayText = text;
+    String displayUserName = userName;
+    String? displayImageUrl = imageUrl;
+    String displayUserId = userId;
+
+    if (isRepost && _quotedPost != null) {
+      displayText = _quotedPost!['text'] ?? '';
+      displayUserName = _quotedPost!['userName'] ?? _quotedPost!['username'] ?? 'User';
+      displayImageUrl = _quotedPost!['imageUrl'] ?? _quotedPost!['imageurl'];
+      displayUserId = _quotedPost!['userId'] ?? _quotedPost!['userid'] ?? 'unknown';
+    } else if (isQuote) {
+      final endIndex = text.indexOf(']');
+      if (endIndex != -1 && endIndex + 1 < text.length) {
+        displayText = text.substring(endIndex + 1).trim();
+      } else {
+        displayText = '';
+      }
+    }
+
     final myId = context.read<SupabaseService>().currentUser?.id;
-    final isMe = userId == myId;
+    final isMe = displayUserId == myId;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: Colors.white12, width: 0.5)),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          UserAvatar(
-            userId: userId,
-            radius: 24,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ReelProfilePage(userId: userId),
-                ),
-              );
-            },
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+          if (isRepost) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 36, bottom: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.repeat, color: Colors.greenAccent, size: 14),
+                  const SizedBox(width: 6),
+                  Text(
+                    '$userName reposted',
+                    style: const TextStyle(color: Colors.greenAccent, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              UserAvatar(
+                userId: displayUserId,
+                radius: 24,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ReelProfilePage(userId: displayUserId),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => ReelProfilePage(userId: userId),
-                          ),
-                        );
-                      },
-                      child: Text(
-                        userName,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '@${userName.toLowerCase().replaceAll(' ', '')}',
-                      style: const TextStyle(color: Colors.white54, fontSize: 14),
-                    ),
-                    const Spacer(),
-                    PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_horiz, color: Colors.white54, size: 20),
-                      color: Colors.grey[900],
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      onSelected: (value) async {
-                        if (value == 'delete') {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              backgroundColor: Colors.grey[900],
-                              title: const Text('Delete Post', style: TextStyle(color: Colors.white)),
-                              content: const Text('Are you sure you want to delete this post?', style: TextStyle(color: Colors.white70)),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, false),
-                                  child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
-                                ),
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context, true),
-                                  child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
-                                ),
-                              ],
-                            ),
-                          );
-                          if (confirm == true) {
-                            await context.read<SupabaseService>().deletePost(widget.post['id']);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Post deleted successfully')),
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ReelProfilePage(userId: displayUserId),
+                              ),
                             );
-                            if (widget.onPostUpdated != null) {
-                              widget.onPostUpdated!();
-                            }
-                          }
-                        } else if (value == 'report') {
-                          await context.read<SupabaseService>().reportPost(widget.post['id']);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Post reported successfully')),
-                          );
-                        }
-                      },
-                      itemBuilder: (context) => [
-                        if (isMe)
-                          const PopupMenuItem(
-                            value: 'delete',
-                            child: Row(
-                              children: [
-                                Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
-                                SizedBox(width: 8),
-                                Text('Delete Post', style: TextStyle(color: Colors.redAccent)),
-                              ],
-                            ),
-                          ),
-                        const PopupMenuItem(
-                          value: 'report',
-                          child: Row(
-                            children: [
-                              Icon(Icons.report_problem_outlined, color: Colors.amber, size: 18),
-                              SizedBox(width: 8),
-                              Text('Report Post', style: TextStyle(color: Colors.white)),
-                            ],
+                          },
+                          child: Text(
+                            displayUserName,
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
                           ),
                         ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '@${displayUserName.toLowerCase().replaceAll(' ', '')}',
+                          style: const TextStyle(color: Colors.white54, fontSize: 14),
+                        ),
+                        const Spacer(),
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_horiz, color: Colors.white54, size: 20),
+                          color: Colors.grey[900],
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          onSelected: (value) async {
+                            if (value == 'delete') {
+                              final confirm = await showDialog<bool>(
+                                context: context,
+                                builder: (context) => AlertDialog(
+                                  backgroundColor: Colors.grey[900],
+                                  title: const Text('Delete Post', style: TextStyle(color: Colors.white)),
+                                  content: const Text('Are you sure you want to delete this post?', style: TextStyle(color: Colors.white70)),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context, false),
+                                      child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                    ),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(context, true),
+                                      child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (confirm == true) {
+                                await context.read<SupabaseService>().deletePost(widget.post['id']);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Post deleted successfully')),
+                                );
+                                if (widget.onPostUpdated != null) {
+                                  widget.onPostUpdated!();
+                                }
+                              }
+                            } else if (value == 'report') {
+                              await context.read<SupabaseService>().reportPost(widget.post['id']);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Post reported successfully')),
+                              );
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            if (isMe)
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.delete_outline, color: Colors.redAccent, size: 18),
+                                    SizedBox(width: 8),
+                                    Text('Delete Post', style: TextStyle(color: Colors.redAccent)),
+                                  ],
+                                ),
+                              ),
+                            const PopupMenuItem(
+                              value: 'report',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.report_problem_outlined, color: Colors.amber, size: 18),
+                                  SizedBox(width: 8),
+                                  Text('Report Post', style: TextStyle(color: Colors.white)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    if (isRepost && _quotedPost == null && _loadingQuotedPost)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 16),
+                        child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+                      )
+                    else if (isRepost && _quotedPost == null && !_loadingQuotedPost)
+                      const Text(
+                        'This post is unavailable',
+                        style: TextStyle(color: Colors.white38, fontSize: 14, fontStyle: FontStyle.italic),
+                      )
+                    else ...[
+                      Text(
+                        displayText,
+                        style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
+                      ),
+                      if (isQuote && _quotedPost != null)
+                        _buildQuotedPostWidget(_quotedPost!),
+                      if (isQuote && _quotedPost == null && _loadingQuotedPost)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 8),
+                          child: Center(
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24),
+                            ),
+                          ),
+                        )
+                      else if (isQuote && _quotedPost == null && !_loadingQuotedPost)
+                        Container(
+                          margin: const EdgeInsets.only(top: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.white10),
+                            color: Colors.white.withOpacity(0.02),
+                          ),
+                          child: const Text(
+                            'This post is unavailable',
+                            style: TextStyle(color: Colors.white38, fontSize: 13, fontStyle: FontStyle.italic),
+                          ),
+                        ),
+                      if (displayImageUrl != null)
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => FullScreenImageViewer(
+                                  imageUrl: displayImageUrl!,
+                                  tag: 'explore_post_${widget.post['id']}',
+                                ),
+                              ),
+                            );
+                          },
+                          child: Hero(
+                            tag: 'explore_post_${widget.post['id']}',
+                            child: Container(
+                              margin: const EdgeInsets.only(top: 12),
+                              width: double.infinity,
+                              constraints: const BoxConstraints(
+                                maxHeight: 360,
+                              ),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                color: const Color(0xFF161616),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: Image.network(
+                                  displayImageUrl!,
+                                  fit: BoxFit.cover,
+                                  alignment: Alignment.center,
+                                  loadingBuilder: (context, child, loadingProgress) {
+                                    if (loadingProgress == null) return child;
+                                    return Container(
+                                      width: double.infinity,
+                                      height: 240,
+                                      color: Colors.white.withOpacity(0.05),
+                                    );
+                                  },
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return Container(
+                                      width: double.infinity,
+                                      height: 240,
+                                      color: Colors.white.withOpacity(0.05),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        GestureDetector(
+                          onTap: () => _showCommentsBottomSheet(context),
+                          child: _buildPostAction(Icons.chat_bubble_outline, _commentsCount.toString(), active: _commentsCount > 0),
+                        ),
+                        GestureDetector(
+                          onTap: _repost,
+                          child: _buildPostAction(Icons.repeat, _repostsCount.toString(), active: _repostsCount > 0, activeColor: Colors.greenAccent),
+                        ),
+                        GestureDetector(
+                          onTap: _toggleLike,
+                          child: _buildPostAction(
+                            _isLiked ? Icons.favorite : Icons.favorite_border,
+                            _likesCount.toString(),
+                            active: _isLiked,
+                            activeColor: Colors.redAccent,
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: _toggleSave,
+                          child: _buildPostAction(
+                            _isSaved ? Icons.bookmark : Icons.bookmark_border,
+                            '',
+                            active: _isSaved,
+                            activeColor: Colors.blueAccent,
+                          ),
+                        ),
+                        _buildPostAction(Icons.share_outlined, ''),
                       ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  text,
-                  style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
-                ),
-                if (imageUrl != null)
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => FullScreenImageViewer(
-                            imageUrl: imageUrl,
-                            tag: 'explore_post_${widget.post['id']}',
-                          ),
-                        ),
-                      );
-                    },
-                    child: Hero(
-                      tag: 'explore_post_${widget.post['id']}',
-                      child: Container(
-                        margin: const EdgeInsets.only(top: 12),
-                        width: double.infinity,
-                        constraints: const BoxConstraints(
-                          maxHeight: 360,
-                        ),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          color: const Color(0xFF161616),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(16),
-                          child: Image.network(
-                            imageUrl,
-                            fit: BoxFit.cover,
-                            alignment: Alignment.center,
-                            loadingBuilder: (context, child, loadingProgress) {
-                              if (loadingProgress == null) return child;
-                              return Container(
-                                width: double.infinity,
-                                height: 240,
-                                color: Colors.white.withOpacity(0.05),
-                              );
-                            },
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                width: double.infinity,
-                                height: 240,
-                                color: Colors.white.withOpacity(0.05),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    GestureDetector(
-                      onTap: () => _showCommentsBottomSheet(context),
-                      child: _buildPostAction(Icons.chat_bubble_outline, _commentsCount.toString(), active: _commentsCount > 0),
-                    ),
-                    GestureDetector(
-                      onTap: _repost,
-                      child: _buildPostAction(Icons.repeat, _repostsCount.toString(), active: _repostsCount > 0, activeColor: Colors.greenAccent),
-                    ),
-                    GestureDetector(
-                      onTap: _toggleLike,
-                      child: _buildPostAction(
-                        _isLiked ? Icons.favorite : Icons.favorite_border,
-                        _likesCount.toString(),
-                        active: _isLiked,
-                        activeColor: Colors.redAccent,
-                      ),
-                    ),
-                    _buildPostAction(Icons.share_outlined, ''),
-                  ],
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),

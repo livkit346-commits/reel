@@ -31,6 +31,9 @@ class SupabaseService {
   final Set<String> _likedPostIds = {};
   Set<String> get likedPostIds => _likedPostIds;
 
+  final Set<String> _savedPostIds = {};
+  Set<String> get savedPostIds => _savedPostIds;
+
   // Cloudflare R2 / CDN Integration Configuration
   static const bool _useCdn = false; // Set to true when R2 is connected
   static const String _cdnBaseUrl = 'https://cdn.reelapp.com';
@@ -176,6 +179,8 @@ class SupabaseService {
         }
       } else if (response.statusCode == 400 || response.statusCode == 401) {
         // If refresh fails due to invalid/expired refresh token, clear local tokens
+        _likedPostIds.clear();
+        _savedPostIds.clear();
         await clearLocalChatCache();
         await LocalStorageService().cacheJson('auth_tokens', null);
         await client.auth.signOut();
@@ -345,6 +350,8 @@ class SupabaseService {
       _mutedChatsLoaded = false;
       _archivedChatIds.clear();
       _archivedChatsLoaded = false;
+      _likedPostIds.clear();
+      _savedPostIds.clear();
       await clearLocalChatCache();
       await LocalStorageService().cacheJson('auth_tokens', null);
       await client.auth.signOut();
@@ -594,6 +601,21 @@ class SupabaseService {
   // Posts: Get feed
   Future<List<dynamic>> getExploreFeed() async {
     try {
+      final myId = currentUser?.id;
+      if (myId != null) {
+        if (_likedPostIds.isEmpty) {
+          final cachedLiked = await LocalStorageService().getCachedJson('liked_posts_$myId');
+          if (cachedLiked is List) {
+            _likedPostIds.addAll(List<String>.from(cachedLiked.map((e) => e.toString())));
+          }
+        }
+        if (_savedPostIds.isEmpty) {
+          final cachedSaved = await LocalStorageService().getCachedJson('saved_posts_$myId');
+          if (cachedSaved is List) {
+            _savedPostIds.addAll(List<String>.from(cachedSaved.map((e) => e.toString())));
+          }
+        }
+      }
       final response = await client.from('posts').select().order('createdAt', ascending: false).limit(25);
       await LocalStorageService().cacheJson('explore_feed', response);
       return response;
@@ -2204,8 +2226,39 @@ class SupabaseService {
       } else {
         _likedPostIds.remove(postId);
       }
+      final myId = currentUser?.id;
+      if (myId != null) {
+        await LocalStorageService().cacheJson('liked_posts_$myId', _likedPostIds.toList());
+      }
     } catch (e) {
       rethrow;
+    }
+  }
+
+  // Posts: Toggle Save (Bookmark)
+  Future<void> toggleSavePost(String postId) async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+    try {
+      if (_savedPostIds.contains(postId)) {
+        _savedPostIds.remove(postId);
+      } else {
+        _savedPostIds.add(postId);
+      }
+      await LocalStorageService().cacheJson('saved_posts_$myId', _savedPostIds.toList());
+    } catch (e) {
+      debugPrint('Error toggling save post: $e');
+    }
+  }
+
+  // Posts: Get post by ID (for rendering quoted/reposted post details)
+  Future<Map<String, dynamic>?> getPostById(String postId) async {
+    try {
+      final response = await client.from('posts').select().eq('id', postId).maybeSingle();
+      return response;
+    } catch (e) {
+      debugPrint('Error getting post by ID: $e');
+      return null;
     }
   }
 
