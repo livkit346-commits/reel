@@ -153,6 +153,16 @@ class _ChatListPageState extends State<ChatListPage> {
       appBar: AppBar(
         backgroundColor: _selectedChats.isNotEmpty ? Theme.of(context).primaryColor.withOpacity(0.2) : Colors.black,
         elevation: 0,
+        leading: _selectedChats.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                onPressed: () {
+                  setState(() {
+                    _selectedChats.clear();
+                  });
+                },
+              )
+            : null,
         title: Text(
           _selectedChats.isNotEmpty ? '${_selectedChats.length} Selected' : 'Reel Secure Chat',
           style: const TextStyle(

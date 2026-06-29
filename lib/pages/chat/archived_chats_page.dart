@@ -16,6 +16,17 @@ class ArchivedChatsPage extends StatefulWidget {
 class _ArchivedChatsPageState extends State<ArchivedChatsPage> {
   List<dynamic> _chats = [];
   bool _loading = true;
+  final Set<String> _selectedChats = {};
+
+  void _toggleSelection(String chatId) {
+    setState(() {
+      if (_selectedChats.contains(chatId)) {
+        _selectedChats.remove(chatId);
+      } else {
+        _selectedChats.add(chatId);
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -75,20 +86,80 @@ class _ArchivedChatsPageState extends State<ArchivedChatsPage> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: _selectedChats.isNotEmpty ? Theme.of(context).primaryColor.withOpacity(0.2) : Colors.black,
         elevation: 0,
-        title: const Text(
-          'Archived Chats',
-          style: TextStyle(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () {
+            if (_selectedChats.isNotEmpty) {
+              setState(() {
+                _selectedChats.clear();
+              });
+            } else {
+              Navigator.pop(context);
+            }
+          },
+        ),
+        title: Text(
+          _selectedChats.isNotEmpty ? '${_selectedChats.length} Selected' : 'Archived Chats',
+          style: const TextStyle(
             color: Colors.white,
             fontSize: 20,
             fontWeight: FontWeight.bold,
           ),
         ),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
+        actions: _selectedChats.isNotEmpty
+            ? [
+                IconButton(
+                  icon: const Icon(Icons.push_pin_outlined, color: Colors.white),
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chats Pinned')));
+                    setState(() => _selectedChats.clear());
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.volume_off_outlined, color: Colors.white),
+                  onPressed: () async {
+                    final supabase = context.read<SupabaseService>();
+                    for (final id in _selectedChats) {
+                      await supabase.toggleMuteChat(id);
+                    }
+                    setState(() {
+                      _selectedChats.clear();
+                      _loadChats();
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chats Muted/Unmuted')));
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.unarchive_outlined, color: Colors.white),
+                  onPressed: () async {
+                    final supabase = context.read<SupabaseService>();
+                    for (final id in _selectedChats) {
+                      await supabase.toggleArchiveChat(id);
+                    }
+                    setState(() {
+                      _selectedChats.clear();
+                      _loadChats();
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chats Unarchived')));
+                  },
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  onPressed: () async {
+                    final supabase = context.read<SupabaseService>();
+                    for (final id in _selectedChats) {
+                      await supabase.client.from('chat_participants').delete().eq('chatId', id).eq('userId', supabase.currentUser!.id);
+                    }
+                    setState(() {
+                      _selectedChats.clear();
+                      _loadChats();
+                    });
+                  },
+                ),
+              ]
+            : const [],
       ),
       body: _loading && _chats.isEmpty
           ? const Center(child: CircularProgressIndicator())
@@ -121,8 +192,13 @@ class _ArchivedChatsPageState extends State<ArchivedChatsPage> {
                         final hasUnread = chatMap['hasUnread'] as bool? ?? false;
                         final isMuted = context.read<SupabaseService>().isChatMuted(chatId);
 
+                        final isSelected = _selectedChats.contains(chatId);
+
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                          selected: isSelected,
+                          selectedTileColor: Colors.white.withOpacity(0.1),
+                          onLongPress: () => _toggleSelection(chatId),
                           leading: isGroup
                               ? CircleAvatar(
                                   radius: 26,
@@ -138,6 +214,10 @@ class _ArchivedChatsPageState extends State<ArchivedChatsPage> {
                                   userId: otherUserId,
                                   radius: 26,
                                   onTap: () {
+                                    if (_selectedChats.isNotEmpty) {
+                                      _toggleSelection(chatId);
+                                      return;
+                                    }
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
@@ -186,6 +266,24 @@ class _ArchivedChatsPageState extends State<ArchivedChatsPage> {
                                 ),
                                 const SizedBox(width: 8),
                               ],
+                              if (isSelected)
+                                const Icon(Icons.check_circle, color: Color(0xFF00BFFF), size: 20)
+                              else if (hasUnread)
+                                Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF00BFFF),
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Color(0xFF00BFFF),
+                                        blurRadius: 8,
+                                        spreadRadius: 1,
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               if (isMuted) ...[
                                 const SizedBox(width: 8),
                                 const Icon(Icons.volume_off, color: Colors.white30, size: 14),
@@ -244,6 +342,10 @@ class _ArchivedChatsPageState extends State<ArchivedChatsPage> {
                             ],
                           ),
                           onTap: () {
+                            if (_selectedChats.isNotEmpty) {
+                              _toggleSelection(chatId);
+                              return;
+                            }
                             Navigator.push(
                               context,
                               MaterialPageRoute(
