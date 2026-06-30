@@ -619,12 +619,12 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                     ),
 
 
-                    return IconButton(
+                    IconButton(
                       icon: const Icon(Icons.more_vert, color: Colors.white30, size: 18),
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       onPressed: () => showCommentOptions(context, setSheetState),
-                    );
+                    )
                   ],
                 ),
               );
