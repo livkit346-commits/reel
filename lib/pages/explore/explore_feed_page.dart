@@ -447,6 +447,98 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
               final isCommentOwner = cUserId == myId;
               final isPostOwner = (widget.post['userId'] ?? widget.post['userid']) == myId;
 
+              void showCommentOptions(BuildContext context, StateSetter setSheetState) {
+                showModalBottomSheet(
+                  context: context,
+                  backgroundColor: const Color(0xFF161616),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  builder: (context) {
+                    return SafeArea(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            margin: const EdgeInsets.symmetric(vertical: 8),
+                            width: 36,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white24,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          ListTile(
+                            leading: const Icon(Icons.copy, color: Colors.white70),
+                            title: const Text('Copy Comment', style: TextStyle(color: Colors.white)),
+                            onTap: () async {
+                              await Clipboard.setData(ClipboardData(text: cText));
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Comment copied to clipboard'),
+                                    duration: Duration(seconds: 1),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                          if (isCommentOwner || isPostOwner)
+                            ListTile(
+                              leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                              title: const Text('Delete Comment', style: TextStyle(color: Colors.redAccent)),
+                              onTap: () async {
+                                Navigator.pop(context);
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    backgroundColor: Colors.grey[950],
+                                    title: const Text('Delete Comment', style: TextStyle(color: Colors.white)),
+                                    content: const Text('Are you sure you want to delete this comment?', style: TextStyle(color: Colors.white70)),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context, false),
+                                        child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                      ),
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context, true),
+                                        child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirm == true) {
+                                  await context.read<SupabaseService>().deleteComment(cId);
+                                  setSheetState(() {});
+                                  _loadCommentsCount();
+                                  if (widget.onPostUpdated != null) {
+                                    widget.onPostUpdated!();
+                                  }
+                                }
+                              },
+                            ),
+                          if (!isCommentOwner)
+                            ListTile(
+                              leading: const Icon(Icons.report_problem_outlined, color: Colors.amber),
+                              title: const Text('Report Comment', style: TextStyle(color: Colors.white)),
+                              onTap: () {
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Comment reported. Thank you for keeping Reel safe!'),
+                                    backgroundColor: Color(0xFF7E1C31),
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              }
+
               return Padding(
                 padding: EdgeInsets.symmetric(
                   vertical: 6.0,
@@ -525,97 +617,7 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                         ],
                       ),
                     ),
-                    void showCommentOptions(BuildContext context, StateSetter setSheetState) {
-                      showModalBottomSheet(
-                        context: context,
-                        backgroundColor: const Color(0xFF161616),
-                        shape: const RoundedRectangleBorder(
-                          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-                        ),
-                        builder: (context) {
-                          return SafeArea(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  margin: const EdgeInsets.symmetric(vertical: 8),
-                                  width: 36,
-                                  height: 4,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white24,
-                                    borderRadius: BorderRadius.circular(2),
-                                  ),
-                                ),
-                                ListTile(
-                                  leading: const Icon(Icons.copy, color: Colors.white70),
-                                  title: const Text('Copy Comment', style: TextStyle(color: Colors.white)),
-                                  onTap: () async {
-                                    await Clipboard.setData(ClipboardData(text: cText));
-                                    if (context.mounted) {
-                                      Navigator.pop(context);
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Comment copied to clipboard'),
-                                          duration: Duration(seconds: 1),
-                                        ),
-                                      );
-                                    }
-                                  },
-                                ),
-                                if (isCommentOwner || isPostOwner)
-                                  ListTile(
-                                    leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                                    title: const Text('Delete Comment', style: TextStyle(color: Colors.redAccent)),
-                                    onTap: () async {
-                                      Navigator.pop(context);
-                                      final confirm = await showDialog<bool>(
-                                        context: context,
-                                        builder: (context) => AlertDialog(
-                                          backgroundColor: Colors.grey[950],
-                                          title: const Text('Delete Comment', style: TextStyle(color: Colors.white)),
-                                          content: const Text('Are you sure you want to delete this comment?', style: TextStyle(color: Colors.white70)),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(context, false),
-                                              child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
-                                            ),
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(context, true),
-                                              child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                      if (confirm == true) {
-                                        await context.read<SupabaseService>().deleteComment(cId);
-                                        setSheetState(() {});
-                                        _loadCommentsCount();
-                                        if (widget.onPostUpdated != null) {
-                                          widget.onPostUpdated!();
-                                        }
-                                      }
-                                    },
-                                  ),
-                                if (!isCommentOwner)
-                                  ListTile(
-                                    leading: const Icon(Icons.report_problem_outlined, color: Colors.amber),
-                                    title: const Text('Report Comment', style: TextStyle(color: Colors.white)),
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('Comment reported. Thank you for keeping Reel safe!'),
-                                          backgroundColor: Color(0xFF7E1C31),
-                                        ),
-                                      );
-                                    },
-                                  ),
-                              ],
-                            ),
-                          );
-                        },
-                      );
-                    }
+
 
                     return IconButton(
                       icon: const Icon(Icons.more_vert, color: Colors.white30, size: 18),
@@ -878,11 +880,13 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
             const SizedBox(height: 6),
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                qImageUrl,
-                maxHeight: 150,
+              child: Container(
+                constraints: const BoxConstraints(maxHeight: 150),
                 width: double.infinity,
-                fit: BoxFit.cover,
+                child: Image.network(
+                  qImageUrl,
+                  fit: BoxFit.cover,
+                ),
               ),
             ),
           ],
