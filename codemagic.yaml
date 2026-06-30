@@ -1,6 +1,6 @@
 workflows:
   android-workflow:
-    name: Android Workflow
+    name: Android Release Build
     instance_type: mac_mini_m1
     max_build_duration: 60
     environment:
@@ -8,9 +8,15 @@ workflows:
       groups:
         - google_play # For publishing later
     scripts:
+      - name: Set up local.properties
+        script: |
+          echo "flutter.sdk=$FLUTTER_ROOT" > android/local.properties
+          echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
+      - name: Restore gradlew permissions
+        script: chmod +x android/gradlew
       - name: Get Flutter packages
         script: flutter pub get
-      - name: Build Android
+      - name: Build Android APK & AAB
         script: |
           flutter build apk --release
           flutter build appbundle --release
@@ -24,13 +30,13 @@ workflows:
     publishing:
       email:
         recipients:
-          - your-email@example.com # Change this to your email
+          - livkit346@gmail.com
         notify:
           success: true
           failure: true
 
   ios-workflow:
-    name: iOS Workflow
+    name: iOS Build
     instance_type: mac_mini_m1
     max_build_duration: 60
     environment:
@@ -40,10 +46,8 @@ workflows:
     scripts:
       - name: Get Flutter packages
         script: flutter pub get
-      - name: Build iOS IPA
+      - name: Build iOS IPA (no codesign)
         script: |
-          # The following command builds the app and creates an IPA.
-          # Note: Code signing is required for real device builds.
           flutter build ipa --release --no-codesign
     artifacts:
       - build/ios/ipa/*.ipa
@@ -51,7 +55,7 @@ workflows:
     publishing:
       email:
         recipients:
-          - your-email@example.com # Change this to your email
+          - livkit346@gmail.com
         notify:
           success: true
           failure: true
