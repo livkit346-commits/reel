@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/services/local_storage_service.dart';
 
@@ -87,17 +86,10 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
       });
 
       final file = File(pickedFile.path);
-      final fileName = 'custom_sticker_${DateTime.now().millisecondsSinceEpoch}.png';
-      final storagePath = 'stickers/$myId/$fileName';
 
-      // Upload directly to public media bucket
-      await supabase.client.storage.from('media').upload(
-        storagePath,
-        file,
-        fileOptions: const FileOptions(contentType: 'image/png'),
-      );
 
-      final url = supabase.getMediaUrl('media', storagePath);
+      // Upload directly to Backblaze B2 via Edge Function
+      final url = await supabase.uploadToR2(file);
 
       setState(() {
         _customStickers.insert(0, url);

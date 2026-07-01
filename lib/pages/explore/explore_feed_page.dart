@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/explore/create_post_screen.dart';
+import 'package:reel/widgets/chat/sticker_picker.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/pages/explore/full_screen_image_viewer.dart';
 import 'package:reel/pages/updates/status_viewer_screen.dart';
@@ -416,6 +417,7 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     final FocusNode commentFocusNode = FocusNode();
     Map<String, dynamic>? replyTarget; // {'parentId': String, 'userName': String}
     final Map<String, bool> expandedReplies = {};
+    bool isStickerPickerActive = false;
 
     showModalBottomSheet(
       context: context,
@@ -431,6 +433,11 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
               final cId = (comment['id'] ?? '').toString();
               final cUser = comment['userName'] ?? 'User';
               final cText = comment['text'] ?? '';
+              final isSticker = cText.startsWith('[STICKER:') && cText.endsWith(']');
+              String? stickerUrl;
+              if (isSticker) {
+                stickerUrl = cText.substring(9, cText.length - 1);
+              }
               final cUserId = comment['userId'] ?? '';
               final cCreatedAtStr = (comment['createdAt'] ?? comment['createdat']) as String?;
               final replyTo = comment['replyToUserName'] ?? comment['replytousername'] as String?;
@@ -572,24 +579,38 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                               ],
                             ],
                           ),
-                          const SizedBox(height: 2),
-                          RichText(
-                            text: TextSpan(
-                              style: const TextStyle(color: Colors.white70, fontSize: 14),
-                              children: [
-                                if (isReply && replyTo != null && replyTo.isNotEmpty) ...[
-                                  TextSpan(
-                                    text: '@$replyTo ',
-                                    style: const TextStyle(
-                                      color: Color(0xFF00BFFF),
-                                      fontWeight: FontWeight.bold,
+                          if (isSticker && stickerUrl != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.network(
+                                  stickerUrl,
+                                  width: 80,
+                                  height: 80,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
+                                ),
+                              ),
+                            )
+                          else
+                            RichText(
+                              text: TextSpan(
+                                style: const TextStyle(color: Colors.white70, fontSize: 14),
+                                children: [
+                                  if (isReply && replyTo != null && replyTo.isNotEmpty) ...[
+                                    TextSpan(
+                                      text: '@$replyTo ',
+                                      style: const TextStyle(
+                                        color: Color(0xFF00BFFF),
+                                        fontWeight: FontWeight.bold,
+                                      ),
                                     ),
-                                  ),
+                                  ],
+                                  TextSpan(text: cText),
                                 ],
-                                TextSpan(text: cText),
-                              ],
+                              ),
                             ),
-                          ),
                           const SizedBox(height: 4),
                           Row(
                             children: [
@@ -772,11 +793,34 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                       ),
                       child: Row(
                         children: [
+                          IconButton(
+                            icon: Icon(
+                              isStickerPickerActive ? Icons.keyboard : Icons.emoji_emotions_outlined,
+                              color: isStickerPickerActive ? const Color(0xFF00BFFF) : Colors.white70,
+                            ),
+                            onPressed: () {
+                              setSheetState(() {
+                                isStickerPickerActive = !isStickerPickerActive;
+                                if (isStickerPickerActive) {
+                                  commentFocusNode.unfocus();
+                                } else {
+                                  commentFocusNode.requestFocus();
+                                }
+                              });
+                            },
+                          ),
                           Expanded(
                             child: TextField(
                               controller: textController,
                               focusNode: commentFocusNode,
                               style: const TextStyle(color: Colors.white),
+                              onTap: () {
+                                if (isStickerPickerActive) {
+                                  setSheetState(() {
+                                    isStickerPickerActive = false;
+                                  });
+                                }
+                              },
                               decoration: InputDecoration(
                                 hintText: replyTarget != null
                                     ? 'Reply to @${replyTarget!['userName']}...'
@@ -810,6 +854,26 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                         ],
                       ),
                     ),
+                    if (isStickerPickerActive)
+                      StickerPicker(
+                        onStickerSelected: (url) async {
+                          final stickerTag = '[STICKER:$url]';
+                          await context.read<SupabaseService>().addComment(
+                            widget.post['id'],
+                            stickerTag,
+                            parentId: replyTarget?['parentId'],
+                            replyToUserName: replyTarget?['userName'],
+                          );
+                          setSheetState(() {
+                            isStickerPickerActive = false;
+                            replyTarget = null;
+                          });
+                          _loadCommentsCount();
+                          if (widget.onPostUpdated != null) {
+                            widget.onPostUpdated!();
+                          }
+                        },
+                      ),
                   ],
                 ),
               ),
