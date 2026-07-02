@@ -145,4 +145,26 @@ class LocalStorageService {
     } catch (_) {}
     return null;
   }
+
+  Future<void> setString(String key, String value) async {
+    await cacheJson(key, value);
+  }
+
+  Future<String?> getString(String key) async {
+    final data = await getCachedJson(key);
+    if (data is String) {
+      return data;
+    }
+    return null;
+  }
+
+  Future<void> remove(String key) async {
+    try {
+      final path = await _localPath;
+      final file = File('$path/json_cache_${_safeKey(key)}.json');
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {}
+  }
 }
