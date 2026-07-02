@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/chat/chat_video_viewer_page.dart';
+import 'package:video_player/video_player.dart';
 
 class CachedMediaView extends StatefulWidget {
   final String url;
@@ -161,12 +162,11 @@ class _CachedMediaViewState extends State<CachedMediaView> {
               child: Stack(
                 alignment: Alignment.center,
                 children: [
-                  // Video Preview Container
-                  Container(
+                  // Video Preview (Thumbnail)
+                  VideoThumbnailView(
+                    videoPath: _cachedFile!.path,
                     width: widget.width ?? 200,
                     height: widget.height ?? 200,
-                    color: Colors.white.withOpacity(0.1),
-                    child: const Icon(Icons.video_library_outlined, color: Colors.white54, size: 40),
                   ),
                   // Play Icon Button overlay
                   Container(
@@ -180,6 +180,83 @@ class _CachedMediaViewState extends State<CachedMediaView> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+class VideoThumbnailView extends StatefulWidget {
+  final String videoPath;
+  final double width;
+  final double height;
+
+  const VideoThumbnailView({
+    super.key,
+    required this.videoPath,
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  State<VideoThumbnailView> createState() => _VideoThumbnailViewState();
+}
+
+class _VideoThumbnailViewState extends State<VideoThumbnailView> {
+  VideoPlayerController? _controller;
+  bool _isInitialized = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initController();
+  }
+
+  Future<void> _initController() async {
+    try {
+      final isNetwork = widget.videoPath.startsWith('http://') || widget.videoPath.startsWith('https://');
+      _controller = isNetwork
+          ? VideoPlayerController.networkUrl(Uri.parse(widget.videoPath))
+          : VideoPlayerController.file(File(widget.videoPath));
+          
+      await _controller!.initialize();
+      if (mounted) {
+        setState(() {
+          _isInitialized = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to initialize video thumbnail: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isInitialized && _controller != null) {
+      return SizedBox(
+        width: widget.width,
+        height: widget.height,
+        child: AspectRatio(
+          aspectRatio: _controller!.value.aspectRatio,
+          child: VideoPlayer(_controller!),
+        ),
+      );
+    }
+    return Container(
+      width: widget.width,
+      height: widget.height,
+      color: Colors.white.withOpacity(0.05),
+      child: const Center(
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.white54),
+        ),
+      ),
     );
   }
 }

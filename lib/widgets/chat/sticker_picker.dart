@@ -24,9 +24,9 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
   List<String> _customStickers = [];
 
   static const List<String> _defaultStickers = [
-    'https://zvxrcwgvvubgqlxbcyov.supabase.co/storage/v1/object/public/media/stickers/default/cyber_neon_smile.webp',
-    'https://zvxrcwgvvubgqlxbcyov.supabase.co/storage/v1/object/public/media/stickers/default/cyber_neon_skull.webp',
-    'https://zvxrcwgvvubgqlxbcyov.supabase.co/storage/v1/object/public/media/stickers/default/cyber_neon_heart.webp',
+    'assets/cyber_neon_smile.webp',
+    'assets/cyber_neon_skull.webp',
+    'assets/cyber_neon_heart.webp',
   ];
 
   @override
@@ -210,20 +210,25 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.white.withOpacity(0.05)),
             ),
-            child: Image.network(
-              actualUrl,
-              fit: BoxFit.contain,
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) return child;
-                return const Center(
-                  child: CircularProgressIndicator(
-                    color: Color(0xFF00BFFF),
-                    strokeWidth: 1.5,
+            child: actualUrl.startsWith('assets/')
+                ? Image.asset(
+                    actualUrl,
+                    fit: BoxFit.contain,
+                  )
+                : Image.network(
+                    actualUrl,
+                    fit: BoxFit.contain,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF00BFFF),
+                          strokeWidth: 1.5,
+                        ),
+                      );
+                    },
+                    errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
                   ),
-                );
-              },
-              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
-            ),
           ),
         );
       },

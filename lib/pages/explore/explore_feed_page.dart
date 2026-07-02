@@ -584,13 +584,20 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                               padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(8),
-                                child: Image.network(
-                                  stickerUrl,
-                                  width: 80,
-                                  height: 80,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
-                                ),
+                                child: stickerUrl.startsWith('assets/')
+                                    ? Image.asset(
+                                        stickerUrl,
+                                        width: 80,
+                                        height: 80,
+                                        fit: BoxFit.contain,
+                                      )
+                                    : Image.network(
+                                        stickerUrl,
+                                        width: 80,
+                                        height: 80,
+                                        fit: BoxFit.contain,
+                                        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
+                                      ),
                               ),
                             )
                           else

@@ -110,6 +110,17 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   // Global static in-memory cache for all chats to achieve instant load times
   static final Map<String, List<Map<String, dynamic>>> _inMemoryMsgCache = {};
 
+  String? _wallpaperPath;
+
+  Future<void> _loadWallpaper() async {
+    final path = await LocalStorageService().getString('chat_wallpaper_${widget.chatId}');
+    if (mounted) {
+      setState(() {
+        _wallpaperPath = path;
+      });
+    }
+  }
+
   Future<void> _loadLastSeenTime() async {
     final timeStr = await LocalStorageService().getCachedJson('last_seen_time_${widget.chatId}') as String?;
     if (timeStr != null) {
@@ -142,6 +153,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     super.initState();
     final supabase = context.read<SupabaseService>();
     supabase.activeChatId = widget.chatId;
+    _loadWallpaper();
     _loadLastSeenTime();
 
     // Try to load from in-memory cache first for instant rendering
@@ -2095,7 +2107,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             color: Colors.grey[900],
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             onSelected: (value) async {
-              if (value == 'off' || value == '24h' || value == '48h') {
+              if (value == 'wallpaper') {
+                _showWallpaperOptions();
+              } else if (value == 'off' || value == '24h' || value == '48h') {
                 _updateDisappearingSettings(value);
               } else if (value == 'friend') {
                 _toggleFollow();
@@ -2136,6 +2150,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                             Icon(Icons.info_outline, color: Colors.white70, size: 18),
                             SizedBox(width: 8),
                             Text('Group Info', style: TextStyle(color: Colors.white)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'wallpaper',
+                        child: Row(
+                          children: [
+                            Icon(Icons.wallpaper, color: Colors.white70, size: 18),
+                            SizedBox(width: 8),
+                            Text('Wallpaper', style: TextStyle(color: Colors.white)),
                           ],
                         ),
                       ),
@@ -2213,6 +2237,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         ],
                       ),
                     ),
+                    const PopupMenuItem(
+                      value: 'wallpaper',
+                      child: Row(
+                        children: [
+                          Icon(Icons.wallpaper, color: Colors.white70, size: 18),
+                          SizedBox(width: 8),
+                          Text('Wallpaper', style: TextStyle(color: Colors.white)),
+                        ],
+                      ),
+                    ),
                     const PopupMenuDivider(height: 1),
                     const PopupMenuItem(
                       value: 'clear',
@@ -2262,11 +2296,22 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               ),
             ),
           Expanded(
-            child: Builder(
-              builder: (context) {
-                if (_isLoadingLocal) {
-                  return const Center(child: CircularProgressIndicator());
-                }
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F0F0F),
+                image: _wallpaperPath != null && _wallpaperPath!.isNotEmpty
+                    ? DecorationImage(
+                        image: FileImage(File(_wallpaperPath!)),
+                        fit: BoxFit.cover,
+                        opacity: 0.18,
+                      )
+                    : null,
+              ),
+              child: Builder(
+                builder: (context) {
+                  if (_isLoadingLocal) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
 
                 final displayMessages = _localMessages.where((m) {
                   final deletedForList = m['deletedFor'] as List<dynamic>? ?? [];
@@ -2475,11 +2520,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                              child: Stack(
                                                                alignment: Alignment.center,
                                                                children: [
-                                                                 Container(
+                                                                 VideoThumbnailView(
+                                                                   videoPath: msg['mediaFilePath'],
                                                                    width: 200,
                                                                    height: 200,
-                                                                   color: Colors.white.withOpacity(0.1),
-                                                                   child: const Icon(Icons.video_library_outlined, color: Colors.white54, size: 40),
                                                                  ),
                                                                  Container(
                                                                    padding: const EdgeInsets.all(8),
@@ -2689,6 +2733,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               },
             ),
           ),
+        ),
           if (_isSending)
             Container(
               color: Colors.black,
@@ -2979,15 +3024,17 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   height: 130,
                   padding: const EdgeInsets.all(4),
                   child: mediaUrl != null
-                      ? Image.network(
-                          mediaUrl,
-                          fit: BoxFit.contain,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5));
-                          },
-                          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 40),
-                        )
+                      ? (mediaUrl.startsWith('assets/')
+                          ? Image.asset(mediaUrl, fit: BoxFit.contain)
+                          : Image.network(
+                              mediaUrl,
+                              fit: BoxFit.contain,
+                              loadingBuilder: (context, child, progress) {
+                                if (progress == null) return child;
+                                return const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5));
+                              },
+                              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 40),
+                            ))
                       : const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF), strokeWidth: 1.5)),
                 ),
                 Positioned(
@@ -3154,8 +3201,57 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       }
     } catch (e) {
       debugPrint('Failed to send pending sticker $tempId: $e');
-      _sendingMessageIds.remove(tempId);
     }
+  }
+
+  void _showWallpaperOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.grey[900],
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  'Chat Wallpaper',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined, color: Colors.white70),
+                title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final picker = ImagePicker();
+                  final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+                  if (pickedFile != null) {
+                    await LocalStorageService().setString('chat_wallpaper_${widget.chatId}', pickedFile.path);
+                    _loadWallpaper();
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                title: const Text('Remove Wallpaper', style: TextStyle(color: Colors.redAccent)),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await LocalStorageService().remove('chat_wallpaper_${widget.chatId}');
+                  setState(() {
+                    _wallpaperPath = null;
+                  });
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 
