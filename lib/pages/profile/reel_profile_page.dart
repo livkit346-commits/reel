@@ -7,6 +7,7 @@ import 'package:reel/pages/auth/reel_auth_page.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/pages/profile/edit_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/pages/explore/explore_feed_page.dart';
 
 class ReelProfilePage extends StatefulWidget {
   final String? userId; // Optional profile to view
@@ -716,41 +717,12 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                     : _userPosts.isEmpty
                         ? const Center(child: Text('No posts yet', style: TextStyle(color: Colors.white38)))
                         : ListView.builder(
-                            padding: const EdgeInsets.all(8),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
                             itemCount: _userPosts.length,
                             itemBuilder: (context, index) {
-                              final post = _userPosts[index];
-                              final postImageUrl = post['imageUrl'] ?? post['imageurl'];
-                              return Card(
-                                color: Colors.white.withOpacity(0.04),
-                                margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(12),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        post['text'] ?? '',
-                                        style: const TextStyle(color: Colors.white, fontSize: 14),
-                                      ),
-                                      if (postImageUrl != null) ...[
-                                        const SizedBox(height: 8),
-                                        ClipRRect(
-                                          borderRadius: BorderRadius.circular(12),
-                                          child: Image.network(postImageUrl as String, fit: BoxFit.cover, height: 180, width: double.infinity),
-                                        ),
-                                      ],
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        (post['createdAt'] ?? post['createdat']) != null 
-                                          ? DateTime.parse((post['createdAt'] ?? post['createdat']) as String).toLocal().toString().substring(0, 16)
-                                          : '',
-                                        style: const TextStyle(color: Colors.white30, fontSize: 11),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                              return ExplorePostItem(
+                                post: _userPosts[index],
+                                onPostUpdated: () => _loadUserPosts(userId),
                               );
                             },
                           ),

@@ -1551,21 +1551,7 @@ class SupabaseService {
         final history = await WebSocketService().fetchHistory(cid, lastMessageId: lastMessageId);
         if (history.isEmpty) continue;
 
-        // Discard old history if this is a fresh install/reinstall and we have no lastReceivedMessageId
-        final bool isFreshInstallEmpty = localMessages.isEmpty && lastMessageId == null;
-        if (isFreshInstallEmpty) {
-          final sortedHistory = List<Map<String, dynamic>>.from(history);
-          sortedHistory.sort((a, b) {
-            final idA = (a['messageId'] ?? a['id'] ?? '') as String;
-            final idB = (b['messageId'] ?? b['id'] ?? '') as String;
-            return idA.compareTo(idB);
-          });
-          final latestId = sortedHistory.last['messageId'] ?? sortedHistory.last['id'];
-          if (latestId != null) {
-            await updateLastReceivedMessageId(cid, latestId);
-          }
-          continue;
-        }
+
 
         bool hasChanges = false;
         for (final msg in history) {

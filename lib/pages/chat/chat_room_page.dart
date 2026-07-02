@@ -586,26 +586,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
       final history = await WebSocketService().fetchHistory(widget.chatId, lastMessageId: lastMessageId);
       if (history.isNotEmpty) {
-        final bool isFreshInstallEmpty = _localMessages.isEmpty && lastMessageId == null;
-
-        if (isFreshInstallEmpty) {
-          final sortedHistory = List<Map<String, dynamic>>.from(history);
-          sortedHistory.sort((a, b) {
-            final idA = (a['messageId'] ?? a['id'] ?? '') as String;
-            final idB = (b['messageId'] ?? b['id'] ?? '') as String;
-            return idA.compareTo(idB);
-          });
-          final latestId = sortedHistory.last['messageId'] ?? sortedHistory.last['id'];
-          if (latestId != null) {
-            context.read<SupabaseService>().updateLastReceivedMessageId(widget.chatId, latestId);
-          }
-        }
-
         setState(() {
           for (final msg in history) {
-            if (isFreshInstallEmpty) {
-              continue;
-            }
             final typedMsg = Map<String, dynamic>.from(msg);
             final msgId = typedMsg['messageId'] ?? typedMsg['id'];
 
