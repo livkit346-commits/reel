@@ -113,7 +113,23 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   String? _wallpaperPath;
 
   Future<void> _loadWallpaper() async {
-    final path = await LocalStorageService().getString('chat_wallpaper_${widget.chatId}');
+    // 1. Specific chat wallpaper
+    var path = await LocalStorageService().getString('chat_wallpaper_${widget.chatId}');
+    
+    // 2. If null, fallback to group-default (for groups) or general-default (for 1-on-1)
+    if (path == null || path.isEmpty) {
+      if (widget.isGroup) {
+        path = await LocalStorageService().getString('chat_wallpaper_group_default');
+      } else {
+        path = await LocalStorageService().getString('chat_wallpaper_general_default');
+      }
+    }
+    
+    // 3. If still null, check if there is a general-default wallpaper as ultimate fallback
+    if ((path == null || path.isEmpty) && widget.isGroup) {
+      path = await LocalStorageService().getString('chat_wallpaper_general_default');
+    }
+
     if (mounted) {
       setState(() {
         _wallpaperPath = path;
@@ -599,6 +615,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               if (msgTime != null && msgTime.isBefore(_joinedAt!)) {
                 continue;
               }
+            }
+
+            // Filter out already read/seen messages if we are bootstrapping history after a fresh login (no local messages)
+            final isMe = typedMsg['senderId'] == myId;
+            final seenParticipants = List<String>.from(typedMsg['seenParticipants'] ?? []);
+            final isSeenByMe = typedMsg['seen'] == true || seenParticipants.contains(myId);
+            if (lastMessageId == null && (isMe || isSeenByMe)) {
+              continue;
             }
 
             final exists = _localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
@@ -1755,15 +1779,17 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              try {
-                final supabase = context.read<SupabaseService>();
-                for (final messageId in messageIds) {
-                  _localMessages.removeWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
+              final supabase = context.read<SupabaseService>();
+              for (final messageId in messageIds) {
+                _localMessages.removeWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
+                try {
                   await supabase.deleteMessageForMe(messageId);
+                } catch (e) {
+                  debugPrint('Failed to delete message for me on server $messageId: $e');
                 }
-                await _saveLocalMessages();
-                setState(() {});
-              } catch (_) {}
+              }
+              await _saveLocalMessages();
+              setState(() {});
             },
             child: const Text('DELETE FOR ME', style: TextStyle(color: Colors.redAccent)),
           ),
@@ -1771,27 +1797,29 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             TextButton(
               onPressed: () async {
                 Navigator.pop(context);
-                try {
-                  final supabase = context.read<SupabaseService>();
-                  for (final messageId in messageIds) {
-                    final index = _localMessages.indexWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
-                    if (index != -1) {
-                      _localMessages[index]['isDeleted'] = true;
-                      _localMessages[index]['text'] = 'This message was deleted';
-                      _localMessages[index]['mediaUrl'] = null;
-                      _localMessages[index]['mediaType'] = null;
-                    }
-                    await supabase.deleteMessageForEveryone(messageId);
-                    final recipientId = widget.otherUserId ?? '';
-                    WebSocketService().sendDeleteMessage(
-                      chatId: widget.chatId,
-                      messageId: messageId,
-                      recipientId: recipientId,
-                    );
+                final supabase = context.read<SupabaseService>();
+                for (final messageId in messageIds) {
+                  final index = _localMessages.indexWhere((m) => m['id'] == messageId || m['messageId'] == messageId);
+                  if (index != -1) {
+                    _localMessages[index]['isDeleted'] = true;
+                    _localMessages[index]['text'] = 'This message was deleted';
+                    _localMessages[index]['mediaUrl'] = null;
+                    _localMessages[index]['mediaType'] = null;
                   }
-                  await _saveLocalMessages();
-                  setState(() {});
-                } catch (_) {}
+                  try {
+                    await supabase.deleteMessageForEveryone(messageId);
+                  } catch (e) {
+                    debugPrint('Failed to delete message for everyone on server $messageId: $e');
+                  }
+                  final recipientId = widget.otherUserId ?? '';
+                  WebSocketService().sendDeleteMessage(
+                    chatId: widget.chatId,
+                    messageId: messageId,
+                    recipientId: recipientId,
+                  );
+                }
+                await _saveLocalMessages();
+                setState(() {});
               },
               child: const Text('DELETE FOR EVERYONE', style: TextStyle(color: Colors.redAccent)),
             ),
@@ -1871,11 +1899,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subColor = isDark ? Colors.white54 : Colors.black54;
+    final iconColor = isDark ? Colors.white : Colors.black87;
     final supabase = context.read<SupabaseService>();
     final myId = supabase.currentUser?.id;
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: _selectedMessageIds.isNotEmpty
           ? AppBar(
               backgroundColor: const Color(0xFF00A884), // WhatsApp green selection color
@@ -1984,16 +2017,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               ],
             )
           : AppBar(
-              backgroundColor: Colors.grey[950],
+              backgroundColor: theme.scaffoldBackgroundColor,
         titleSpacing: 0,
         title: _isSearchActive
             ? TextField(
                 controller: _searchController,
                 autofocus: true,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-                decoration: const InputDecoration(
+                style: TextStyle(color: textColor, fontSize: 16),
+                decoration: InputDecoration(
                   hintText: 'Search messages...',
-                  hintStyle: TextStyle(color: Colors.white30),
+                  hintStyle: TextStyle(color: subColor),
                   border: InputBorder.none,
                 ),
                 onChanged: (value) {
@@ -2021,7 +2054,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                       MaterialPageRoute(
                         builder: (context) => ReelProfilePage(userId: widget.otherUserId),
                       ),
-                    );
+                    ).then((_) {
+                      _loadChatSettings();
+                    });
                   }
                 },
                 child: Row(
@@ -2048,13 +2083,13 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         children: [
                           Text(
                             widget.otherUserName,
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textColor),
                           ),
                           Text(
                             widget.isGroup
                                 ? '${_participantNames.length} members'
                                 : (_disappearingDuration == 'off' ? 'tap settings for disappearing' : '⏰ disappearing: $_disappearingDuration'),
-                            style: const TextStyle(fontSize: 11, color: Colors.white54),
+                            style: TextStyle(fontSize: 11, color: subColor),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ],
@@ -2066,7 +2101,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         actions: [
           if (_isSearchActive)
             IconButton(
-              icon: const Icon(Icons.close, color: Colors.white),
+              icon: Icon(Icons.close, color: iconColor),
               onPressed: () {
                 setState(() {
                   _isSearchActive = false;
@@ -2077,7 +2112,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             )
           else
             IconButton(
-              icon: const Icon(Icons.search, color: Colors.white),
+              icon: Icon(Icons.search, color: iconColor),
               onPressed: () {
                 setState(() {
                   _isSearchActive = true;
@@ -2085,7 +2120,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               },
             ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: Colors.white),
+            icon: Icon(Icons.more_vert, color: iconColor),
             color: Colors.grey[900],
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             onSelected: (value) async {
@@ -2411,21 +2446,23 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                 : Container(
                                       margin: const EdgeInsets.only(bottom: 8),
                                       padding: (isDeleted || (text != null && text.trim().isNotEmpty) || (mediaType != 'image' && mediaType != 'video'))
-                                          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
+                                          ? const EdgeInsets.symmetric(horizontal: 10, vertical: 6)
                                           : EdgeInsets.zero,
                                       decoration: BoxDecoration(
                                         color: isDeleted 
                                             ? Colors.transparent 
-                                            : (isMe ? const Color(0xFF7E1C31) : const Color(0xFF262626)),
-                                        border: isDeleted ? Border.all(color: Colors.white24, width: 1) : null,
+                                            : (isMe 
+                                                ? (isDark ? const Color(0xFF7E1C31) : const Color(0xFFFFD2D2))
+                                                : (isDark ? const Color(0xFF262626) : const Color(0xFFEAEAEA))),
+                                        border: isDeleted ? Border.all(color: isDark ? Colors.white24 : Colors.black12, width: 1) : null,
                                         borderRadius: BorderRadius.only(
-                                          topLeft: const Radius.circular(20),
-                                          topRight: const Radius.circular(20),
-                                          bottomLeft: isMe ? const Radius.circular(20) : Radius.zero,
-                                          bottomRight: isMe ? Radius.zero : const Radius.circular(20),
+                                          topLeft: const Radius.circular(16),
+                                          topRight: const Radius.circular(16),
+                                          bottomLeft: isMe ? const Radius.circular(16) : Radius.zero,
+                                          bottomRight: isMe ? Radius.zero : const Radius.circular(16),
                                         ),
                                       ),
-                                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
+                                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                                child: IntrinsicWidth(
                                  child: Column(
                                    crossAxisAlignment: CrossAxisAlignment.end,
@@ -2656,33 +2693,34 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                          ],
                                        ],
                                        if (text != null && text.isNotEmpty)
-                                         Align(
-                                           alignment: Alignment.topLeft,
-                                           child: Padding(
-                                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-                                             child: Text(
-                                               text,
-                                               style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.3),
-                                             ),
-                                           ),
-                                         ),
+                                          Padding(
+                                            padding: const EdgeInsets.only(left: 6, right: 6, top: 4, bottom: 2),
+                                            child: Text(
+                                              text,
+                                              style: TextStyle(
+                                                color: isDark ? Colors.white : Colors.black87,
+                                                fontSize: 15,
+                                                height: 1.3,
+                                              ),
+                                            ),
+                                          ),
                                      ],
                                      if (isDeleted || (text != null && text.trim().isNotEmpty) || (mediaType != 'image' && mediaType != 'video')) ...[
-                                       const SizedBox(height: 4),
+                                       const SizedBox(height: 2),
                                        Padding(
-                                         padding: const EdgeInsets.only(right: 14, bottom: 8),
+                                         padding: const EdgeInsets.only(left: 20, right: 4, bottom: 2),
                                          child: Row(
                                            mainAxisAlignment: MainAxisAlignment.end,
                                            mainAxisSize: MainAxisSize.min,
                                            children: [
                                              if (msg['is_pinned'] == true)
-                                               const Padding(
-                                                 padding: EdgeInsets.only(right: 4),
-                                                 child: Icon(Icons.push_pin, size: 12, color: Colors.white70),
+                                               Padding(
+                                                 padding: const EdgeInsets.only(right: 4),
+                                                 child: Icon(Icons.push_pin, size: 10, color: isDark ? Colors.white30 : Colors.black38),
                                                ),
                                              Text(
                                                timeStr,
-                                               style: const TextStyle(color: Colors.white38, fontSize: 9),
+                                               style: TextStyle(color: isDark ? Colors.white38 : Colors.black45, fontSize: 9),
                                              ),
                                              if (isMe) ...[
                                                const SizedBox(width: 4),
@@ -2690,12 +2728,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                  msg['isPending'] == true 
                                                      ? Icons.access_time 
                                                      : (msg['seen'] == true || msg['received'] == true ? Icons.done_all : Icons.done),
-                                                 size: 13,
+                                                 size: 11,
                                                  color: msg['isPending'] == true 
-                                                     ? Colors.white38 
+                                                     ? (isDark ? Colors.white38 : Colors.black38)
                                                      : (msg['seen'] == true 
                                                          ? Colors.lightBlueAccent 
-                                                         : (msg['received'] == true ? Colors.white54 : Colors.white30)),
+                                                         : (msg['received'] == true 
+                                                             ? (isDark ? Colors.white54 : Colors.black45) 
+                                                             : (isDark ? Colors.white24 : Colors.black26))),
                                                ),
                                              ],
                                            ],
@@ -2879,16 +2919,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                             ),
                             GestureDetector(
                               onTap: _isBlocked ? null : _sendImage,
-                              child: const Padding(
-                                padding: EdgeInsets.only(left: 4, right: 12),
-                                child: Icon(Icons.image, color: Colors.white70, size: 26),
+                              child: Padding(
+                                padding: const EdgeInsets.only(left: 4, right: 12),
+                                child: Icon(Icons.image, color: subColor, size: 26),
                               ),
                             ),
                             Expanded(
                               child: Container(
                                 padding: const EdgeInsets.only(left: 16, right: 4),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.1),
+                                  color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.05),
                                   borderRadius: BorderRadius.circular(24),
                                 ),
                                 child: Row(
@@ -2902,11 +2942,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                             _isStickerPickerActive = false;
                                           });
                                         },
-                                        style: const TextStyle(color: Colors.white, fontSize: 15),
+                                        style: TextStyle(color: textColor, fontSize: 15),
                                         maxLines: null,
                                         decoration: InputDecoration(
                                           hintText: _isBlocked ? 'Unblock to chat' : 'Send message...',
-                                          hintStyle: const TextStyle(color: Colors.white54, fontSize: 15),
+                                          hintStyle: TextStyle(color: subColor, fontSize: 15),
                                           border: InputBorder.none,
                                           isDense: true,
                                           contentPadding: const EdgeInsets.symmetric(vertical: 12),
@@ -2926,7 +2966,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                         padding: const EdgeInsets.symmetric(horizontal: 8),
                                         child: Icon(
                                           _isStickerPickerActive ? Icons.keyboard : Icons.emoji_emotions_outlined,
-                                          color: _isStickerPickerActive ? const Color(0xFF00BFFF) : Colors.white70,
+                                          color: _isStickerPickerActive ? const Color(0xFF00BFFF) : subColor,
                                           size: 24,
                                         ),
                                       ),
@@ -3189,47 +3229,99 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   void _showWallpaperOptions() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[900],
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey[900] : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final textColor = isDark ? Colors.white : Colors.black87;
+        final iconColor = isDark ? Colors.white70 : Colors.black54;
+
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 16),
-                child: Text(
-                  'Chat Wallpaper',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Text(
+                    'Chat Wallpaper',
+                    style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
                 ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined, color: Colors.white70),
-                title: const Text('Choose from Gallery', style: TextStyle(color: Colors.white)),
-                onTap: () async {
-                  Navigator.pop(context);
-                  final picker = ImagePicker();
-                  final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-                  if (pickedFile != null) {
-                    await LocalStorageService().setString('chat_wallpaper_${widget.chatId}', pickedFile.path);
+                ListTile(
+                  leading: Icon(Icons.photo_library_outlined, color: iconColor),
+                  title: Text('Set for This Chat Only', style: TextStyle(color: textColor)),
+                  subtitle: Text('Personal custom wallpaper', style: TextStyle(color: isDark ? Colors.white54 : Colors.black54, fontSize: 12)),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final picker = ImagePicker();
+                    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+                    if (pickedFile != null) {
+                      await LocalStorageService().setString('chat_wallpaper_${widget.chatId}', pickedFile.path);
+                      _loadWallpaper();
+                    }
+                  },
+                ),
+                ListTile(
+                  leading: Icon(Icons.wallpaper, color: iconColor),
+                  title: Text('Set as General Wallpaper (All Chats)', style: TextStyle(color: textColor)),
+                  subtitle: Text('Default wallpaper for all chats', style: TextStyle(color: isDark ? Colors.white54 : Colors.black54, fontSize: 12)),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final picker = ImagePicker();
+                    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+                    if (pickedFile != null) {
+                      await LocalStorageService().setString('chat_wallpaper_general_default', pickedFile.path);
+                      _loadWallpaper();
+                    }
+                  },
+                ),
+                ListTile(
+                  leading: Icon(Icons.group_work_outlined, color: iconColor),
+                  title: Text('Set as Group Wallpaper (All Groups)', style: TextStyle(color: textColor)),
+                  subtitle: Text('Default wallpaper for all group chats', style: TextStyle(color: isDark ? Colors.white54 : Colors.black54, fontSize: 12)),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final picker = ImagePicker();
+                    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+                    if (pickedFile != null) {
+                      await LocalStorageService().setString('chat_wallpaper_group_default', pickedFile.path);
+                      _loadWallpaper();
+                    }
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                  title: const Text('Remove Personal Wallpaper (This Chat)', style: TextStyle(color: Colors.redAccent)),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await LocalStorageService().remove('chat_wallpaper_${widget.chatId}');
                     _loadWallpaper();
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                title: const Text('Remove Wallpaper', style: TextStyle(color: Colors.redAccent)),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await LocalStorageService().remove('chat_wallpaper_${widget.chatId}');
-                  setState(() {
-                    _wallpaperPath = null;
-                  });
-                },
-              ),
-            ],
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_sweep_outlined, color: Colors.redAccent),
+                  title: const Text('Remove General Wallpaper (All Chats)', style: TextStyle(color: Colors.redAccent)),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await LocalStorageService().remove('chat_wallpaper_general_default');
+                    _loadWallpaper();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_sweep_outlined, color: Colors.redAccent),
+                  title: const Text('Remove Group Wallpaper (All Groups)', style: TextStyle(color: Colors.redAccent)),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await LocalStorageService().remove('chat_wallpaper_group_default');
+                    _loadWallpaper();
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },

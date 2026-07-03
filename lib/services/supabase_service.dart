@@ -21,6 +21,9 @@ class SupabaseService {
   // Track active chat room ID to avoid race conditions with background listeners
   String? activeChatId;
 
+  // Background refresh timer
+  Timer? _tokenRefreshTimer;
+
   // Future lock to prevent duplicate concurrent refresh requests
   Future<String?>? _activeRefreshFuture;
 
@@ -119,6 +122,20 @@ class SupabaseService {
       debugPrint('Error in _setSessionOffline: $e');
       rethrow;
     }
+  }
+
+  void _startTokenRefreshTimer() {
+    _tokenRefreshTimer?.cancel();
+    _tokenRefreshTimer = Timer.periodic(const Duration(minutes: 1), (timer) async {
+      final cached = await LocalStorageService().getCachedJson('auth_tokens');
+      if (cached != null && cached is Map) {
+        final accessToken = cached['accessToken'] as String?;
+        if (accessToken != null && _isTokenExpired(accessToken)) {
+          debugPrint('Periodic token check: Token is expired or expiring soon, refreshing...');
+          await getValidAccessToken();
+        }
+      }
+    });
   }
 
   // Retrieve valid access token, auto-refreshing if expired
@@ -220,6 +237,7 @@ class SupabaseService {
               debugPrint('Failed background token refresh on startup: $err');
             });
           }
+          _startTokenRefreshTimer();
         }
       }
     } catch (e) {
@@ -310,6 +328,7 @@ class SupabaseService {
 
       // Pass token to Supabase client offline
       final authResponse = await _setSessionOffline(accessToken, refreshToken);
+      _startTokenRefreshTimer();
 
       // Sign in to Firebase Auth as a fallback/sync (if firebase is still active for other things, though we don't require it)
       try {
@@ -346,6 +365,7 @@ class SupabaseService {
       debugPrint('Error calling logout endpoint: $e');
     } finally {
       // Clear cache and sign out Supabase/Firebase clients
+      _tokenRefreshTimer?.cancel();
       _mutedChatIds.clear();
       _mutedChatsLoaded = false;
       _archivedChatIds.clear();
@@ -1377,10 +1397,8 @@ class SupabaseService {
             chatData['chatIcon'] = user['photoUrl'];
             chatData['otherUserId'] = user['id'];
           } else {
-            // Fallback if other user is deleted or not found
-            chatData['chatName'] = 'Deleted User';
-            chatData['chatIcon'] = null;
-            chatData['otherUserId'] = '';
+            // Fallback if other user is deleted or not found: skip this chat completely
+            continue;
           }
         }
 
@@ -1566,6 +1584,14 @@ class SupabaseService {
             if (msgTime != null && msgTime.isBefore(joinedAt)) {
               continue;
             }
+          }
+
+          // Filter out already read/seen messages if we are bootstrapping history after a fresh login (no local messages)
+          final isMe = typedMsg['senderId'] == myId;
+          final seenParticipants = List<String>.from(typedMsg['seenParticipants'] ?? []);
+          final isSeenByMe = typedMsg['seen'] == true || seenParticipants.contains(myId);
+          if (lastMessageId == null && (isMe || isSeenByMe)) {
+            continue;
           }
 
           final exists = localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);

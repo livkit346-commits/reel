@@ -148,14 +148,22 @@ class _ChatListPageState extends State<ChatListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subColor = isDark ? Colors.white54 : Colors.black87;
+    final hintColor = isDark ? Colors.white38 : Colors.black54;
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: _selectedChats.isNotEmpty ? Theme.of(context).primaryColor.withOpacity(0.2) : Colors.black,
+        backgroundColor: _selectedChats.isNotEmpty 
+            ? theme.primaryColor.withOpacity(0.2) 
+            : theme.scaffoldBackgroundColor,
         elevation: 0,
         leading: _selectedChats.isNotEmpty
             ? IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                icon: Icon(Icons.arrow_back, color: textColor),
                 onPressed: () {
                   setState(() {
                     _selectedChats.clear();
@@ -165,8 +173,8 @@ class _ChatListPageState extends State<ChatListPage> {
             : null,
         title: Text(
           _selectedChats.isNotEmpty ? '${_selectedChats.length} Selected' : 'Reel Secure Chat',
-          style: const TextStyle(
-            color: Colors.white,
+          style: TextStyle(
+            color: textColor,
             fontSize: 22,
             fontWeight: FontWeight.bold,
           ),
@@ -174,14 +182,14 @@ class _ChatListPageState extends State<ChatListPage> {
         actions: _selectedChats.isNotEmpty
             ? [
                 IconButton(
-                  icon: const Icon(Icons.push_pin_outlined, color: Colors.white),
+                  icon: Icon(Icons.push_pin_outlined, color: textColor),
                   onPressed: () {
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Chats Pinned')));
                     setState(() => _selectedChats.clear());
                   },
                 ),
                 IconButton(
-                  icon: const Icon(Icons.volume_off_outlined, color: Colors.white),
+                  icon: Icon(Icons.volume_off_outlined, color: textColor),
                   onPressed: () async {
                     final supabase = context.read<SupabaseService>();
                     for (final id in _selectedChats) {
@@ -195,7 +203,7 @@ class _ChatListPageState extends State<ChatListPage> {
                   },
                 ),
                 IconButton(
-                  icon: const Icon(Icons.archive_outlined, color: Colors.white),
+                  icon: Icon(Icons.archive_outlined, color: textColor),
                   onPressed: () async {
                     final supabase = context.read<SupabaseService>();
                     for (final id in _selectedChats) {
@@ -232,17 +240,17 @@ class _ChatListPageState extends State<ChatListPage> {
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: const [
-                          Icon(Icons.chat_bubble_outline, size: 64, color: Colors.white24),
-                          SizedBox(height: 16),
+                        children: [
+                          Icon(Icons.chat_bubble_outline, size: 64, color: hintColor),
+                          const SizedBox(height: 16),
                           Text(
                             'No active chats yet.',
-                            style: TextStyle(color: Colors.white54, fontSize: 16),
+                            style: TextStyle(color: subColor, fontSize: 16),
                           ),
-                          SizedBox(height: 8),
+                          const SizedBox(height: 8),
                           Text(
                             'Use the Add Friends tab to find and message users!',
-                            style: TextStyle(color: Colors.white38, fontSize: 13),
+                            style: TextStyle(color: hintColor, fontSize: 13),
                           ),
                         ],
                       ),
@@ -268,7 +276,7 @@ class _ChatListPageState extends State<ChatListPage> {
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                           selected: isSelected,
-                          selectedTileColor: Colors.white.withOpacity(0.1),
+                          selectedTileColor: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.05),
                           onLongPress: () => _toggleSelection(chatId),
                           leading: isGroup
                               ? CircleAvatar(
@@ -299,8 +307,8 @@ class _ChatListPageState extends State<ChatListPage> {
                                 ),
                           title: Text(
                             chatName,
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: textColor,
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
                             ),
@@ -318,7 +326,7 @@ class _ChatListPageState extends State<ChatListPage> {
                                                 ? '👾 Sticker'
                                                 : 'Tap to view encrypted ephemeral messages'))))),
                             style: TextStyle(
-                              color: hasUnread ? const Color(0xFF00BFFF) : Colors.white38,
+                              color: hasUnread ? const Color(0xFF00BFFF) : hintColor,
                               fontSize: 13,
                               fontWeight: hasUnread ? FontWeight.bold : FontWeight.normal,
                             ),
@@ -333,7 +341,7 @@ class _ChatListPageState extends State<ChatListPage> {
                                   chatMap['latestMessageTime'] != '1970-01-01T00:00:00Z') ...[
                                 Text(
                                   _formatMessageTime(chatMap['latestMessageTime']?.toString()),
-                                  style: const TextStyle(color: Colors.white30, fontSize: 11),
+                                  style: TextStyle(color: hintColor, fontSize: 11),
                                 ),
                                 const SizedBox(width: 8),
                               ],
@@ -569,10 +577,10 @@ class _ChatListPageState extends State<ChatListPage> {
           child: Icon(Icons.archive_outlined, color: Colors.cyanAccent, size: 24),
         ),
       ),
-      title: const Text(
+      title: Text(
         'Archived',
         style: TextStyle(
-          color: Colors.white,
+          color: textColor,
           fontWeight: FontWeight.bold,
           fontSize: 16,
         ),

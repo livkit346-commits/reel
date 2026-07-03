@@ -374,3 +374,21 @@ CREATE POLICY "Post owners can delete reports on their posts" ON public.reports
     auth.uid() IN (SELECT "userId" FROM public.posts WHERE id = "postId")
   );
 
+
+-- ========================================================
+-- AUTO CLEAN UP DELETED USERS
+-- ========================================================
+-- Automatically delete the public.users record when the corresponding user is deleted from auth.users (Supabase Auth dashboard)
+CREATE OR REPLACE FUNCTION public.handle_deleted_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  DELETE FROM public.users WHERE id = OLD.id;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE TRIGGER tr_handle_deleted_user
+AFTER DELETE ON auth.users
+FOR EACH ROW
+EXECUTE FUNCTION public.handle_deleted_user();
+

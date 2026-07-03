@@ -51,7 +51,9 @@ class ReelApp extends StatelessWidget {
       navigatorKey: navigatorKey,
       title: 'Reel',
       debugShowCheckedModeBanner: false,
-      theme: ReelTheme.darkTheme,
+      theme: ReelTheme.lightTheme,
+      darkTheme: ReelTheme.darkTheme,
+      themeMode: ThemeMode.system,
       home: showMainScreen ? MainScreen() : ReelAuthPage(),
     );
   }

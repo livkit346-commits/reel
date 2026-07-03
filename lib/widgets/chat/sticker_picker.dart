@@ -24,9 +24,9 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
   List<String> _customStickers = [];
 
   static const List<String> _defaultStickers = [
-    'assets/cyber_neon_smile.webp',
-    'assets/cyber_neon_skull.webp',
-    'assets/cyber_neon_heart.webp',
+    'assets/cyber_neon_smile.png',
+    'assets/cyber_neon_skull.png',
+    'assets/cyber_neon_heart.png',
   ];
 
   @override
@@ -111,16 +111,18 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 280,
-      decoration: BoxDecoration(
-        color: Colors.grey[950]!.withOpacity(0.9),
-        border: const Border(
-          top: BorderSide(color: Colors.white10),
+    return Material(
+      color: Colors.transparent,
+      child: Container(
+        height: 280,
+        decoration: BoxDecoration(
+          color: Colors.grey[950]!.withOpacity(0.9),
+          border: const Border(
+            top: BorderSide(color: Colors.white10),
+          ),
         ),
-      ),
-      child: Column(
-        children: [
+        child: Column(
+          children: [
           // Tab Bar with Cyberpunk style
           TabBar(
             controller: _tabController,
@@ -164,8 +166,9 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildStickersGrid(List<String> urls, bool isCustomTab) {
     return GridView.builder(
