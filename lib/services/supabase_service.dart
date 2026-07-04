@@ -670,6 +670,7 @@ class SupabaseService {
     File? voiceFile,
     double? trimStart,
     double? trimEnd,
+    String? customImageUrl,
   }) async {
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
@@ -681,7 +682,7 @@ class SupabaseService {
       final userProfile = await getUserProfile(myId);
       final userName = userProfile?['name'] ?? 'User';
 
-      String? imageUrl;
+      String? imageUrl = customImageUrl;
       if (mediaFile != null) {
         final isVideo = mediaType == 'video';
         final extension = isVideo ? 'mp4' : 'jpg';

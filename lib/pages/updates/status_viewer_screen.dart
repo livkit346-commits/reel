@@ -94,7 +94,7 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
 
     _isVideo = mediaType == 'video';
 
-    if (imageUrl != null && imageUrl.isNotEmpty) {
+    if (imageUrl != null && imageUrl.isNotEmpty && !imageUrl.startsWith('color:')) {
       _loadStatusMedia(imageUrl);
     } else {
       // It's a text status
@@ -505,8 +505,16 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
         );
       }
     } else if (textContent != null && textContent.isNotEmpty) {
+      Color bgColor = Colors.deepPurple[900]!;
+      if (imageUrl != null && imageUrl.startsWith('color:')) {
+        final colorStr = imageUrl.substring(6);
+        final val = int.tryParse(colorStr);
+        if (val != null) {
+          bgColor = Color(val);
+        }
+      }
       return Container(
-        color: Colors.deepPurple[900],
+        color: bgColor,
         padding: const EdgeInsets.all(24),
         alignment: Alignment.center,
         child: Text(

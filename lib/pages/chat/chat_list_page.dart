@@ -569,6 +569,9 @@ class _ChatListPageState extends State<ChatListPage> {
   }
 
   Widget _buildArchivedTile(BuildContext context, int count) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
     return ListTile(
       leading: const SizedBox(
         width: 52,

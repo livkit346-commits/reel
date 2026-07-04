@@ -6,6 +6,7 @@ import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/pages/updates/add_story_screen.dart';
 import 'package:reel/widgets/status_ring_painter.dart';
 import 'package:reel/pages/updates/status_viewer_screen.dart';
+import 'package:reel/pages/updates/text_status_editor_screen.dart';
 
 class UpdatesPage extends StatefulWidget {
   const UpdatesPage({super.key});
@@ -181,6 +182,16 @@ class _UpdatesPageState extends State<UpdatesPage> {
     }
   }
 
+  void _openTextStatusEditor() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const TextStatusEditorScreen()),
+    );
+    if (result == true) {
+      _loadStatuses();
+    }
+  }
+
   // Open "Create Channel" input dialog
   void _showCreateChannelDialog() {
     final nameController = TextEditingController();
@@ -254,12 +265,21 @@ class _UpdatesPageState extends State<UpdatesPage> {
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).primaryColor;
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subtitleColor = isDark ? Colors.white70 : Colors.black87;
+    final secondaryTextColor = isDark ? Colors.white38 : Colors.black45;
+    final cardBgColor = isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05);
+    final borderColor = isDark ? Colors.white12 : Colors.black12;
+    final scaffoldBgColor = isDark ? Colors.black : Colors.white;
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: scaffoldBgColor,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: scaffoldBgColor,
         elevation: 0,
-        title: const Text('Updates', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+        iconTheme: IconThemeData(color: textColor),
+        title: Text('Updates', style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
       ),
       body: RefreshIndicator(
         onRefresh: () async {
@@ -270,11 +290,11 @@ class _UpdatesPageState extends State<UpdatesPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 12.0),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16.0, 16.0, 16.0, 12.0),
                 child: Text(
                   'Stories',
-                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: -0.5),
+                  style: TextStyle(color: textColor, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: -0.5),
                 ),
               ),
               // Horizontal TikTok-style Story Bubbles
@@ -349,7 +369,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
                                             padding: const EdgeInsets.all(3),
                                             decoration: BoxDecoration(
                                               shape: BoxShape.circle,
-                                              border: Border.all(color: Colors.white24, width: 2),
+                                              border: Border.all(color: borderColor, width: 2),
                                             ),
                                             child: UserAvatar(
                                               userId: context.read<SupabaseService>().currentUser?.id ?? '',
@@ -379,7 +399,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
                                   ? 'Sending (${((context.read<SupabaseService>().statusUploadProgress.value ?? 0.0) * 100).toStringAsFixed(0)}%)'
                                   : 'My Story',
                               style: TextStyle(
-                                color: _uploadingStatus ? const Color(0xFF00BFFF) : Colors.white70,
+                                color: _uploadingStatus ? const Color(0xFF00BFFF) : subtitleColor,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -397,10 +417,10 @@ class _UpdatesPageState extends State<UpdatesPage> {
                         ),
                       )
                     else if (_userStatusGroups.isEmpty)
-                      const Center(
+                      Center(
                         child: Padding(
-                          padding: EdgeInsets.only(left: 8),
-                          child: Text('No recent updates', style: TextStyle(color: Colors.white38, fontSize: 12)),
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Text('No recent updates', style: TextStyle(color: secondaryTextColor, fontSize: 12)),
                         ),
                       )
                     else
@@ -445,7 +465,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
                                   width: 66,
                                   child: Text(
                                     userName,
-                                    style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
+                                    style: TextStyle(color: subtitleColor, fontSize: 11, fontWeight: FontWeight.w600),
                                     textAlign: TextAlign.center,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -459,15 +479,15 @@ class _UpdatesPageState extends State<UpdatesPage> {
                   ],
                 ),
               ),
-              const Divider(color: Colors.white12, height: 40),
+              Divider(color: borderColor, height: 40),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
+                    Text(
                       'Channels',
-                      style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                      style: TextStyle(color: textColor, fontSize: 20, fontWeight: FontWeight.bold),
                     ),
                     IconButton(
                       icon: Icon(Icons.add, color: primaryColor),
@@ -481,9 +501,9 @@ class _UpdatesPageState extends State<UpdatesPage> {
               _loadingChannels
                   ? const Center(child: CircularProgressIndicator())
                   : _channels.isEmpty
-                      ? const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 16.0),
-                          child: Text('No channels created yet. Tap + to build yours!', style: TextStyle(color: Colors.white38)),
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                          child: Text('No channels created yet. Tap + to build yours!', style: TextStyle(color: secondaryTextColor)),
                         )
                       : SizedBox(
                           height: 180,
@@ -502,22 +522,22 @@ class _UpdatesPageState extends State<UpdatesPage> {
                                 margin: const EdgeInsets.symmetric(horizontal: 4),
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.05),
+                                  color: cardBgColor,
                                   borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: Colors.white12),
+                                  border: Border.all(color: borderColor),
                                 ),
                                 child: Column(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     CircleAvatar(
                                       radius: 30,
-                                      backgroundColor: Colors.grey[800],
-                                      child: const Icon(Icons.people, size: 30, color: Colors.white54),
+                                      backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                                      child: Icon(Icons.people, size: 30, color: isDark ? Colors.white54 : Colors.black54),
                                     ),
                                     const SizedBox(height: 12),
                                     Text(
                                       name,
-                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                      style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 13),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -528,9 +548,9 @@ class _UpdatesPageState extends State<UpdatesPage> {
                                         onPressed: () => _toggleChannelSubscription(chanId),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: isSubscribed
-                                              ? Colors.white12
+                                              ? (isDark ? Colors.white12 : Colors.black12)
                                               : primaryColor.withOpacity(0.1),
-                                          foregroundColor: isSubscribed ? Colors.white70 : primaryColor,
+                                          foregroundColor: isSubscribed ? (isDark ? Colors.white70 : Colors.black87) : primaryColor,
                                           elevation: 0,
                                           padding: EdgeInsets.zero,
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -551,6 +571,24 @@ class _UpdatesPageState extends State<UpdatesPage> {
             ],
           ),
         ),
+      ),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FloatingActionButton.small(
+            heroTag: 'text_status',
+            onPressed: _openTextStatusEditor,
+            backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+            child: Icon(Icons.edit, color: isDark ? Colors.white70 : Colors.black87),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton(
+            heroTag: 'media_status',
+            onPressed: _openStoryPicker,
+            backgroundColor: const Color(0xFF00A884), // WhatsApp Green
+            child: const Icon(Icons.camera_alt, color: Colors.white),
+          ),
+        ],
       ),
     );
   }
