@@ -2832,6 +2832,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 );
               },
             ),
+          ),
+        ),
           if (_isSending)
             Container(
               color: Colors.black,
