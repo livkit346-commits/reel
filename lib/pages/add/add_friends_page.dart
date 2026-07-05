@@ -142,9 +142,23 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
   }
 
   Future<void> _loadQuickAdd() async {
+    // Disk cache fallback
+    try {
+      final cachedQA = await LocalStorageService().getCachedJson('add_page_quick_add');
+      if (mounted && cachedQA is List && cachedQA.isNotEmpty) {
+        setState(() {
+          _quickAddList = cachedQA;
+          _loadingQuickAdd = false;
+        });
+      }
+    } catch (_) {}
+
     final supabase = context.read<SupabaseService>();
-    final myId = supabase.currentUser?.id;
-    if (myId == null) return;
+    final myId = supabase.currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
+    if (myId == null || myId.isEmpty) {
+      if (mounted) setState(() => _loadingQuickAdd = false);
+      return;
+    }
 
     try {
       final response = await supabase.client
@@ -153,11 +167,15 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
           .neq('id', myId)
           .limit(30);
 
+      final filtered = (response as List).where((u) {
+        return !_myFollowing.contains(u['id']);
+      }).toList();
+
+      await LocalStorageService().cacheJson('add_page_quick_add', filtered);
+
       if (mounted) {
         setState(() {
-          _quickAddList = (response as List).where((u) {
-            return !_myFollowing.contains(u['id']);
-          }).toList();
+          _quickAddList = filtered;
           _loadingQuickAdd = false;
         });
       }
@@ -169,9 +187,25 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
   }
 
   Future<void> _loadSnapchatSocials() async {
+    // Disk cache fallback
+    try {
+      final cachedAddedMe = await LocalStorageService().getCachedJson('add_page_added_me');
+      final cachedFollowing = await LocalStorageService().getCachedJson('add_page_following');
+      if (mounted && (cachedAddedMe != null || cachedFollowing != null)) {
+        setState(() {
+          if (cachedAddedMe is List) _addedMeList = cachedAddedMe;
+          if (cachedFollowing is List) _myFollowing = cachedFollowing.map((e) => e.toString()).toSet();
+          _loading = false;
+        });
+      }
+    } catch (_) {}
+
     final supabase = context.read<SupabaseService>();
-    final myId = supabase.currentUser?.id;
-    if (myId == null) return;
+    final myId = supabase.currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
+    if (myId == null || myId.isEmpty) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
 
     try {
       // 1. Get all followers (people who added me)
@@ -195,6 +229,9 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
         final followerId = item['followerId'] as String;
         return !followingIds.contains(followerId);
       }).toList();
+
+      await LocalStorageService().cacheJson('add_page_added_me', addedMeFiltered);
+      await LocalStorageService().cacheJson('add_page_following', followingIds.toList());
 
       if (mounted) {
         setState(() {

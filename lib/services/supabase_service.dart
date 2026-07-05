@@ -117,6 +117,9 @@ class SupabaseService {
 
       final jsonStr = jsonEncode(sessionMap);
       final res = await client.auth.recoverSession(jsonStr);
+      if (userId.isNotEmpty) {
+        await LocalStorageService().setString('last_logged_in_user_id', userId);
+      }
       _loadMutedChats();
       _loadArchivedChats();
       return res;
@@ -280,6 +283,46 @@ class SupabaseService {
     }
   }
 
+  // Auth: Send Password Reset Code via Go backend
+  Future<void> sendResetCode(String email) async {
+    try {
+      final uri = Uri.parse('$backendUrl/auth/send-reset-code');
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email}),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception(response.body.isNotEmpty ? response.body : 'Failed to send reset code');
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Auth: Reset Password with Email, OTP Code, and New Password via Go backend
+  Future<void> resetPassword(String email, String code, String newPassword) async {
+    try {
+      final uri = Uri.parse('$backendUrl/auth/reset-password');
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'code': code,
+          'newPassword': newPassword,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception(response.body.isNotEmpty ? response.body : 'Failed to reset password');
+      }
+    } catch (e) {
+      rethrow;
+    }
+  }
+
   // Auth: Sign Up with Email via Go backend and auto-login
   Future<AuthResponse> signUpWithEmail(String email, String password, String code) async {
     try {
@@ -412,7 +455,22 @@ class SupabaseService {
   }
 
   // Auth: Get Current User
-  User? get currentUser => client.auth.currentUser;
+  User? get currentUser {
+    final user = client.auth.currentUser;
+    if (user != null && user.id.isNotEmpty) {
+      LocalStorageService().setString('last_logged_in_user_id', user.id);
+    }
+    return user;
+  }
+
+  Future<String?> getEffectiveUserId() async {
+    final uid = client.auth.currentUser?.id;
+    if (uid != null && uid.isNotEmpty) {
+      await LocalStorageService().setString('last_logged_in_user_id', uid);
+      return uid;
+    }
+    return await LocalStorageService().getString('last_logged_in_user_id');
+  }
 
   // Profile: Create/Update user doc
   Future<void> createUserProfile(String userId, String name, String? photoUrl, String? phoneNumber, {String? bio}) async {
@@ -574,15 +632,29 @@ class SupabaseService {
 
   // Profile: Get user doc
   Future<Map<String, dynamic>?> getUserProfile(String userId) async {
+    if (userId.isEmpty) return null;
+    if (_profileCache.containsKey(userId)) {
+      return _profileCache[userId];
+    }
     try {
       final response = await client.from('users').select().eq('id', userId).maybeSingle();
       if (response != null) {
         _profileCache[userId] = response;
+        await LocalStorageService().cacheJson('user_profile_$userId', response);
+        return response;
       }
-      return response;
     } catch (e) {
-      return null;
+      debugPrint('Error fetching user profile online: $e');
     }
+    try {
+      final cached = await LocalStorageService().getCachedJson('user_profile_$userId');
+      if (cached != null && cached is Map) {
+        final Map<String, dynamic> map = Map<String, dynamic>.from(cached);
+        _profileCache[userId] = map;
+        return map;
+      }
+    } catch (_) {}
+    return null;
   }
 
   // Profile: Clear cache (useful when editing own profile)
@@ -1370,8 +1442,16 @@ class SupabaseService {
 
   // Get active chats list for the current user with latest-message sorting and offline cache support
   Future<List<dynamic>> getActiveChats() async {
-    final myId = currentUser?.id;
-    if (myId == null) return [];
+    final myId = currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
+    if (myId == null || myId.isEmpty) {
+      try {
+        final cached = await LocalStorageService().getCachedJson('active_chats_offline_fallback');
+        if (cached != null && cached is List) {
+          return cached;
+        }
+      } catch (_) {}
+      return [];
+    }
 
     try {
       // Find all chats where I am a participant
@@ -1471,14 +1551,16 @@ class SupabaseService {
 
       // Cache active chats list locally for offline fallback
       await LocalStorageService().cacheJson('active_chats_$myId', chatsList);
+      await LocalStorageService().cacheJson('active_chats_offline_fallback', chatsList);
 
       return chatsList;
     } catch (e) {
       // Offline fallback: load cached active chats
       try {
-        final cached = await LocalStorageService().getCachedJson('active_chats_$myId');
-        if (cached != null) {
-          return cached as List<dynamic>;
+        final cached = await LocalStorageService().getCachedJson('active_chats_$myId') ??
+            await LocalStorageService().getCachedJson('active_chats_offline_fallback');
+        if (cached != null && cached is List) {
+          return cached;
         }
       } catch (_) {}
       return [];
@@ -2178,8 +2260,13 @@ class SupabaseService {
   Future<List<dynamic>> getChannels() async {
     try {
       final response = await client.from('channels').select().order('createdAt', ascending: false);
+      await LocalStorageService().cacheJson('all_channels_cache', response);
       return response;
     } catch (e) {
+      final cached = await LocalStorageService().getCachedJson('all_channels_cache');
+      if (cached != null && cached is List) {
+        return cached;
+      }
       return [];
     }
   }

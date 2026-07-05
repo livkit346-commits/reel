@@ -117,6 +117,9 @@ class _ReelAuthPageState extends State<ReelAuthPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final trackColor = isDark ? Colors.white12 : Colors.black12;
+
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -135,7 +138,7 @@ class _ReelAuthPageState extends State<ReelAuthPage> {
                       decoration: BoxDecoration(
                         color: index <= _currentStep
                             ? Theme.of(context).primaryColor
-                            : Colors.white12,
+                            : trackColor,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -273,6 +276,13 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
   @override
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).primaryColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final sheetBgColor = isDark ? Colors.grey[950]! : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subtextColor = isDark ? Colors.white.withOpacity(0.5) : Colors.black54;
+    final iconColor = isDark ? Colors.white54 : Colors.black45;
+    final pinBgColor = isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.03);
+    final pinBorderColor = isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.15);
 
     return Container(
       padding: EdgeInsets.only(
@@ -282,9 +292,9 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
         bottom: MediaQuery.of(context).viewInsets.bottom + 24,
       ),
       decoration: BoxDecoration(
-        color: Colors.grey[950],
+        color: sheetBgColor,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: pinBorderColor),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -293,16 +303,16 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'Verify Email',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: textColor,
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.close, color: Colors.white54),
+                icon: Icon(Icons.close, color: iconColor),
                 onPressed: () => Navigator.pop(context),
               ),
             ],
@@ -310,13 +320,13 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
           const SizedBox(height: 12),
           Text(
             "We've sent a 6-digit verification code to:",
-            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14),
+            style: TextStyle(color: subtextColor, fontSize: 14),
           ),
           const SizedBox(height: 4),
           Text(
             widget.email,
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: textColor,
               fontSize: 15,
               fontWeight: FontWeight.bold,
             ),
@@ -331,19 +341,19 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
               defaultPinTheme: PinTheme(
                 width: 48,
                 height: 48,
-                textStyle: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                textStyle: TextStyle(fontSize: 18, color: textColor, fontWeight: FontWeight.bold),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.02),
-                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                  color: pinBgColor,
+                  border: Border.all(color: pinBorderColor),
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
               focusedPinTheme: PinTheme(
                 width: 48,
                 height: 48,
-                textStyle: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                textStyle: TextStyle(fontSize: 18, color: textColor, fontWeight: FontWeight.bold),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.02),
+                  color: pinBgColor,
                   border: Border.all(color: primaryColor.withOpacity(0.8)),
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -375,7 +385,7 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
                   _secondsRemaining > 0
                       ? "Resend code in ${_secondsRemaining}s"
                       : "Didn't receive the code? ",
-                  style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13),
+                  style: TextStyle(color: subtextColor, fontSize: 13),
                 ),
                 if (_secondsRemaining == 0)
                   GestureDetector(

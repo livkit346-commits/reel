@@ -154,6 +154,28 @@ func createUserInDynamoDB(userID, email, passwordHashB64, saltB64, name, photoUR
 	return err
 }
 
+// Update user's password in ReelUsers table
+func updateUserPasswordInDynamoDB(email, passwordHashB64, saltB64 string) error {
+	if dbClient == nil {
+		return fmt.Errorf("DynamoDB client not initialized")
+	}
+
+	input := &dynamodb.UpdateItemInput{
+		TableName: aws.String("ReelUsers"),
+		Key: map[string]types.AttributeValue{
+			"email": &types.AttributeValueMemberS{Value: email},
+		},
+		UpdateExpression: aws.String("SET passwordHash = :p, salt = :s"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":p": &types.AttributeValueMemberS{Value: passwordHashB64},
+			":s": &types.AttributeValueMemberS{Value: saltB64},
+		},
+	}
+
+	_, err := dbClient.UpdateItem(context.TODO(), input)
+	return err
+}
+
 // Retrieve user by email from ReelUsers table
 func getUserFromDynamoDB(email string) (*DBUser, error) {
 	if dbClient == nil {

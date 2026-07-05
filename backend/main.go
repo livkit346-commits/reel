@@ -144,7 +144,9 @@ func main() {
 
 	// Custom authentication endpoints
 	http.HandleFunc("/auth/send-code", handleSendVerificationCode)
+	http.HandleFunc("/auth/send-reset-code", handleSendResetCode)
 	http.HandleFunc("/auth/register", handleRegister)
+	http.HandleFunc("/auth/reset-password", handleResetPassword)
 	http.HandleFunc("/auth/login", handleLogin)
 	http.HandleFunc("/auth/refresh", handleRefresh)
 	http.HandleFunc("/auth/logout", handleLogout)
@@ -923,6 +925,170 @@ func handleSendVerificationCode(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "success",
 		"message": "Verification code sent successfully",
+	})
+}
+
+// Send Password Reset Code Endpoint
+func handleSendResetCode(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Email string `json:"email"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if email == "" {
+		http.Error(w, "Email is required", http.StatusBadRequest)
+		return
+	}
+
+	if !isValidEmail(email) {
+		http.Error(w, "Invalid email address format", http.StatusBadRequest)
+		return
+	}
+
+	// Verify user exists
+	existingUser, err := getUserFromDynamoDB(email)
+	if err != nil {
+		log.Printf("Error checking user for password reset: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	if existingUser == nil {
+		http.Error(w, "No account found with this email address", http.StatusNotFound)
+		return
+	}
+
+	// Generate 6-digit OTP code
+	code := fmt.Sprintf("%06d", rand.Intn(1000000))
+	expiresAt := time.Now().Add(10 * time.Minute).Unix()
+
+	err = saveVerificationCode(email, code, expiresAt)
+	if err != nil {
+		log.Printf("Error saving reset verification code: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	err = sendVerificationCodeEmail(email, code)
+	if err != nil {
+		log.Printf("Error sending password reset email: %v", err)
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Password reset code sent to your email",
+	})
+}
+
+// Password Reset Endpoint
+func handleResetPassword(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Email       string `json:"email"`
+		Code        string `json:"code"`
+		NewPassword string `json:"newPassword"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	req.Email = strings.ToLower(strings.TrimSpace(req.Email))
+	req.Code = strings.TrimSpace(req.Code)
+
+	if len(req.NewPassword) < 9 {
+		http.Error(w, "New password must be at least 9 characters long", http.StatusBadRequest)
+		return
+	}
+
+	if req.Email == "" || req.Code == "" {
+		http.Error(w, "Email and verification code are required", http.StatusBadRequest)
+		return
+	}
+
+	savedCode, expiresAt, err := getVerificationCode(req.Email)
+	if err != nil {
+		log.Printf("Error getting verification code: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if savedCode == "" {
+		http.Error(w, "No verification code sent or code expired. Please request a new code.", http.StatusBadRequest)
+		return
+	}
+
+	if time.Now().Unix() > expiresAt {
+		http.Error(w, "Verification code has expired. Please request a new code.", http.StatusBadRequest)
+		return
+	}
+
+	if savedCode != req.Code {
+		http.Error(w, "Incorrect verification code", http.StatusBadRequest)
+		return
+	}
+
+	existingUser, err := getUserFromDynamoDB(req.Email)
+	if err != nil || existingUser == nil {
+		http.Error(w, "Account not found", http.StatusBadRequest)
+		return
+	}
+
+	salt, err := generateSalt()
+	if err != nil {
+		log.Printf("Error generating salt: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	hashedPassword := hashPassword(req.NewPassword, salt)
+	saltB64 := base64.StdEncoding.EncodeToString(salt)
+	passwordHashB64 := base64.StdEncoding.EncodeToString(hashedPassword)
+
+	err = updateUserPasswordInDynamoDB(req.Email, passwordHashB64, saltB64)
+	if err != nil {
+		log.Printf("Error updating password in DynamoDB: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	_ = deleteVerificationCode(req.Email)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "Password updated successfully",
 	})
 }
 

@@ -96,6 +96,13 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final subtextColor = isDark ? Colors.white60 : Colors.black54;
+    final hintColor = isDark ? Colors.white38 : Colors.black38;
+    final iconColor = isDark ? Colors.white38 : Colors.black45;
+    final avatarBgColor = isDark ? const Color(0x1AFFFFFF) : const Color(0x0F000000);
+
     return Padding(
       padding: const EdgeInsets.all(24.0),
       child: Column(
@@ -105,14 +112,14 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
             'Profile info',
             style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: textColor,
                 ),
           ),
           const SizedBox(height: 12),
           Text(
             'Please provide your name and an optional phone number to connect with friends.',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: Colors.white60,
+                  color: subtextColor,
                 ),
           ),
           const SizedBox(height: 32),
@@ -126,7 +133,7 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
                     width: 100,
                     height: 100,
                     decoration: BoxDecoration(
-                      color: const Color(0x1AFFFFFF),
+                      color: avatarBgColor,
                       shape: BoxShape.circle,
                       border: Border.all(
                         color: Theme.of(context).primaryColor.withOpacity(0.5),
@@ -137,9 +144,9 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
                           : null,
                     ),
                     child: _avatarFile == null
-                        ? const Icon(
+                        ? Icon(
                             Icons.add_a_photo_outlined,
-                            color: Colors.white30,
+                            color: iconColor,
                             size: 32,
                           )
                         : null,
@@ -176,20 +183,22 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
           const SizedBox(height: 32),
           TextField(
             controller: _nameController,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
+            style: TextStyle(color: textColor),
+            decoration: InputDecoration(
               hintText: 'Display Name (Required)',
-              prefixIcon: Icon(Icons.person_outline, color: Colors.white38),
+              hintStyle: TextStyle(color: hintColor),
+              prefixIcon: Icon(Icons.person_outline, color: iconColor),
             ),
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _phoneController,
             keyboardType: TextInputType.phone,
-            style: const TextStyle(color: Colors.white),
-            decoration: const InputDecoration(
+            style: TextStyle(color: textColor),
+            decoration: InputDecoration(
               hintText: 'Phone Number (Optional)',
-              prefixIcon: Icon(Icons.phone_outlined, color: Colors.white38),
+              hintStyle: TextStyle(color: hintColor),
+              prefixIcon: Icon(Icons.phone_outlined, color: iconColor),
             ),
           ),
           const Spacer(),

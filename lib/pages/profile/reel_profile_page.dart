@@ -7,6 +7,7 @@ import 'package:reel/pages/auth/reel_auth_page.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/pages/profile/edit_profile_page.dart';
 import 'package:reel/services/supabase_service.dart';
+import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/pages/explore/explore_feed_page.dart';
 
 class ReelProfilePage extends StatefulWidget {
@@ -35,27 +36,40 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
   bool _userFollowsMe = false;
   bool _isMutual = false;
   bool _loadingFriendship = true;
+  String _cachedMyId = '';
 
   bool get _isMe {
-    final myId = context.read<SupabaseService>().currentUser?.id;
-    return widget.userId == null || widget.userId == myId;
+    final myId = context.read<SupabaseService>().currentUser?.id ?? _cachedMyId;
+    return widget.userId == null || widget.userId == myId || widget.userId == _cachedMyId;
   }
 
   String get _targetUserId {
-    return widget.userId ?? context.read<SupabaseService>().currentUser?.id ?? '';
+    final currentUid = context.read<SupabaseService>().currentUser?.id;
+    return widget.userId ?? ((currentUid != null && currentUid.isNotEmpty) ? currentUid : _cachedMyId);
   }
 
   @override
   void initState() {
     super.initState();
-    _loadProfile();
     _tabController = TabController(length: 4, vsync: this);
+    _initAndLoadProfile();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  Future<void> _initAndLoadProfile() async {
+    final supabase = context.read<SupabaseService>();
+    final myId = await supabase.getEffectiveUserId();
+    if (mounted && myId != null) {
+      setState(() {
+        _cachedMyId = myId;
+      });
+    }
+    _loadProfile();
   }
 
   void _loadProfile() {
@@ -77,6 +91,17 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
   }
 
   Future<void> _loadUserPosts(String userId) async {
+    // Disk cache fallback
+    try {
+      final cachedPosts = await LocalStorageService().getCachedJson('user_posts_$userId');
+      if (mounted && cachedPosts is List && cachedPosts.isNotEmpty) {
+        setState(() {
+          _userPosts = cachedPosts;
+          _loadingPosts = false;
+        });
+      }
+    } catch (_) {}
+
     final supabase = context.read<SupabaseService>();
     try {
       final posts = await supabase.client
@@ -84,6 +109,9 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
           .select()
           .eq('userId', userId)
           .order('createdAt', ascending: false);
+
+      await LocalStorageService().cacheJson('user_posts_$userId', posts);
+
       if (mounted) {
         setState(() {
           _userPosts = posts;
@@ -98,10 +126,26 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
   }
 
   Future<void> _loadSocialStats(String userId) async {
+    // Disk cache fallback
+    try {
+      final cachedFollowers = await LocalStorageService().getCachedJson('user_followers_$userId');
+      final cachedFollowing = await LocalStorageService().getCachedJson('user_following_$userId');
+      if (mounted && cachedFollowers is int && cachedFollowing is int) {
+        setState(() {
+          _followersCount = cachedFollowers;
+          _followingCount = cachedFollowing;
+        });
+      }
+    } catch (_) {}
+
     final supabase = context.read<SupabaseService>();
     try {
       final followers = await supabase.getFollowersCount(userId);
       final following = await supabase.getFollowingCount(userId);
+
+      await LocalStorageService().cacheJson('user_followers_$userId', followers);
+      await LocalStorageService().cacheJson('user_following_$userId', following);
+
       if (mounted) {
         setState(() {
           _followersCount = followers;

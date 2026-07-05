@@ -98,6 +98,9 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
       _loadStatusMedia(imageUrl);
     } else {
       // It's a text status
+      setState(() {
+        _mediaLoading = false;
+      });
       _animController.duration = const Duration(seconds: 5);
       _animController.forward();
     }
@@ -399,7 +402,7 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
     final isMe = statusUserId == myId;
     
     final imageUrl = (status['imageUrl'] ?? status['imageurl']) as String?;
-    final textContent = status['text'] as String?;
+    final textContent = (status['text'] ?? status['caption'] ?? status['content'] ?? status['message']) as String?;
     final userName = status['userName'] ?? status['username'] ?? 'User';
     final posterId = statusUserId ?? '';
 
@@ -417,6 +420,26 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
               child: _buildMediaLayer(imageUrl, textContent),
             ),
             
+            // Caption Overlay for Media Statuses with Text
+            if (textContent != null && textContent.trim().isNotEmpty && imageUrl != null && !imageUrl.startsWith('color:'))
+              Positioned(
+                bottom: 85,
+                left: 20,
+                right: 20,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.65),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    textContent,
+                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600, height: 1.3),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+
             // Progress Bars & AppBar Overlay
             Positioned(
               top: 0, left: 0, right: 0,

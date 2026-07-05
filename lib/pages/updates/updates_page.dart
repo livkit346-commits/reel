@@ -62,10 +62,30 @@ class _UpdatesPageState extends State<UpdatesPage> {
   }
 
   Future<void> _loadStatuses() async {
+    // Load local disk cache first for instant offline rendering
+    try {
+      final cachedGroups = await LocalStorageService().getCachedJson('user_status_groups_cache');
+      final cachedMine = await LocalStorageService().getCachedJson('my_statuses_cache');
+      if (mounted && cachedGroups is List && cachedGroups.isNotEmpty) {
+        setState(() {
+          _userStatusGroups = List<Map<String, dynamic>>.from(
+            cachedGroups.map((g) => Map<String, dynamic>.from(g as Map)),
+          );
+          if (cachedMine is List) {
+            _myStatuses = cachedMine;
+          }
+          _loadingStatuses = false;
+        });
+      }
+    } catch (_) {}
+
     final supabase = context.read<SupabaseService>();
     try {
       final statuses = await supabase.getActiveStatuses();
-      final viewedStatusIds = await supabase.getViewedStatusIds();
+      Set<String> viewedStatusIds = {};
+      try {
+        viewedStatusIds = (await supabase.getViewedStatusIds()).toSet();
+      } catch (_) {}
       
       final Map<String, List<dynamic>> groupedMap = {};
       final Map<String, String> userNames = {};
@@ -84,7 +104,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
       
       final List<Map<String, dynamic>> groupedList = [];
       List<dynamic> myStatuses = [];
-      final myId = supabase.currentUser?.id;
+      final myId = supabase.currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
 
       for (var entry in groupedMap.entries) {
         final userId = entry.key;
@@ -92,8 +112,8 @@ class _UpdatesPageState extends State<UpdatesPage> {
         
         // Sort user's statuses from oldest to newest (WhatsApp style play order)
         userStatuses.sort((a, b) {
-          final dateA = DateTime.parse(a['createdAt']);
-          final dateB = DateTime.parse(b['createdAt']);
+          final dateA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final dateB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
           return dateA.compareTo(dateB);
         });
 
@@ -117,23 +137,27 @@ class _UpdatesPageState extends State<UpdatesPage> {
           'statuses': userStatuses,
           'viewedCount': viewedCount,
           'isFullyViewed': viewedCount == userStatuses.length,
-          'latestUpdate': userStatuses.last['createdAt'], // For sorting users
+          'latestUpdate': userStatuses.isNotEmpty ? userStatuses.last['createdAt'] : DateTime.now().toIso8601String(),
         });
       }
       
       // Sort users by unviewed first, viewed last, then chronological descending
       groupedList.sort((a, b) {
-        final isFullyViewedA = a['isFullyViewed'] as bool;
-        final isFullyViewedB = b['isFullyViewed'] as bool;
+        final isFullyViewedA = a['isFullyViewed'] as bool? ?? false;
+        final isFullyViewedB = b['isFullyViewed'] as bool? ?? false;
 
         if (isFullyViewedA != isFullyViewedB) {
-          return isFullyViewedA ? 1 : -1; // unviewed (false) comes first
+          return isFullyViewedA ? 1 : -1;
         }
 
-        final dateA = DateTime.parse(a['latestUpdate']);
-        final dateB = DateTime.parse(b['latestUpdate']);
+        final dateA = DateTime.tryParse(a['latestUpdate'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final dateB = DateTime.tryParse(b['latestUpdate'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
         return dateB.compareTo(dateA);
       });
+
+      // Cache processed lists to disk
+      await LocalStorageService().cacheJson('user_status_groups_cache', groupedList);
+      await LocalStorageService().cacheJson('my_statuses_cache', myStatuses);
 
       if (mounted) {
         setState(() {
@@ -148,15 +172,31 @@ class _UpdatesPageState extends State<UpdatesPage> {
   }
 
   Future<void> _loadChannels() async {
+    // Load local disk cache first for offline channels
+    try {
+      final cachedChannels = await LocalStorageService().getCachedJson('channels_list_cache');
+      if (mounted && cachedChannels is List && cachedChannels.isNotEmpty) {
+        setState(() {
+          _channels = cachedChannels;
+          _loadingChannels = false;
+        });
+      }
+    } catch (_) {}
+
     final supabase = context.read<SupabaseService>();
     try {
       final channels = await supabase.getChannels();
       
+      // Cache channels locally
+      await LocalStorageService().cacheJson('channels_list_cache', channels);
+
       // Load user subscription status for each channel
       final subscriptions = <String, bool>{};
       for (var chan in channels) {
-        final isSub = await supabase.isSubscribedToChannel(chan['id'] as String);
-        subscriptions[chan['id'] as String] = isSub;
+        try {
+          final isSub = await supabase.isSubscribedToChannel(chan['id'] as String);
+          subscriptions[chan['id'] as String] = isSub;
+        } catch (_) {}
       }
 
       if (mounted) {

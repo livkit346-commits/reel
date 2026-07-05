@@ -83,18 +83,21 @@ class _ChatListPageState extends State<ChatListPage> {
 
   Future<void> _initChats() async {
     final supabase = context.read<SupabaseService>();
-    final myId = supabase.currentUser?.id;
-    if (myId != null) {
-      try {
-        final cached = await LocalStorageService().getCachedJson('active_chats_$myId');
-        if (cached != null && cached is List) {
+    final myId = supabase.currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
+    try {
+      final cached = (myId != null && myId.isNotEmpty)
+          ? await LocalStorageService().getCachedJson('active_chats_$myId')
+          : await LocalStorageService().getCachedJson('active_chats_offline_fallback');
+      final fallback = cached ?? await LocalStorageService().getCachedJson('active_chats_offline_fallback');
+      if (fallback != null && fallback is List && fallback.isNotEmpty) {
+        if (mounted) {
           setState(() {
-            _chats = cached;
+            _chats = fallback;
             _loading = false;
           });
         }
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
     await _loadChats();
   }
 
@@ -104,7 +107,9 @@ class _ChatListPageState extends State<ChatListPage> {
       final freshChats = await supabase.getActiveChats();
       if (mounted) {
         setState(() {
-          _chats = freshChats;
+          if (freshChats.isNotEmpty || _chats.isEmpty) {
+            _chats = freshChats;
+          }
           _loading = false;
         });
       }

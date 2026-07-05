@@ -233,7 +233,7 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
       supabase.createCustomStatus(
         text: text.isNotEmpty ? text : null,
         mediaFile: finalMediaFile,
-        mediaType: widget.mediaType == 'text' ? null : widget.mediaType,
+        mediaType: widget.mediaType,
         trimStart: widget.mediaType == 'video' ? _trimStart : null,
         trimEnd: widget.mediaType == 'video' ? _trimEnd : null,
       ).then((_) {
