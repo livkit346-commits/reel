@@ -452,7 +452,7 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
       return Stack(
         fit: StackFit.expand,
         children: [
-          if (imageUrl != null && imageUrl.isNotEmpty)
+          if (imageUrl != null && imageUrl.isNotEmpty && !imageUrl.startsWith('color:'))
             Opacity(
               opacity: 0.3,
               child: Image.network(
@@ -504,8 +504,8 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
           },
         );
       }
-    } else if (textContent != null && textContent.isNotEmpty) {
-      Color bgColor = Colors.deepPurple[900]!;
+    } else {
+      Color bgColor = const Color(0xFF673AB7);
       if (imageUrl != null && imageUrl.startsWith('color:')) {
         final colorStr = imageUrl.substring(6);
         final val = int.tryParse(colorStr);
@@ -515,11 +515,16 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
       }
       return Container(
         color: bgColor,
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
         alignment: Alignment.center,
         child: Text(
-          textContent,
-          style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+          textContent ?? '',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            height: 1.3,
+          ),
           textAlign: TextAlign.center,
         ),
       );

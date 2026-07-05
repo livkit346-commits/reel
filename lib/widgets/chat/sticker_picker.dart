@@ -116,6 +116,34 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
     }
   }
 
+  Future<void> _removeCustomSticker(String url) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1F1F28) : Colors.white,
+        title: Text('Delete Sticker?', style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+        content: Text('Remove this sticker from your custom stickers?', style: TextStyle(color: isDark ? Colors.white70 : Colors.black54)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              setState(() {
+                _customStickers.remove(url);
+              });
+              await _saveCustomStickers();
+            },
+            child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -288,6 +316,7 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
 
         return GestureDetector(
           onTap: () => widget.onStickerSelected(actualUrl),
+          onLongPress: isCustomTab ? () => _removeCustomSticker(actualUrl) : null,
           child: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(

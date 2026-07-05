@@ -433,25 +433,25 @@ class SupabaseService {
     }
   }
 
-  // Upload any file directly to Cloudflare R2 via our Supabase Edge Function
+  // Upload any file directly to Cloudflare R2 via our Supabase Edge Function (with Supabase Storage fallback)
   Future<String> uploadToR2(File file) async {
-    try {
-      final filename = file.path.split(RegExp(r'[/\\]')).last;
-      
-      // Determine contentType
-      String contentType = 'application/octet-stream';
-      final ext = filename.split('.').last.toLowerCase();
-      if (ext == 'jpg' || ext == 'jpeg') {
-        contentType = 'image/jpeg';
-      } else if (ext == 'png') {
-        contentType = 'image/png';
-      } else if (ext == 'mp4') {
-        contentType = 'video/mp4';
-      } else if (ext == 'm4a' || ext == 'mp3' || ext == 'wav') {
-        contentType = 'audio/mpeg';
-      }
+    final filename = file.path.split(RegExp(r'[/\\]')).last;
+    
+    // Determine contentType
+    String contentType = 'application/octet-stream';
+    final ext = filename.split('.').last.toLowerCase();
+    if (ext == 'jpg' || ext == 'jpeg') {
+      contentType = 'image/jpeg';
+    } else if (ext == 'png') {
+      contentType = 'image/png';
+    } else if (ext == 'mp4') {
+      contentType = 'video/mp4';
+    } else if (ext == 'm4a' || ext == 'mp3' || ext == 'wav') {
+      contentType = 'audio/mpeg';
+    }
 
-      // 1. Invoke Supabase Edge Function to get presigned URL
+    try {
+      // 1. Try invoking Supabase Edge Function to get presigned URL
       final response = await client.functions.invoke(
         'r2-presign',
         body: {
@@ -460,53 +460,53 @@ class SupabaseService {
         },
       );
 
-      if (response.status != 200) {
-        throw Exception('Edge function returned status ${response.status}: ${response.data}');
-      }
+      if (response.status == 200 && response.data != null && response.data['uploadUrl'] != null) {
+        final String uploadUrl = response.data['uploadUrl'];
+        final String publicUrl = response.data['publicUrl'] ?? '';
 
-      final data = response.data;
-      if (data == null || data['uploadUrl'] == null) {
-        throw Exception('Invalid response from edge function: $data');
-      }
+        final fileBytes = await file.readAsBytes();
+        final totalBytes = fileBytes.length;
+        
+        final request = http.StreamedRequest('PUT', Uri.parse(uploadUrl));
+        request.headers['Content-Type'] = contentType;
+        request.contentLength = totalBytes;
 
-      final String uploadUrl = data['uploadUrl'];
-      final String publicUrl = data['publicUrl'] ?? '';
-
-      // 2. Perform direct HTTP PUT request to Cloudflare R2 with progress tracking
-      final fileBytes = await file.readAsBytes();
-      final totalBytes = fileBytes.length;
-      
-      final request = http.StreamedRequest('PUT', Uri.parse(uploadUrl));
-      request.headers['Content-Type'] = contentType;
-      request.contentLength = totalBytes;
-
-      int uploadedBytes = 0;
-      final chunkSize = 64 * 1024; // 64 KB chunks
-      
-      Future.microtask(() async {
-        for (int i = 0; i < totalBytes; i += chunkSize) {
-          final end = (i + chunkSize < totalBytes) ? i + chunkSize : totalBytes;
-          request.sink.add(fileBytes.sublist(i, end));
-          uploadedBytes += (end - i);
-          
-          final progress = uploadedBytes / totalBytes;
-          if (statusUploadProgress.value != null) {
-            statusUploadProgress.value = progress;
+        int uploadedBytes = 0;
+        final chunkSize = 64 * 1024;
+        
+        Future.microtask(() async {
+          for (int i = 0; i < totalBytes; i += chunkSize) {
+            final end = (i + chunkSize < totalBytes) ? i + chunkSize : totalBytes;
+            request.sink.add(fileBytes.sublist(i, end));
+            uploadedBytes += (end - i);
+            
+            final progress = uploadedBytes / totalBytes;
+            if (statusUploadProgress.value != null) {
+              statusUploadProgress.value = progress;
+            }
           }
+          await request.sink.close();
+        });
+
+        final responseStream = await request.send();
+        final uploadResponse = await http.Response.fromStream(responseStream);
+
+        if (uploadResponse.statusCode == 200) {
+          return publicUrl;
         }
-        await request.sink.close();
-      });
-
-      final responseStream = await request.send();
-      final uploadResponse = await http.Response.fromStream(responseStream);
-
-      if (uploadResponse.statusCode != 200) {
-        throw Exception('Cloudflare R2 upload failed with code ${uploadResponse.statusCode}');
       }
+    } catch (e) {
+      debugPrint('Cloudflare R2 upload un-available ($e), falling back to Supabase Storage...');
+    }
 
+    // 2. Fallback: Direct upload to Supabase Storage bucket 'media'
+    try {
+      final storagePath = 'uploads/${DateTime.now().millisecondsSinceEpoch}_$filename';
+      await client.storage.from('media').upload(storagePath, file);
+      final publicUrl = getMediaUrl('media', storagePath);
       return publicUrl;
     } catch (e) {
-      debugPrint('uploadToR2 error: $e');
+      debugPrint('Supabase storage fallback error: $e');
       rethrow;
     }
   }
