@@ -766,35 +766,37 @@ class SupabaseService {
         });
         return;
       } catch (e2) {
-        debugPrint('Insert fallback 2 (lowercase full) failed: $e2. Trying camelCase intermediate...');
+        debugPrint('Insert fallback 2 (lowercase full) failed: $e2. Trying camelCase with text...');
       }
 
       try {
-        // 3. Try camelCase intermediate format (with mediaType but without text/voiceUrl)
+        // 3. Try camelCase with mediaType and text (without voiceUrl)
         await client.from('statuses').insert({
           'userId': myId,
           'userName': userName,
           'imageUrl': imageUrl,
           'mediaType': mediaType ?? 'image',
+          'text': text,
           'createdAt': DateTime.now().toIso8601String(),
         });
         return;
       } catch (e3) {
-        debugPrint('Insert fallback 3 (camelCase intermediate) failed: $e3. Trying lowercase intermediate...');
+        debugPrint('Insert fallback 3 (camelCase with text) failed: $e3. Trying lowercase with text...');
       }
 
       try {
-        // 4. Try lowercase intermediate format (with mediatype but without text/voiceurl)
+        // 4. Try lowercase with mediatype and text (without voiceurl)
         await client.from('statuses').insert({
           'userid': myId,
           'username': userName,
           'imageurl': imageUrl,
           'mediatype': mediaType ?? 'image',
+          'text': text,
           'createdat': DateTime.now().toIso8601String(),
         });
         return;
       } catch (e4) {
-        debugPrint('Insert fallback 4 (lowercase intermediate) failed: $e4. Trying camelCase basic...');
+        debugPrint('Insert fallback 4 (lowercase with text) failed: $e4. Trying camelCase basic...');
       }
 
       try {
@@ -826,7 +828,7 @@ class SupabaseService {
       }
 
       try {
-        // 7. Try camelCase minimal format (without mediaType/voiceUrl/text)
+        // 7. Try camelCase minimal format (without voiceUrl/text)
         await client.from('statuses').insert({
           'userId': myId,
           'userName': userName,
