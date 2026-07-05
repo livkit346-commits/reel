@@ -67,62 +67,9 @@ class FcmService {
         if (message.notification != null) {
           final title = message.notification!.title ?? 'New Message';
           final body = message.notification!.body ?? '';
+          final senderId = message.data['senderId'] as String?;
 
-          if (navigatorKey.currentContext != null) {
-            ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
-              SnackBar(
-                behavior: SnackBarBehavior.floating,
-                backgroundColor: Colors.grey[950],
-                duration: const Duration(seconds: 4),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: const BorderSide(color: Color(0xFF00BFFF), width: 1),
-                ),
-                margin: const EdgeInsets.all(12),
-                content: Row(
-                  children: [
-                    const Icon(Icons.chat_bubble_outline, color: Color(0xFF00BFFF)),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            body,
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                action: SnackBarAction(
-                  label: 'View',
-                  textColor: const Color(0xFF00BFFF),
-                  onPressed: () {
-                    if (chatId != null) {
-                      _navigateToChat(chatId);
-                    }
-                  },
-                ),
-              ),
-            );
-          }
+          _showHeadsUpBanner(title, body, chatId, senderId);
         }
       });
 
@@ -186,5 +133,185 @@ class FcmService {
     } catch (e) {
       debugPrint('Error fetching/registering FCM Token: $e');
     }
+  }
+
+  OverlayEntry? _currentOverlay;
+
+  void _showHeadsUpBanner(String title, String body, String? chatId, String? senderId) {
+    final overlayState = navigatorKey.currentState?.overlay;
+    if (overlayState == null) return;
+
+    // Remove any previous active overlay
+    _currentOverlay?.remove();
+    _currentOverlay = null;
+
+    _currentOverlay = OverlayEntry(
+      builder: (context) {
+        return Positioned(
+          top: MediaQuery.of(context).padding.top,
+          left: 0,
+          right: 0,
+          child: _HeadsUpNotificationBanner(
+            title: title,
+            body: body,
+            senderId: senderId,
+            onTap: () {
+              if (chatId != null) {
+                _navigateToChat(chatId);
+              }
+            },
+            onDismiss: () {
+              _currentOverlay?.remove();
+              _currentOverlay = null;
+            },
+          ),
+        );
+      },
+    );
+
+    overlayState.insert(_currentOverlay!);
+  }
+}
+
+class _HeadsUpNotificationBanner extends StatefulWidget {
+  final String title;
+  final String body;
+  final String? senderId;
+  final VoidCallback onTap;
+  final VoidCallback onDismiss;
+
+  const _HeadsUpNotificationBanner({
+    required this.title,
+    required this.body,
+    this.senderId,
+    required this.onTap,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_HeadsUpNotificationBanner> createState() => _HeadsUpNotificationBannerState();
+}
+
+class _HeadsUpNotificationBannerState extends State<_HeadsUpNotificationBanner> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _offsetAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    _offsetAnimation = Tween<Offset>(
+      begin: const Offset(0, -1.5),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
+
+    _controller.forward();
+
+    // Auto-dismiss after 4 seconds
+    Future.delayed(const Duration(seconds: 4), () {
+      if (mounted) {
+        _dismiss();
+      }
+    });
+  }
+
+  void _dismiss() async {
+    await _controller.reverse();
+    widget.onDismiss();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return SlideTransition(
+      position: _offsetAnimation,
+      child: GestureDetector(
+        onVerticalDragUpdate: (details) {
+          if (details.primaryDelta! < -5) {
+            _dismiss();
+          }
+        },
+        onTap: () {
+          widget.onTap();
+          _dismiss();
+        },
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E1E24) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
+              width: 1.2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.15),
+                blurRadius: 16,
+                spreadRadius: 2,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: Row(
+              children: [
+                // Sender Icon/Avatar
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.08),
+                  child: Icon(Icons.person, color: isDark ? Colors.white30 : Colors.black38, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        widget.body,
+                        style: TextStyle(
+                          color: isDark ? Colors.white70 : Colors.black54,
+                          fontSize: 13,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                // Swipe-up drag handle
+                Icon(
+                  Icons.drag_handle,
+                  color: isDark ? Colors.white24 : Colors.black26,
+                  size: 16,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
