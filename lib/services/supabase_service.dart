@@ -2601,9 +2601,10 @@ class SupabaseService {
     }
   }
 
-  // Clear chat locally and set clear timestamp
+  // Clear chat locally and set clear timestamp (WhatsApp-style)
   Future<void> clearChatLocally(String chatId) async {
     try {
+      ChatRoomPage.clearCacheFor(chatId);
       final directory = await getApplicationDocumentsDirectory();
       final file = File('${directory.path}/chats/${chatId}_messages.json');
       await file.writeAsString(jsonEncode([]));
