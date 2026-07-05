@@ -170,10 +170,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scaffoldBgColor = isDark ? ReelTheme.pitchBlack : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final leadingBgColor = isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04);
+    final leadingBorderColor = isDark ? Colors.white12 : Colors.black12;
+    final arrowColor = isDark ? Colors.white : Colors.black87;
 
     return Scaffold(
-      backgroundColor: ReelTheme.pitchBlack,
+      backgroundColor: scaffoldBgColor,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -183,18 +188,18 @@ class _EditProfilePageState extends State<EditProfilePage> {
             onTap: () => Navigator.pop(context),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: leadingBgColor,
                 shape: BoxShape.circle,
-                border: Border.all(color: Colors.white12),
+                border: Border.all(color: leadingBorderColor),
               ),
-              child: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
+              child: Icon(Icons.arrow_back, color: arrowColor, size: 20),
             ),
           ),
         ),
-        title: const Text(
+        title: Text(
           'Edit Profile',
           style: TextStyle(
-            color: Colors.white,
+            color: textColor,
             fontWeight: FontWeight.bold,
             fontSize: 20,
             letterSpacing: 0.5,
@@ -366,8 +371,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   const SizedBox(height: 8),
                   Text(
                     _uploadingAvatar ? 'Uploading image...' : 'Tap icon to edit photo',
-                    style: const TextStyle(
-                      color: Colors.white38,
+                    style: TextStyle(
+                      color: isDark ? Colors.white38 : Colors.black45,
                       fontSize: 12,
                     ),
                   ),
@@ -378,10 +383,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.02),
+                      color: isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.01),
                       borderRadius: BorderRadius.circular(24),
                       border: Border.all(
-                        color: Colors.white.withOpacity(0.05),
+                        color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.06),
                       ),
                     ),
                     child: Column(
@@ -478,6 +483,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
     int maxLines = 1,
     TextInputType keyboardType = TextInputType.text,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final iconColor = isDark ? Colors.white30 : Colors.black38;
+    final hintColor = isDark ? Colors.white24 : Colors.black26;
+    final fillColor = isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.03);
+    final borderColor = isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -495,19 +507,19 @@ class _EditProfilePageState extends State<EditProfilePage> {
           controller: controller,
           maxLines: maxLines,
           keyboardType: keyboardType,
-          style: const TextStyle(
-            color: Colors.white,
+          style: TextStyle(
+            color: textColor,
             fontSize: 15,
           ),
           decoration: InputDecoration(
-            prefixIcon: Icon(icon, color: Colors.white30, size: 20),
+            prefixIcon: Icon(icon, color: iconColor, size: 20),
             hintText: hint,
-            hintStyle: const TextStyle(
-              color: Colors.white24,
+            hintStyle: TextStyle(
+              color: hintColor,
               fontSize: 14,
             ),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.02),
+            fillColor: fillColor,
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 16,
               vertical: 14,
@@ -515,7 +527,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(
-                color: Colors.white.withOpacity(0.08),
+                color: borderColor,
               ),
             ),
             focusedBorder: OutlineInputBorder(

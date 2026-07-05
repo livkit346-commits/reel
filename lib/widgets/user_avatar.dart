@@ -19,11 +19,12 @@ class UserAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final supabase = context.read<SupabaseService>();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // If cache already has the profile, use it instantly without FutureBuilder layout hop
     final cached = supabase.profileCache[userId];
     if (cached != null) {
-      return _buildAvatar(cached['photoUrl']);
+      return _buildAvatar(cached['photoUrl'], isDark);
     }
 
     return FutureBuilder<Map<String, dynamic>?>(
@@ -31,21 +32,25 @@ class UserAvatar extends StatelessWidget {
       builder: (context, snapshot) {
         final profile = snapshot.data;
         final photoUrl = profile?['photoUrl'] as String?;
-        return _buildAvatar(photoUrl);
+        return _buildAvatar(photoUrl, isDark);
       },
     );
   }
 
-  Widget _buildAvatar(String? photoUrl) {
+  Widget _buildAvatar(String? photoUrl, bool isDark) {
     Widget avatar = CircleAvatar(
       radius: radius,
-      backgroundColor: Colors.white10,
+      backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.08),
       backgroundImage: photoUrl != null && photoUrl.isNotEmpty
           ? NetworkImage(photoUrl)
           : null,
       child: photoUrl != null && photoUrl.isNotEmpty
           ? null
-          : Icon(Icons.person, color: Colors.white30, size: radius),
+          : Icon(
+              Icons.person,
+              color: isDark ? Colors.white30 : Colors.black38,
+              size: radius,
+            ),
     );
 
     if (border != null) {

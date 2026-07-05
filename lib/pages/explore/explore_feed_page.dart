@@ -34,18 +34,23 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scaffoldBgColor = isDark ? Colors.black : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black87;
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: scaffoldBgColor,
       appBar: AppBar(
-        backgroundColor: Colors.black.withOpacity(0.8),
+        backgroundColor: scaffoldBgColor.withOpacity(0.8),
         elevation: 0,
-        title: const Text('Explore', style: TextStyle(fontWeight: FontWeight.bold)),
+        iconTheme: IconThemeData(color: textColor),
+        title: Text('Explore', style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
         centerTitle: false,
       ),
       body: RefreshIndicator(
         onRefresh: _refreshFeed,
         color: Theme.of(context).primaryColor,
-        backgroundColor: Colors.black,
+        backgroundColor: scaffoldBgColor,
         child: FutureBuilder<List<dynamic>>(
           future: _feedFuture,
           builder: (context, snapshot) {

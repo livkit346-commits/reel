@@ -411,9 +411,13 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
   @override
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).primaryColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final scaffoldBgColor = isDark ? Colors.black : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondaryTextColor = isDark ? Colors.white54 : Colors.black54;
 
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: scaffoldBgColor,
       body: FutureBuilder<Map<String, dynamic>?>(
         future: _profileFuture,
         builder: (context, snapshot) {
@@ -423,7 +427,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
           
           final userProfile = snapshot.data;
           if (userProfile == null) {
-            return const Center(child: Text('User profile not found', style: TextStyle(color: Colors.white54)));
+            return Center(child: Text('User profile not found', style: TextStyle(color: secondaryTextColor)));
           }
 
           final name = userProfile['name'] ?? 'User';
@@ -439,16 +443,16 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                 SliverAppBar(
                   expandedHeight: 0,
                   pinned: true,
-                  backgroundColor: Colors.black,
+                  backgroundColor: scaffoldBgColor,
                   elevation: 0,
                   leading: !_isMe 
-                    ? IconButton(icon: const Icon(Icons.arrow_back, color: Colors.white), onPressed: () => Navigator.pop(context))
+                    ? IconButton(icon: Icon(Icons.arrow_back, color: textColor), onPressed: () => Navigator.pop(context))
                     : null,
-                  title: Text(_isMe ? 'My Profile' : name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  title: Text(_isMe ? 'My Profile' : name, style: TextStyle(color: textColor, fontWeight: FontWeight.bold)),
                   actions: [
                     if (_isMe)
                       IconButton(
-                        icon: const Icon(Icons.more_vert, color: Colors.white),
+                        icon: Icon(Icons.more_vert, color: textColor),
                         onPressed: () => _showSettingsBottomSheet(context),
                       ),
                   ],
@@ -476,7 +480,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                                     : Container(
                                         height: 140,
                                         width: double.infinity,
-                                        color: Colors.grey[950],
+                                        color: isDark ? Colors.grey[950] : Colors.grey[300],
                                       ),
                                 if (_uploadingCover)
                                   Positioned.fill(
@@ -522,15 +526,15 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                                   Container(
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
-                                      border: Border.all(color: Colors.black, width: 4),
+                                      border: Border.all(color: scaffoldBgColor, width: 4),
                                     ),
                                     child: CircleAvatar(
                                       radius: 38,
-                                      backgroundColor: Colors.grey[900],
+                                      backgroundColor: isDark ? Colors.grey[900] : Colors.grey[200],
                                       backgroundImage: photoUrl != null && photoUrl.isNotEmpty
                                           ? NetworkImage(photoUrl)
                                           : null,
-                                      child: (photoUrl == null || photoUrl.isEmpty) ? const Icon(Icons.person, size: 40, color: Colors.white30) : null,
+                                      child: (photoUrl == null || photoUrl.isEmpty) ? Icon(Icons.person, size: 40, color: isDark ? Colors.white30 : Colors.black38) : null,
                                     ),
                                   ),
                                   if (_isMe && _uploadingAvatar)
@@ -576,13 +580,13 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                               OutlinedButton(
                                 onPressed: () => _editProfile(context, userProfile),
                                 style: OutlinedButton.styleFrom(
-                                  side: const BorderSide(color: Colors.white30),
+                                  side: BorderSide(color: isDark ? Colors.white30 : Colors.black26),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                                 ),
-                                child: const Text(
+                                child: Text(
                                   'Edit profile',
-                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                  style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 13),
                                 ),
                               )
                             else ...[
@@ -595,9 +599,9 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                                         onPressed: _toggleFriendship,
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: _isMutual
-                                              ? Colors.white12
+                                              ? (isDark ? Colors.white12 : Colors.black12)
                                               : (_isFollowingThisUser 
-                                                  ? Colors.grey[800] 
+                                                  ? (isDark ? Colors.grey[800] : Colors.grey[300]) 
                                                   : (_userFollowsMe ? primaryColor : Colors.indigoAccent)),
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -608,12 +612,12 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                                               : (_isFollowingThisUser
                                                   ? 'Added'
                                                   : (_userFollowsMe ? 'Accept' : '+ Add')),
-                                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                          style: TextStyle(color: _isMutual && !isDark ? Colors.black87 : Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
                                       IconButton(
-                                        icon: const Icon(Icons.chat_bubble_outline, color: Colors.white70),
+                                        icon: Icon(Icons.chat_bubble_outline, color: isDark ? Colors.white70 : Colors.black54),
                                         onPressed: () => _startDirectChat(name),
                                       ),
                                     ],
@@ -631,8 +635,8 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                           children: [
                             Text(
                               name,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: textColor,
                                 fontSize: 22,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.5,
@@ -641,43 +645,43 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                             const SizedBox(height: 2),
                             Text(
                               '@${name.toLowerCase().replaceAll(' ', '')}',
-                              style: const TextStyle(color: Colors.white54, fontSize: 14),
+                              style: TextStyle(color: secondaryTextColor, fontSize: 14),
                             ),
                             const SizedBox(height: 12),
                             // User Bio
                             Text(
                               bio,
-                              style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14, height: 1.3),
+                              style: TextStyle(color: textColor.withOpacity(0.9), fontSize: 14, height: 1.3),
                             ),
                             const SizedBox(height: 12),
                             // Location and Joined Date Row
                             Row(
                               children: [
-                                const Icon(Icons.location_on_outlined, color: Colors.white54, size: 14),
+                                Icon(Icons.location_on_outlined, color: secondaryTextColor, size: 14),
                                 const SizedBox(width: 4),
-                                const Text('Nigeria', style: TextStyle(color: Colors.white54, fontSize: 13)),
+                                Text('Nigeria', style: TextStyle(color: secondaryTextColor, fontSize: 13)),
                                 const SizedBox(width: 16),
-                                const Icon(Icons.calendar_today_outlined, color: Colors.white54, size: 13),
+                                Icon(Icons.calendar_today_outlined, color: secondaryTextColor, size: 13),
                                 const SizedBox(width: 4),
-                                const Text('Joined May 2026', style: TextStyle(color: Colors.white54, fontSize: 13)),
+                                Text('Joined May 2026', style: TextStyle(color: secondaryTextColor, fontSize: 13)),
                               ],
                             ),
                             const SizedBox(height: 4),
                             // Phone Row
                             Row(
                               children: [
-                                const Icon(Icons.phone_outlined, color: Colors.white54, size: 14),
+                                Icon(Icons.phone_outlined, color: secondaryTextColor, size: 14),
                                 const SizedBox(width: 4),
-                                Text(phone, style: const TextStyle(color: Colors.white54, fontSize: 13)),
+                                Text(phone, style: TextStyle(color: secondaryTextColor, fontSize: 13)),
                               ],
                             ),
                             const SizedBox(height: 12),
                             // Dynamic Followers / Following Stats
                             Row(
                               children: [
-                                _buildRichStat('$_followingCount', 'Following'),
+                                _buildRichStat('$_followingCount', 'Following', textColor, secondaryTextColor),
                                 const SizedBox(width: 20),
-                                _buildRichStat('$_followersCount', 'Followers'),
+                                _buildRichStat('$_followersCount', 'Followers', textColor, secondaryTextColor),
                               ],
                             ),
                             const SizedBox(height: 12),
@@ -693,8 +697,8 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                     TabBar(
                       controller: _tabController,
                       indicatorColor: primaryColor,
-                      labelColor: Colors.white,
-                      unselectedLabelColor: Colors.white54,
+                      labelColor: textColor,
+                      unselectedLabelColor: secondaryTextColor,
                       indicatorWeight: 3,
                       labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                       tabs: const [
@@ -715,7 +719,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                 _loadingPosts
                     ? const Center(child: CircularProgressIndicator())
                     : _userPosts.isEmpty
-                        ? const Center(child: Text('No posts yet', style: TextStyle(color: Colors.white38)))
+                        ? Center(child: Text('No posts yet', style: TextStyle(color: secondaryTextColor)))
                         : ListView.builder(
                             padding: const EdgeInsets.symmetric(vertical: 8),
                             itemCount: _userPosts.length,
@@ -727,11 +731,11 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                             },
                           ),
                 // Tab 2: Snaps (Placeholder for other screens)
-                const Center(child: Text('Private Ephemeral Snaps locked 🔒', style: TextStyle(color: Colors.white38))),
+                Center(child: Text('Private Ephemeral Snaps locked 🔒', style: TextStyle(color: secondaryTextColor))),
                 // Tab 3: Replies (Mock)
-                const Center(child: Text('No replies yet', style: TextStyle(color: Colors.white38))),
+                Center(child: Text('No replies yet', style: TextStyle(color: secondaryTextColor))),
                 // Tab 4: Likes (Mock)
-                const Center(child: Text('No liked posts yet', style: TextStyle(color: Colors.white38))),
+                Center(child: Text('No liked posts yet', style: TextStyle(color: secondaryTextColor))),
               ],
             ),
           );
@@ -740,14 +744,14 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
     );
   }
 
-  Widget _buildRichStat(String count, String label) {
+  Widget _buildRichStat(String count, String label, Color textColor, Color labelColor) {
     return RichText(
       text: TextSpan(
-        style: const TextStyle(color: Colors.white, fontSize: 14),
+        style: TextStyle(color: textColor, fontSize: 14),
         children: [
           TextSpan(text: count, style: const TextStyle(fontWeight: FontWeight.bold)),
           const TextSpan(text: ' '),
-          TextSpan(text: label, style: const TextStyle(color: Colors.white54)),
+          TextSpan(text: label, style: TextStyle(color: labelColor)),
         ],
       ),
     );
@@ -765,8 +769,9 @@ class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
-      color: Colors.black,
+      color: isDark ? Colors.black : Colors.white,
       child: _tabBar,
     );
   }

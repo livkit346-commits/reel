@@ -37,6 +37,11 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final navBgColor = isDark ? Colors.black : Colors.white;
+    final navSelectedColor = isDark ? Colors.white : Colors.black;
+    final navUnselectedColor = isDark ? Colors.white38 : Colors.black38;
+
     return Scaffold(
       body: IndexedStack(
         index: _selectedIndex,
@@ -46,9 +51,9 @@ class _MainScreenState extends State<MainScreen> {
         currentIndex: _selectedIndex,
         onTap: (index) => setState(() => _selectedIndex = index),
         type: BottomNavigationBarType.fixed,
-        backgroundColor: Colors.black,
-        selectedItemColor: Theme.of(context).primaryColor, // Red
-        unselectedItemColor: Colors.white38,
+        backgroundColor: navBgColor,
+        selectedItemColor: navSelectedColor,
+        unselectedItemColor: navUnselectedColor,
         showSelectedLabels: true,
         showUnselectedLabels: true,
         selectedFontSize: 12,
