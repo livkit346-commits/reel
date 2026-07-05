@@ -250,8 +250,8 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
   @override
   void initState() {
     super.initState();
-    _likesCount = widget.post['likes'] ?? 0;
-    _repostsCount = widget.post['reposts'] ?? 0;
+    _likesCount = (widget.post['likes'] as num?)?.toInt() ?? 0;
+    _repostsCount = (widget.post['reposts'] as num?)?.toInt() ?? 0;
     final supabase = context.read<SupabaseService>();
     _isLiked = supabase.likedPostIds.contains(widget.post['id']);
     _isSaved = supabase.savedPostIds.contains(widget.post['id']);

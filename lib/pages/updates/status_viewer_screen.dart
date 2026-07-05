@@ -482,7 +482,7 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
       } else {
         return const Center(child: CircularProgressIndicator(color: Color(0xFF00BFFF)));
       }
-    } else if (imageUrl != null && imageUrl.isNotEmpty) {
+    } else if (imageUrl != null && imageUrl.isNotEmpty && !imageUrl.startsWith('color:')) {
       if (_localMediaFile != null) {
         return Image.file(
           _localMediaFile!,
