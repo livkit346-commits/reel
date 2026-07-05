@@ -23,16 +23,24 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
   bool _isUploading = false;
   List<String> _customStickers = [];
 
+  // Optimized webp assets for lightning fast loading
   static const List<String> _defaultStickers = [
-    'assets/cyber_neon_smile.png',
-    'assets/cyber_neon_skull.png',
-    'assets/cyber_neon_heart.png',
+    'assets/cyber_neon_smile.webp',
+    'assets/cyber_neon_skull.webp',
+    'assets/cyber_neon_heart.webp',
+  ];
+
+  // A premium selection of large emoji stickers that require zero network downloads
+  static const List<String> _emojiStickers = [
+    '😂', '😍', '😭', '😎', '👍', '🔥', '🎉', '❤️',
+    '💀', '👽', '🤖', '👾', '👑', '🦄', '🍄', '🍕',
+    '🍦', '🚀', '💡', '💎', '🔮', '💖', '🌟', '🌈',
   ];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _loadCustomStickers();
   }
 
@@ -87,8 +95,7 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
 
       final file = File(pickedFile.path);
 
-
-      // Upload directly to Backblaze B2 via Edge Function
+      // Upload directly to Cloudflare R2
       final url = await supabase.uploadToR2(file);
 
       setState(() {
@@ -111,66 +118,137 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryColor = Theme.of(context).primaryColor;
+    
+    // Premium theme variables
+    final pickerBgColor = isDark ? const Color(0xFF0F0F14) : const Color(0xFFF7F7FA);
+    final borderColor = isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06);
+    final activeTabColor = isDark ? const Color(0xFF00BFFF) : primaryColor;
+
     return Material(
       color: Colors.transparent,
       child: Container(
-        height: 280,
+        height: 310,
         decoration: BoxDecoration(
-          color: Colors.grey[950]!.withOpacity(0.9),
-          border: const Border(
-            top: BorderSide(color: Colors.white10),
+          color: pickerBgColor,
+          border: Border(
+            top: BorderSide(color: borderColor, width: 1.2),
           ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(isDark ? 0.4 : 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
+          ],
         ),
-        child: Column(
-          children: [
-          // Tab Bar with Cyberpunk style
-          TabBar(
-            controller: _tabController,
-            indicatorColor: const Color(0xFF00BFFF),
-            labelColor: const Color(0xFF00BFFF),
-            unselectedLabelColor: Colors.white54,
-            tabs: const [
-              Tab(
-                icon: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.face, size: 18),
-                    SizedBox(width: 6),
-                    Text('Cyberpunk'),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            children: [
+              // Premium styled Tab Bar
+              Container(
+                height: 48,
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: borderColor, width: 0.8)),
+                ),
+                child: TabBar(
+                  controller: _tabController,
+                  indicatorColor: activeTabColor,
+                  labelColor: activeTabColor,
+                  unselectedLabelColor: isDark ? Colors.white38 : Colors.black38,
+                  indicatorWeight: 2.5,
+                  labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  tabs: const [
+                    Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.emoji_emotions, size: 16),
+                          SizedBox(width: 6),
+                          Text('Emojis'),
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.bolt, size: 16),
+                          SizedBox(width: 6),
+                          Text('Cyberpunk'),
+                        ],
+                      ),
+                    ),
+                    Tab(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.folder_special, size: 16),
+                          SizedBox(width: 6),
+                          Text('My Stickers'),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
-              Tab(
-                icon: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+              // Tab Content
+              Expanded(
+                child: TabBarView(
+                  controller: _tabController,
                   children: [
-                    Icon(Icons.star, size: 18),
-                    SizedBox(width: 6),
-                    Text('My Stickers'),
+                    // 1. Emoji Stickers Grid
+                    _buildEmojiStickersGrid(),
+                    // 2. Default Cyberpunk Grid
+                    _buildStickersGrid(_defaultStickers, false, isDark),
+                    // 3. Custom Stickers Grid
+                    _buildStickersGrid(_customStickers, true, isDark),
                   ],
                 ),
               ),
             ],
           ),
-          // Tab Content
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                // 1. Default Cyberpunk Grid
-                _buildStickersGrid(_defaultStickers, false),
-                // 2. Custom Stickers Grid
-                _buildStickersGrid(_customStickers, true),
-              ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmojiStickersGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.all(12),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: _emojiStickers.length,
+      itemBuilder: (context, index) {
+        final emoji = _emojiStickers[index];
+        return GestureDetector(
+          onTap: () => widget.onStickerSelected('emoji:$emoji'),
+          child: Container(
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Text(
+              emoji,
+              style: const TextStyle(fontSize: 48),
             ),
           ),
-        ],
-      ),
-    ),
-  );
-}
+        );
+      },
+    );
+  }
 
-  Widget _buildStickersGrid(List<String> urls, bool isCustomTab) {
+  Widget _buildStickersGrid(List<String> urls, bool isCustomTab, bool isDark) {
+    final itemBgColor = isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.02);
+    final itemBorderColor = isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.04);
+    final iconColor = isDark ? Colors.white54 : Colors.black54;
+
     return GridView.builder(
       padding: const EdgeInsets.all(12),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -181,22 +259,26 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
       itemCount: urls.length + (isCustomTab ? 1 : 0),
       itemBuilder: (context, index) {
         if (isCustomTab && index == 0) {
-          // Render the "+" Add button for custom stickers
+          // "+" Add button for custom stickers
           return GestureDetector(
             onTap: _isUploading ? null : _addCustomSticker,
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
+                color: isDark ? Colors.white.withOpacity(0.04) : Colors.black.withOpacity(0.03),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white10, style: BorderStyle.solid),
+                border: Border.all(color: itemBorderColor),
               ),
               child: Center(
                 child: _isUploading
-                    ? const CircularProgressIndicator(
-                        color: Color(0xFF00BFFF),
-                        strokeWidth: 2,
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          color: Color(0xFF00BFFF),
+                          strokeWidth: 2,
+                        ),
                       )
-                    : const Icon(Icons.add, color: Colors.white54, size: 28),
+                    : Icon(Icons.add_photo_alternate_outlined, color: iconColor, size: 28),
               ),
             ),
           );
@@ -209,14 +291,25 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
           child: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.02),
+              color: itemBgColor,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withOpacity(0.05)),
+              border: Border.all(color: itemBorderColor),
             ),
             child: actualUrl.startsWith('assets/')
                 ? Image.asset(
                     actualUrl,
                     fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) {
+                      // Fallback to PNG version if webp fails (or vice versa)
+                      final fallbackUrl = actualUrl.endsWith('.webp')
+                          ? actualUrl.replaceAll('.webp', '.png')
+                          : actualUrl.replaceAll('.png', '.webp');
+                      return Image.asset(
+                        fallbackUrl,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => Icon(Icons.broken_image, color: iconColor, size: 24),
+                      );
+                    },
                   )
                 : Image.network(
                     actualUrl,
@@ -230,7 +323,7 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
                         ),
                       );
                     },
-                    errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
+                    errorBuilder: (_, __, ___) => Icon(Icons.broken_image, color: iconColor, size: 24),
                   ),
           ),
         );

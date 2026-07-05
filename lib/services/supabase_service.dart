@@ -1624,10 +1624,18 @@ class SupabaseService {
             hasChanges = true;
 
             if (typedMsg['senderId'] != myId) {
-              final mType = typedMsg['mediaType'] as String?;
-              if (mType != 'image' && mType != 'video' && mType != 'audio') {
-                deleteMessageFromServer(msgId, deleteStorage: false);
+              final mediaUrl = typedMsg['mediaUrl'] as String?;
+              if (mediaUrl != null && mediaUrl.isNotEmpty) {
+                // Pre-cache media file locally first so we don't lose it
+                try {
+                  await LocalStorageService().getCachedFile(mediaUrl, ttl: const Duration(days: 30));
+                  debugPrint('Pre-cached offline media file: $mediaUrl');
+                } catch (e) {
+                  debugPrint('Failed to pre-cache offline media: $e');
+                }
               }
+              // Immediately delete both database row and storage file from server
+              await deleteMessageFromServer(msgId, deleteStorage: true);
             }
           }
         }
@@ -1741,14 +1749,28 @@ class SupabaseService {
           debugPrint('Chat $chatId automatically unarchived due to new message.');
         }
 
-        // Notify the server we received it so it gets deleted from DynamoDB
-        if (senderId != myId && WebSocketService().isConnected) {
-          WebSocketService().sendStatusUpdate(
-            chatId: chatId,
-            messageId: messageId,
-            recipientId: senderId,
-            status: 'received',
-          );
+        // Pre-cache media locally and immediately delete message from server database and storage
+        if (senderId != myId) {
+          final mediaUrl = event['mediaUrl'] as String?;
+          if (mediaUrl != null && mediaUrl.isNotEmpty) {
+            try {
+              await LocalStorageService().getCachedFile(mediaUrl, ttl: const Duration(days: 30));
+              debugPrint('Pre-cached incoming WS media file: $mediaUrl');
+            } catch (e) {
+              debugPrint('Failed to pre-cache incoming WS media: $e');
+            }
+          }
+          // Immediately purge database row and media file from server
+          deleteMessageFromServer(messageId, deleteStorage: true);
+
+          if (WebSocketService().isConnected) {
+            WebSocketService().sendStatusUpdate(
+              chatId: chatId,
+              messageId: messageId,
+              recipientId: senderId,
+              status: 'received',
+            );
+          }
         }
       }
     } catch (e) {
@@ -1982,12 +2004,23 @@ class SupabaseService {
         final msg = await client.from('messages').select('mediaUrl').eq('id', messageId).maybeSingle();
         if (msg != null) {
           final mediaUrl = msg['mediaUrl'] as String?;
-          if (mediaUrl != null && mediaUrl.contains('storage/v1/object/public/media/')) {
-            final parts = mediaUrl.split('storage/v1/object/public/media/');
-            if (parts.length > 1) {
-              final storagePath = parts[1];
-              await client.storage.from('media').remove([storagePath]);
-              debugPrint('Successfully deleted media from storage: $storagePath');
+          if (mediaUrl != null) {
+            if (mediaUrl.contains('storage/v1/object/public/media/')) {
+              final parts = mediaUrl.split('storage/v1/object/public/media/');
+              if (parts.length > 1) {
+                final storagePath = parts[1];
+                await client.storage.from('media').remove([storagePath]);
+                debugPrint('Successfully deleted media from storage: $storagePath');
+              }
+            } else if (mediaUrl.contains('/chat_media/')) {
+              final idx = mediaUrl.indexOf('chat_media/');
+              if (idx != -1) {
+                final storagePath = mediaUrl.substring(idx);
+                try {
+                  await client.storage.from('media').remove([storagePath]);
+                  debugPrint('Successfully deleted media from fallback storage: $storagePath');
+                } catch (_) {}
+              }
             }
           }
         }
