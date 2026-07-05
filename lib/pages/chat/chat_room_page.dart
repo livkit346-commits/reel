@@ -152,6 +152,51 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     await LocalStorageService().cacheJson('last_seen_time_${widget.chatId}', DateTime.now().toIso8601String());
   }
 
+  String _getDateHeaderText(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final msgDate = DateTime(date.year, date.month, date.day);
+
+    if (msgDate == today) {
+      return 'TODAY';
+    } else if (msgDate == yesterday) {
+      return 'YESTERDAY';
+    } else {
+      final months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      return '${months[date.month - 1]} ${date.day}, ${date.year}';
+    }
+  }
+
+  Widget _buildDateHeader(String dateText, bool isDark) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF182229) : const Color(0xFFE1F5FE),
+          borderRadius: BorderRadius.circular(10),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Text(
+          dateText,
+          style: TextStyle(
+            color: isDark ? Colors.white70 : const Color(0xFF546E7A),
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
+          ),
+        ),
+      ),
+    );
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -2393,23 +2438,45 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                     final received = msg['received'] as bool? ?? false;
                     final createdAtStr = msg['createdAt'] as String?;
 
+                    DateTime? parsedDate;
                     String timeStr = '';
                     if (createdAtStr != null) {
                       try {
-                        final parsed = DateTime.parse(createdAtStr).toLocal();
-                        final hour = parsed.hour;
-                        final minute = parsed.minute.toString().padLeft(2, '0');
+                        parsedDate = DateTime.parse(createdAtStr).toLocal();
+                        final hour = parsedDate.hour;
+                        final minute = parsedDate.minute.toString().padLeft(2, '0');
                         final period = hour >= 12 ? 'PM' : 'AM';
                         final displayHour = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
                         timeStr = '$displayHour:$minute $period';
                       } catch (_) {}
                     }
 
-                    final isDeleted = msg['isDeleted'] as bool? ?? false;
+                    bool showDateHeader = false;
+                    if (parsedDate != null) {
+                      if (index == 0) {
+                        showDateHeader = true;
+                      } else {
+                        final prevMsg = displayMessages[index - 1];
+                        final prevCreatedAtStr = prevMsg['createdAt'] as String?;
+                        if (prevCreatedAtStr != null) {
+                          try {
+                            final prevDate = DateTime.parse(prevCreatedAtStr).toLocal();
+                            showDateHeader = prevDate.year != parsedDate.year ||
+                                prevDate.month != parsedDate.month ||
+                                prevDate.day != parsedDate.day;
+                          } catch (_) {
+                            showDateHeader = true;
+                          }
+                        } else {
+                          showDateHeader = true;
+                        }
+                      }
+                    }
 
+                    final isDeleted = msg['isDeleted'] as bool? ?? false;
                     final isSelected = _selectedMessageIds.contains(msg['id']);
 
-                    return SwipeTo(
+                    Widget messageWidget = SwipeTo(
                       onRightSwipe: (details) {
                         if (!isDeleted) {
                           setState(() {
@@ -2452,9 +2519,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                         color: isDeleted 
                                             ? Colors.transparent 
                                             : (isMe 
-                                                ? (isDark ? const Color(0xFF7E1C31) : const Color(0xFFFFD2D2))
-                                                : (isDark ? const Color(0xFF262626) : const Color(0xFFEAEAEA))),
-                                        border: isDeleted ? Border.all(color: isDark ? Colors.white24 : Colors.black12, width: 1) : null,
+                                                ? (isDark ? const Color(0xFF005C4B) : const Color(0xFFE7FFDB))
+                                                : (isDark ? const Color(0xFF202C33) : const Color(0xFFFFFFFF))),
+                                        border: isDeleted 
+                                            ? Border.all(color: isDark ? Colors.white24 : Colors.black12, width: 1) 
+                                            : (!isMe && !isDark ? Border.all(color: Colors.black.withOpacity(0.08), width: 0.8) : null),
                                         borderRadius: BorderRadius.only(
                                           topLeft: const Radius.circular(16),
                                           topRight: const Radius.circular(16),
@@ -2462,7 +2531,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                           bottomRight: isMe ? Radius.zero : const Radius.circular(16),
                                         ),
                                       ),
-                                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+                                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
                                child: IntrinsicWidth(
                                  child: Column(
                                    crossAxisAlignment: CrossAxisAlignment.end,
@@ -2471,12 +2540,12 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                      if (msg['replyToMessageId'] != null)
                                        _buildReplyBubble(msg, myId),
                                      if (isDeleted)
-                                       const Row(
+                                       Row(
                                          mainAxisSize: MainAxisSize.min,
                                          children: [
-                                           Icon(Icons.block, color: Colors.white30, size: 16),
-                                           SizedBox(width: 6),
-                                           Text('This message was deleted', style: TextStyle(color: Colors.white54, fontStyle: FontStyle.italic)),
+                                           Icon(Icons.block, color: isDark ? Colors.white30 : Colors.black38, size: 16),
+                                           const SizedBox(width: 6),
+                                           Text('This message was deleted', style: TextStyle(color: isDark ? Colors.white54 : Colors.black54, fontStyle: FontStyle.italic)),
                                          ],
                                        )
                                      else ...[
@@ -2509,7 +2578,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                              deleteFromServer: false,
                                            )
                                          else if (text == null || text.trim().isEmpty)
-                                           // Overlay layout for caption-less media bubble
                                            Stack(
                                              children: [
                                                ClipRRect(
@@ -2580,7 +2648,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                           ),
                                                         ),
                                                ),
-                                               // Overlaid timestamp & receipt checks in bottom-right corner
                                                Positioned(
                                                  bottom: 8,
                                                  right: 8,
@@ -2608,11 +2675,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                            msg['isPending'] == true 
                                                                ? Icons.access_time 
                                                                : (msg['seen'] == true || msg['received'] == true ? Icons.done_all : Icons.done),
-                                                           size: 11,
+                                                           size: 13,
                                                            color: msg['isPending'] == true 
                                                                ? Colors.white38 
                                                                : (msg['seen'] == true 
-                                                                   ? Colors.lightBlueAccent 
+                                                                   ? const Color(0xFF53BDEB) 
                                                                    : (msg['received'] == true ? Colors.white70 : Colors.white30)),
                                                          ),
                                                        ],
@@ -2623,7 +2690,6 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                              ],
                                            )
                                          else ...[
-                                           // Legacy media bubble (with caption text below)
                                            if (msg['isPending'] == true && msg['mediaFilePath'] != null)
                                              ClipRRect(
                                                borderRadius: BorderRadius.circular(16),
@@ -2698,7 +2764,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                             child: Text(
                                               text,
                                               style: TextStyle(
-                                                color: isDark ? Colors.white : Colors.black87,
+                                                color: isDark ? Colors.white : const Color(0xFF111B21),
                                                 fontSize: 15,
                                                 height: 1.3,
                                               ),
@@ -2716,11 +2782,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                              if (msg['is_pinned'] == true)
                                                Padding(
                                                  padding: const EdgeInsets.only(right: 4),
-                                                 child: Icon(Icons.push_pin, size: 10, color: isDark ? Colors.white30 : Colors.black38),
+                                                 child: Icon(Icons.push_pin, size: 10, color: isDark ? Colors.white30 : const Color(0xFF667781)),
                                                ),
                                              Text(
                                                timeStr,
-                                               style: TextStyle(color: isDark ? Colors.white38 : Colors.black45, fontSize: 9),
+                                               style: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF667781), fontSize: 10),
                                              ),
                                              if (isMe) ...[
                                                const SizedBox(width: 4),
@@ -2728,14 +2794,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                  msg['isPending'] == true 
                                                      ? Icons.access_time 
                                                      : (msg['seen'] == true || msg['received'] == true ? Icons.done_all : Icons.done),
-                                                 size: 11,
+                                                 size: 13,
                                                  color: msg['isPending'] == true 
-                                                     ? (isDark ? Colors.white38 : Colors.black38)
+                                                     ? (isDark ? Colors.white38 : const Color(0xFF667781))
                                                      : (msg['seen'] == true 
-                                                         ? Colors.lightBlueAccent 
+                                                         ? const Color(0xFF53BDEB) 
                                                          : (msg['received'] == true 
-                                                             ? (isDark ? Colors.white54 : Colors.black45) 
-                                                             : (isDark ? Colors.white24 : Colors.black26))),
+                                                             ? (isDark ? Colors.white60 : const Color(0xFF667781)) 
+                                                             : (isDark ? Colors.white24 : const Color(0xFF8696A0)))),
                                                ),
                                              ],
                                            ],
@@ -2750,11 +2816,19 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         ),
                       ),
                     );
+
+                    if (showDateHeader && parsedDate != null) {
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildDateHeader(_getDateHeaderText(parsedDate), isDark),
+                          messageWidget,
+                        ],
+                      );
+                    }
+
+                    return messageWidget;
                   },
-                );
-              },
-            ),
-          ),
         ),
           if (_isSending)
             Container(
