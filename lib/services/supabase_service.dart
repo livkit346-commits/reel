@@ -9,6 +9,7 @@ import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/services/websocket_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart' as fb;
+import 'package:reel/pages/chat/chat_room_page.dart';
 
 class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
@@ -395,14 +396,15 @@ class SupabaseService {
     }
   }
 
-  // Clear local JSON chat cache from disk
+  // Clear local JSON chat cache from disk and memory
   Future<void> clearLocalChatCache() async {
     try {
+      ChatRoomPage.clearAllCache();
       final directory = await getApplicationDocumentsDirectory();
       final chatsDir = Directory('${directory.path}/chats');
       if (await chatsDir.exists()) {
         await chatsDir.delete(recursive: true);
-        debugPrint('Cleared local chat cache directory.');
+        debugPrint('Cleared local chat cache directory and RAM.');
       }
     } catch (e) {
       debugPrint('Error clearing local chat cache: $e');

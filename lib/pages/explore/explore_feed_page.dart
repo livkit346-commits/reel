@@ -921,13 +921,20 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
       }
     }
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondaryTextColor = isDark ? Colors.white70 : Colors.black87;
+    final subTextColor = isDark ? Colors.white38 : Colors.black45;
+    final borderColor = isDark ? Colors.white10 : Colors.black.withOpacity(0.1);
+    final cardBgColor = isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.03);
+
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
-        color: Colors.white.withOpacity(0.02),
+        border: Border.all(color: borderColor),
+        color: cardBgColor,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -938,25 +945,24 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
               const SizedBox(width: 6),
               Text(
                 qUserName,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 13),
               ),
               const SizedBox(width: 4),
               Text(
                 '@${qUserName.toLowerCase().replaceAll(' ', '')}',
-                style: const TextStyle(color: Colors.white38, fontSize: 12),
+                style: TextStyle(color: subTextColor, fontSize: 12),
               ),
             ],
           ),
           const SizedBox(height: 6),
           if (qText.startsWith('[REPOST:'))
-            const Text(
-              '♻️ Repost',
-              style: TextStyle(color: Colors.white54, fontSize: 13, fontStyle: FontStyle.italic),
-            )
+            TextStyle(color: secondaryTextColor, fontSize: 13, fontStyle: FontStyle.italic) != null
+                ? Text('♻️ Repost', style: TextStyle(color: secondaryTextColor, fontSize: 13, fontStyle: FontStyle.italic))
+                : const SizedBox()
           else
             Text(
               displayQText,
-              style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.3),
+              style: TextStyle(color: secondaryTextColor, fontSize: 13, height: 1.3),
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1012,10 +1018,16 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     final myId = context.read<SupabaseService>().currentUser?.id;
     final isMe = displayUserId == myId;
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondaryTextColor = isDark ? Colors.white54 : Colors.black54;
+    final subTextColor = isDark ? Colors.white38 : Colors.black38;
+    final borderSideColor = isDark ? Colors.white12 : Colors.black.withOpacity(0.08);
+
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.white12, width: 0.5)),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: borderSideColor, width: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1068,31 +1080,31 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                           },
                           child: Text(
                             displayUserName,
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                            style: TextStyle(color: textColor, fontWeight: FontWeight.bold, fontSize: 15),
                           ),
                         ),
                         const SizedBox(width: 4),
                         Text(
                           '@${displayUserName.toLowerCase().replaceAll(' ', '')}',
-                          style: const TextStyle(color: Colors.white54, fontSize: 14),
+                          style: TextStyle(color: secondaryTextColor, fontSize: 14),
                         ),
                         const Spacer(),
                         PopupMenuButton<String>(
-                          icon: const Icon(Icons.more_horiz, color: Colors.white54, size: 20),
-                          color: Colors.grey[900],
+                          icon: Icon(Icons.more_horiz, color: secondaryTextColor, size: 20),
+                          color: isDark ? Colors.grey[900] : Colors.white,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           onSelected: (value) async {
                             if (value == 'delete') {
                               final confirm = await showDialog<bool>(
                                 context: context,
                                 builder: (context) => AlertDialog(
-                                  backgroundColor: Colors.grey[900],
-                                  title: const Text('Delete Post', style: TextStyle(color: Colors.white)),
-                                  content: const Text('Are you sure you want to delete this post?', style: TextStyle(color: Colors.white70)),
+                                  backgroundColor: isDark ? Colors.grey[900] : Colors.white,
+                                  title: Text('Delete Post', style: TextStyle(color: textColor)),
+                                  content: Text('Are you sure you want to delete this post?', style: TextStyle(color: secondaryTextColor)),
                                   actions: [
                                     TextButton(
                                       onPressed: () => Navigator.pop(context, false),
-                                      child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                      child: Text('Cancel', style: TextStyle(color: subTextColor)),
                                     ),
                                     TextButton(
                                       onPressed: () => Navigator.pop(context, true),
@@ -1129,13 +1141,13 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                                   ],
                                 ),
                               ),
-                            const PopupMenuItem(
+                            PopupMenuItem(
                               value: 'report',
                               child: Row(
                                 children: [
-                                  Icon(Icons.report_problem_outlined, color: Colors.amber, size: 18),
-                                  SizedBox(width: 8),
-                                  Text('Report Post', style: TextStyle(color: Colors.white)),
+                                  const Icon(Icons.report_problem_outlined, color: Colors.amber, size: 18),
+                                  const SizedBox(width: 8),
+                                  Text('Report Post', style: TextStyle(color: textColor)),
                                 ],
                               ),
                             ),
@@ -1145,30 +1157,30 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                     ),
                     const SizedBox(height: 4),
                     if (isRepost && _quotedPost == null && _loadingQuotedPost)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 16),
-                        child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Center(child: CircularProgressIndicator(strokeWidth: 2, color: secondaryTextColor)),
                       )
                     else if (isRepost && _quotedPost == null && !_loadingQuotedPost)
-                      const Text(
+                      Text(
                         'This post is unavailable',
-                        style: TextStyle(color: Colors.white38, fontSize: 14, fontStyle: FontStyle.italic),
+                        style: TextStyle(color: subTextColor, fontSize: 14, fontStyle: FontStyle.italic),
                       )
                     else ...[
                       Text(
                         displayText,
-                        style: const TextStyle(color: Colors.white, fontSize: 15, height: 1.4),
+                        style: TextStyle(color: textColor, fontSize: 15, height: 1.4),
                       ),
                       if (isQuote && _quotedPost != null)
                         _buildQuotedPostWidget(_quotedPost!),
                       if (isQuote && _quotedPost == null && _loadingQuotedPost)
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 8),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Center(
                             child: SizedBox(
                               width: 20,
                               height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: secondaryTextColor),
                             ),
                           ),
                         )
@@ -1178,12 +1190,12 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white10),
-                            color: Colors.white.withOpacity(0.02),
+                            border: Border.all(color: borderSideColor),
+                            color: isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.02),
                           ),
-                          child: const Text(
+                          child: Text(
                             'This post is unavailable',
-                            style: TextStyle(color: Colors.white38, fontSize: 13, fontStyle: FontStyle.italic),
+                            style: TextStyle(color: subTextColor, fontSize: 13, fontStyle: FontStyle.italic),
                           ),
                         ),
                       if (displayImageUrl != null)
@@ -1209,7 +1221,7 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                               ),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(16),
-                                color: const Color(0xFF161616),
+                                color: isDark ? const Color(0xFF161616) : Colors.grey[200],
                               ),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(16),
@@ -1222,14 +1234,14 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                                     return Container(
                                       width: double.infinity,
                                       height: 240,
-                                      color: Colors.white.withOpacity(0.05),
+                                      color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
                                     );
                                   },
                                   errorBuilder: (context, error, stackTrace) {
                                     return Container(
                                       width: double.infinity,
                                       height: 240,
-                                      color: Colors.white.withOpacity(0.05),
+                                      color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
                                     );
                                   },
                                 ),
@@ -1281,13 +1293,18 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     );
   }
 
-  Widget _buildPostAction(IconData icon, String label, {bool active = false, Color activeColor = Colors.white}) {
+  Widget _buildPostAction(IconData icon, String label, {bool active = false, Color? activeColor}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final defaultActiveColor = isDark ? Colors.white : Colors.black87;
+    final effectiveActiveColor = activeColor ?? defaultActiveColor;
+    final inactiveColor = isDark ? Colors.white54 : Colors.black45;
+
     return Row(
       children: [
-        Icon(icon, color: active ? activeColor : Colors.white54, size: 18),
+        Icon(icon, color: active ? effectiveActiveColor : inactiveColor, size: 18),
         if (label.isNotEmpty) ...[
           const SizedBox(width: 4),
-          Text(label, style: TextStyle(color: active ? activeColor : Colors.white54, fontSize: 12)),
+          Text(label, style: TextStyle(color: active ? effectiveActiveColor : inactiveColor, fontSize: 12)),
         ],
       ],
     );

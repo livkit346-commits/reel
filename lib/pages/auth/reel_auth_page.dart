@@ -80,6 +80,7 @@ class _ReelAuthPageState extends State<ReelAuthPage> {
         }
       } else {
         await supabaseService.signInWithEmail(email, password);
+        await supabaseService.clearLocalChatCache();
         
         // If login successful, check if profile exists
         final user = supabaseService.currentUser;

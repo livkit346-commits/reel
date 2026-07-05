@@ -316,23 +316,29 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
   }
 
   Widget _buildLocationSharingCard() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondaryTextColor = isDark ? Colors.white38 : Colors.black45;
+    final cardBgGradient = [
+      isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+      isDark ? Colors.white.withOpacity(0.02) : Colors.black.withOpacity(0.01),
+    ];
+    final cardBorder = _locationSharingEnabled
+        ? Colors.cyanAccent.withOpacity(0.4)
+        : (isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.08));
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            Colors.white.withOpacity(0.05),
-            Colors.white.withOpacity(0.02),
-          ],
+          colors: cardBgGradient,
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: _locationSharingEnabled
-              ? Colors.cyanAccent.withOpacity(0.2)
-              : Colors.white.withOpacity(0.05),
+          color: cardBorder,
           width: 1.5,
         ),
       ),
@@ -346,33 +352,33 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                 decoration: BoxDecoration(
                   color: _locationSharingEnabled
                       ? Colors.cyanAccent.withOpacity(0.15)
-                      : Colors.white.withOpacity(0.05),
+                      : (isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05)),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   Icons.location_on,
-                  color: _locationSharingEnabled ? Colors.cyanAccent : Colors.white38,
+                  color: _locationSharingEnabled ? Colors.cyanAccent : secondaryTextColor,
                   size: 22,
                 ),
               ),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'Nearby Discovery (50m)',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: textColor,
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
                       'Reciprocal location sharing',
                       style: TextStyle(
-                        color: Colors.white38,
+                        color: secondaryTextColor,
                         fontSize: 12,
                       ),
                     ),
@@ -390,8 +396,8 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                   value: _locationSharingEnabled,
                   activeColor: Colors.cyanAccent,
                   activeTrackColor: Colors.cyanAccent.withOpacity(0.3),
-                  inactiveThumbColor: Colors.white54,
-                  inactiveTrackColor: Colors.white12,
+                  inactiveThumbColor: isDark ? Colors.white54 : Colors.grey,
+                  inactiveTrackColor: isDark ? Colors.white12 : Colors.grey[300],
                   onChanged: (val) => _toggleLocationSharing(val),
                 ),
             ],
@@ -401,18 +407,18 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.3),
+                color: isDark ? Colors.black.withOpacity(0.3) : Colors.black.withOpacity(0.04),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.lock_outline, color: Colors.white30, size: 16),
-                  SizedBox(width: 8),
+                  Icon(Icons.lock_outline, color: secondaryTextColor, size: 16),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Turn on Location Sharing to find and be found by active users within 50 meters.',
                       style: TextStyle(
-                        color: Colors.white38,
+                        color: secondaryTextColor,
                         fontSize: 11,
                         height: 1.4,
                       ),
@@ -423,31 +429,31 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
             ),
           ] else ...[
             const SizedBox(height: 16),
-            const Divider(color: Colors.white10, height: 1),
+            Divider(color: isDark ? Colors.white10 : Colors.black.withOpacity(0.08), height: 1),
             const SizedBox(height: 12),
             if (_fetchingNearby)
-              const Center(
+              Center(
                 child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
+                  padding: const EdgeInsets.symmetric(vertical: 24),
                   child: Column(
                     children: [
-                      CircularProgressIndicator(strokeWidth: 2, color: Colors.cyanAccent),
-                      SizedBox(height: 8),
+                      const CircularProgressIndicator(strokeWidth: 2, color: Colors.cyanAccent),
+                      const SizedBox(height: 8),
                       Text(
                         'Scanning for active users within 50m...',
-                        style: TextStyle(color: Colors.white38, fontSize: 12),
+                        style: TextStyle(color: secondaryTextColor, fontSize: 12),
                       ),
                     ],
                   ),
                 ),
               )
             else if (_nearbyUsers.isEmpty)
-              const Center(
+              Center(
                 child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
+                  padding: const EdgeInsets.symmetric(vertical: 24),
                   child: Column(
                     children: [
-                      Icon(Icons.radar, color: Colors.white24, size: 36),
+                      Icon(Icons.radar, color: secondaryTextColor, size: 36),
                       SizedBox(height: 8),
                       Text(
                         'No active users within 50 meters right now.',
@@ -544,15 +550,23 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final backgroundColor = isDark ? Colors.black : Colors.white;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondaryTextColor = isDark ? Colors.white54 : Colors.black54;
+    final hintColor = isDark ? Colors.white38 : Colors.black38;
+    final searchFillColor = isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05);
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: backgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: backgroundColor,
         elevation: 0,
         centerTitle: true,
-        title: const Text(
+        iconTheme: IconThemeData(color: textColor),
+        title: Text(
           'Add Friends',
-          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: Colors.white),
+          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 20, color: textColor),
         ),
       ),
       body: _loading
@@ -570,12 +584,12 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                       child: TextField(
                         controller: _searchController,
                         onChanged: _searchUsers,
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: textColor),
                         decoration: InputDecoration(
                           hintText: 'Find Friends',
-                          hintStyle: const TextStyle(color: Colors.white38, fontWeight: FontWeight.bold),
-                          prefixIcon: const Icon(Icons.search, color: Colors.white54),
-                          fillColor: Colors.white.withOpacity(0.08),
+                          hintStyle: TextStyle(color: hintColor, fontWeight: FontWeight.bold),
+                          prefixIcon: Icon(Icons.search, color: secondaryTextColor),
+                          fillColor: searchFillColor,
                           filled: true,
                           contentPadding: const EdgeInsets.symmetric(vertical: 14),
                           border: OutlineInputBorder(
@@ -583,12 +597,12 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                             borderSide: BorderSide.none,
                           ),
                           suffixIcon: _searching
-                              ? const Padding(
-                                  padding: EdgeInsets.all(12),
+                              ? Padding(
+                                  padding: const EdgeInsets.all(12),
                                   child: SizedBox(
                                     width: 16,
                                     height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: textColor),
                                   ),
                                 )
                               : null,
@@ -603,11 +617,11 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
 
                     // SEARCH RESULTS SECTION
                     if (_searchResults.isNotEmpty) ...[
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         child: Text(
                           'SEARCH RESULTS',
-                          style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.8),
+                          style: TextStyle(color: secondaryTextColor, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.8),
                         ),
                       ),
                       ListView.builder(
@@ -641,11 +655,11 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
 
                     // "ADDED ME" SECTION (Snapchat style: list of people who added you)
                     if (_addedMeList.isNotEmpty) ...[
-                      const Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         child: Text(
                           'ADDED ME',
-                          style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.8),
+                          style: TextStyle(color: secondaryTextColor, fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.8),
                         ),
                       ),
                       Container(
@@ -750,11 +764,16 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
     required VoidCallback onActionPressed,
   }) {
     final primaryColor = Theme.of(context).primaryColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondaryTextColor = isDark ? Colors.white54 : Colors.black54;
+    final subTextColor = isDark ? Colors.white38 : Colors.black38;
+    final borderSideColor = isDark ? Colors.white10 : Colors.black.withOpacity(0.08);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.white10, width: 0.5)),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: borderSideColor, width: 0.5)),
       ),
       child: Row(
         children: [
@@ -789,8 +808,8 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                 children: [
                   Text(
                     name,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: textColor,
                       fontWeight: FontWeight.bold,
                       fontSize: 15,
                     ),
@@ -800,19 +819,19 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                     children: [
                       Text(
                         username,
-                        style: const TextStyle(color: Colors.white54, fontSize: 12),
+                        style: TextStyle(color: secondaryTextColor, fontSize: 12),
                       ),
                       const SizedBox(width: 6),
                       Container(
                         width: 3,
                         height: 3,
-                        decoration: const BoxDecoration(color: Colors.white38, shape: BoxShape.circle),
+                        decoration: BoxDecoration(color: subTextColor, shape: BoxShape.circle),
                       ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           subtext,
-                          style: const TextStyle(color: Colors.white38, fontSize: 12),
+                          style: TextStyle(color: subTextColor, fontSize: 12),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -829,7 +848,7 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
-                icon: const Icon(Icons.chat_bubble_outline, color: Colors.white70, size: 20),
+                icon: Icon(Icons.chat_bubble_outline, color: secondaryTextColor, size: 20),
                 onPressed: () => _startChat(context, userId, name),
               ),
               const SizedBox(width: 4),
@@ -837,9 +856,9 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                 onPressed: onActionPressed,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: isAdded
-                      ? Colors.white12
+                      ? (isDark ? Colors.white12 : Colors.black.withOpacity(0.08))
                       : (isAddedMeText != null ? primaryColor : Colors.indigoAccent),
-                  foregroundColor: Colors.white,
+                  foregroundColor: isAdded ? textColor : Colors.white,
                   elevation: 0,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   shape: RoundedRectangleBorder(
