@@ -26,15 +26,14 @@ void main() async {
 
   final supabaseService = SupabaseService();
   await supabaseService.initializeSession();
-
-  final session = Supabase.instance.client.auth.currentSession;
+  final hasSession = await supabaseService.hasSavedSession();
 
   runApp(
     MultiProvider(
       providers: [
         Provider<SupabaseService>(create: (_) => SupabaseService()),
       ],
-      child: ReelApp(showMainScreen: session != null),
+      child: ReelApp(showMainScreen: hasSession),
     ),
   );
 }

@@ -91,15 +91,16 @@ class SupabaseService {
       final Map<String, dynamic> claims = jsonDecode(payloadDecoded);
       final userId = claims['sub'] as String? ?? '';
       final email = claims['email'] as String? ?? 'user@reelapp.com';
-      final exp = claims['exp'] as int? ?? (DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600);
-      final timeNow = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final expiresIn = exp - timeNow;
+
+      // Set far-future expiration (10 years) for permanent offline session persistence (WhatsApp-style)
+      final farFutureExp = (DateTime.now().millisecondsSinceEpoch ~/ 1000) + 315360000;
+      const expiresIn = 315360000;
 
       final sessionMap = {
         'access_token': accessToken,
         'refresh_token': refreshToken,
         'expires_in': expiresIn,
-        'expires_at': exp,
+        'expires_at': farFutureExp,
         'token_type': 'bearer',
         'user': {
           'id': userId,
@@ -122,6 +123,19 @@ class SupabaseService {
       debugPrint('Error in _setSessionOffline: $e');
       rethrow;
     }
+  }
+
+  // Check if a valid saved session exists in local storage
+  Future<bool> hasSavedSession() async {
+    try {
+      final cached = await LocalStorageService().getCachedJson('auth_tokens');
+      if (cached != null && cached is Map) {
+        final accessToken = cached['accessToken'] as String?;
+        final refreshToken = cached['refreshToken'] as String?;
+        return accessToken != null && accessToken.isNotEmpty && refreshToken != null && refreshToken.isNotEmpty;
+      }
+    } catch (_) {}
+    return false;
   }
 
   void _startTokenRefreshTimer() {
