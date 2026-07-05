@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
+import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:geolocator/geolocator.dart';
