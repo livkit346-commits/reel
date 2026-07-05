@@ -2519,11 +2519,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                         color: isDeleted 
                                             ? Colors.transparent 
                                             : (isMe 
-                                                ? (isDark ? const Color(0xFF005C4B) : const Color(0xFFE7FFDB))
-                                                : (isDark ? const Color(0xFF202C33) : const Color(0xFFFFFFFF))),
-                                        border: isDeleted 
-                                            ? Border.all(color: isDark ? Colors.white24 : Colors.black12, width: 1) 
-                                            : (!isMe && !isDark ? Border.all(color: Colors.black.withOpacity(0.08), width: 0.8) : null),
+                                                ? (isDark ? const Color(0xFF7E1C31) : const Color(0xFFFFD2D2))
+                                                : (isDark ? const Color(0xFF262626) : const Color(0xFFEAEAEA))),
+                                        border: isDeleted ? Border.all(color: isDark ? Colors.white24 : Colors.black12, width: 1) : null,
                                         borderRadius: BorderRadius.only(
                                           topLeft: const Radius.circular(16),
                                           topRight: const Radius.circular(16),
@@ -2764,7 +2762,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                             child: Text(
                                               text,
                                               style: TextStyle(
-                                                color: isDark ? Colors.white : const Color(0xFF111B21),
+                                                color: isDark ? Colors.white : Colors.black87,
                                                 fontSize: 15,
                                                 height: 1.3,
                                               ),
@@ -2782,11 +2780,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                              if (msg['is_pinned'] == true)
                                                Padding(
                                                  padding: const EdgeInsets.only(right: 4),
-                                                 child: Icon(Icons.push_pin, size: 10, color: isDark ? Colors.white30 : const Color(0xFF667781)),
+                                                 child: Icon(Icons.push_pin, size: 10, color: isDark ? Colors.white30 : Colors.black38),
                                                ),
                                              Text(
                                                timeStr,
-                                               style: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF667781), fontSize: 10),
+                                               style: TextStyle(color: isDark ? Colors.white38 : Colors.black45, fontSize: 10),
                                              ),
                                              if (isMe) ...[
                                                const SizedBox(width: 4),
