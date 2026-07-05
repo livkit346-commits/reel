@@ -2829,7 +2829,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
                     return messageWidget;
                   },
-        ),
+                );
+              },
+            ),
           if (_isSending)
             Container(
               color: Colors.black,
