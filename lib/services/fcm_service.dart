@@ -69,7 +69,7 @@ class FcmService {
           final body = message.notification!.body ?? '';
           final senderId = message.data['senderId'] as String?;
 
-          _showHeadsUpBanner(title, body, chatId, senderId);
+          showHeadsUpBanner(title, body, chatId, senderId);
         }
       });
 
@@ -137,7 +137,7 @@ class FcmService {
 
   OverlayEntry? _currentOverlay;
 
-  void _showHeadsUpBanner(String title, String body, String? chatId, String? senderId) {
+  void showHeadsUpBanner(String title, String body, String? chatId, String? senderId) {
     final overlayState = navigatorKey.currentState?.overlay;
     if (overlayState == null) return;
 

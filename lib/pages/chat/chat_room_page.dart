@@ -2670,16 +2670,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                        if (isMe) ...[
                                                          const SizedBox(width: 4),
                                                          Icon(
-                                                           msg['isPending'] == true 
-                                                               ? Icons.access_time 
-                                                               : (msg['seen'] == true || msg['received'] == true ? Icons.done_all : Icons.done),
-                                                           size: 13,
-                                                           color: msg['isPending'] == true 
-                                                               ? Colors.white38 
-                                                               : (msg['seen'] == true 
-                                                                   ? const Color(0xFF53BDEB) 
-                                                                   : (msg['received'] == true ? Colors.white70 : Colors.white30)),
-                                                         ),
+                                                            msg['isPending'] == true 
+                                                                ? Icons.access_time 
+                                                                : ((msg['seen'] == true || msg['status'] == 'read' || msg['status'] == 'seen' || msg['received'] == true || msg['status'] == 'delivered' || msg['status'] == 'received') ? Icons.done_all : Icons.done),
+                                                            size: 13,
+                                                            color: msg['isPending'] == true 
+                                                                ? Colors.white38 
+                                                                : ((msg['seen'] == true || msg['status'] == 'read' || msg['status'] == 'seen')
+                                                                    ? const Color(0xFF53BDEB) 
+                                                                    : ((msg['received'] == true || msg['status'] == 'delivered' || msg['status'] == 'received') ? Colors.white70 : Colors.white38)),
+                                                          ),
                                                        ],
                                                      ],
                                                    ),
@@ -3163,12 +3163,12 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           Icon(
                             msg['isPending'] == true 
                                 ? Icons.access_time 
-                                : (msg['seen'] == true || msg['received'] == true ? Icons.done_all : Icons.done),
+                                : ((msg['seen'] == true || msg['status'] == 'read' || msg['status'] == 'seen' || msg['received'] == true || msg['status'] == 'delivered' || msg['status'] == 'received') ? Icons.done_all : Icons.done),
                             color: msg['isPending'] == true 
                                 ? Colors.white38 
-                                : (msg['seen'] == true 
-                                    ? Colors.lightBlueAccent 
-                                    : (msg['received'] == true ? Colors.white70 : Colors.white30)),
+                                : ((msg['seen'] == true || msg['status'] == 'read' || msg['status'] == 'seen')
+                                    ? const Color(0xFF53BDEB) 
+                                    : ((msg['received'] == true || msg['status'] == 'delivered' || msg['status'] == 'received') ? Colors.white70 : Colors.white30)),
                             size: 11,
                           ),
                         ],

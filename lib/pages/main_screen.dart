@@ -24,6 +24,7 @@ class _MainScreenState extends State<MainScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final supabaseService = context.read<SupabaseService>();
       FcmService().init(supabaseService);
+      supabaseService.initializeGlobalRealtime();
     });
   }
 

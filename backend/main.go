@@ -248,20 +248,20 @@ func (c *Client) readPump() {
 			continue
 		}
 
-		// Handle status updates (e.g. "received", "seen")
+		// Handle status updates (e.g. "delivered", "received", "read", "seen")
 		if chatMsg.Type == "status" {
-			if chatMsg.Status == "received" && chatMsg.MessageID != "" && chatMsg.ChatID != "" {
+			if (chatMsg.Status == "received" || chatMsg.Status == "delivered") && chatMsg.MessageID != "" && chatMsg.ChatID != "" {
 				// Purge message from DynamoDB since it has been successfully received
 				err := deleteMessageFromDynamoDB(chatMsg.ChatID, chatMsg.MessageID, c.UserID)
 				if err != nil {
 					log.Printf("Error deleting message from DynamoDB on status update: %v", err)
 				} else {
-					log.Printf("Message %s in chat %s received and deleted from DynamoDB.", chatMsg.MessageID, chatMsg.ChatID)
+					log.Printf("Message %s in chat %s received/delivered and deleted from DynamoDB.", chatMsg.MessageID, chatMsg.ChatID)
 				}
 			}
 
-			// Forward status update (received, seen, etc.) to the sender if they are online
-			if (chatMsg.Status == "received" || chatMsg.Status == "seen") && chatMsg.RecipientID != "" {
+			// Forward status update (delivered, received, read, seen) to the sender if they are online
+			if (chatMsg.Status == "received" || chatMsg.Status == "delivered" || chatMsg.Status == "seen" || chatMsg.Status == "read") && chatMsg.RecipientID != "" {
 				chatMsg.SenderID = c.UserID // Add status sender's ID so recipient knows who read/received it
 				statusPayload, _ := json.Marshal(chatMsg)
 				hub.mutex.RLock()
@@ -354,9 +354,8 @@ func (c *Client) readPump() {
 
 			if online {
 				recipientClient.Send <- deliveredMsg
-			} else {
-				go sendFcmNotification(recipientID, c.UserID, chatMsg.ChatID, chatMsg.Text)
 			}
+			go sendFcmNotification(recipientID, c.UserID, chatMsg.ChatID, chatMsg.Text)
 		}
 	}
 }
