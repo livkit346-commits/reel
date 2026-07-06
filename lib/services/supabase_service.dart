@@ -40,115 +40,117 @@ class SupabaseService {
           final senderId = event['senderId'] as String?;
           final text = event['text'] as String? ?? '';
           
-          if (chatId == null || msgId == null) return;
-          final myId = currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
-          
-          if (senderId != null && senderId != myId) {
-            // 1. Persist message locally into chat file
-            final directory = await getApplicationDocumentsDirectory();
-            final file = File('${directory.path}/chats/${chatId}_messages.json');
-            List<Map<String, dynamic>> localMessages = [];
-            if (await file.exists()) {
-              try {
-                final content = await file.readAsString();
-                final List<dynamic> decoded = jsonDecode(content);
-                localMessages = decoded.map((m) => Map<String, dynamic>.from(m)).toList();
-              } catch (_) {}
-            }
-
-            final exists = localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
-            if (!exists) {
-              final localMsg = {
-                'id': msgId,
-                'messageId': msgId,
-                'chatId': chatId,
-                'senderId': senderId,
-                'text': text,
-                'mediaUrl': event['mediaUrl'],
-                'mediaType': event['mediaType'],
-                'createdAt': event['createdAt'] ?? DateTime.now().toIso8601String(),
-                'received': true,
-                'status': 'delivered',
-              };
-              localMessages.add(localMsg);
-              localMessages.sort((a, b) {
-                final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
-                final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
-                return timeA.compareTo(timeB);
-              });
-
-              final dir = Directory('${directory.path}/chats');
-              if (!await dir.exists()) await dir.create(recursive: true);
-              await file.writeAsString(jsonEncode(localMessages));
-            }
-
-            // 2. Send 'delivered' status update back to sender online
-            WebSocketService().sendStatusUpdate(
-              chatId: chatId,
-              messageId: msgId,
-              recipientId: senderId,
-              status: 'delivered',
-            );
-
-            // 3. If currently in this active chat, send 'read' receipt immediately
-            if (activeChatId == chatId) {
-              WebSocketService().sendStatusUpdate(
-                chatId: chatId,
-                messageId: msgId,
-                recipientId: senderId,
-                status: 'read',
-              );
-            } else {
-              // Show in-app heads-up notification banner if user is elsewhere in the app
-              String senderName = 'New Message';
-              try {
-                final profile = await getUserProfile(senderId);
-                if (profile != null && profile['name'] != null && (profile['name'] as String).isNotEmpty) {
-                  senderName = profile['name'];
-                }
-              } catch (_) {}
-
-              final previewText = text.isNotEmpty ? text : (event['mediaUrl'] != null ? '📷 Media message' : 'New message');
-              FcmService().showHeadsUpBanner(senderName, previewText, chatId, senderId);
-            }
-          } 
-          // Handle real-time status updates (delivered, read/seen)
-          else if (type == 'status') {
-            final chatId = event['chatId'] as String?;
-            final msgId = (event['messageId'] ?? event['id']) as String?;
-            final status = (event['status'] ?? '').toString();
-
-            if (chatId != null && msgId != null && status.isNotEmpty) {
+          if (chatId != null && msgId != null) {
+            final myId = currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
+            
+            if (senderId != null && senderId != myId) {
+              // 1. Persist message locally into chat file
               final directory = await getApplicationDocumentsDirectory();
               final file = File('${directory.path}/chats/${chatId}_messages.json');
+              List<Map<String, dynamic>> localMessages = [];
               if (await file.exists()) {
                 try {
                   final content = await file.readAsString();
                   final List<dynamic> decoded = jsonDecode(content);
-                  final localMessages = decoded.map((m) => Map<String, dynamic>.from(m)).toList();
-                  
-                  bool updated = false;
-                  for (var m in localMessages) {
-                    if (m['id'] == msgId || m['messageId'] == msgId) {
-                      m['status'] = status;
-                      if (status == 'read' || status == 'seen') {
-                        m['seen'] = true;
-                        m['received'] = true;
-                      } else if (status == 'delivered' || status == 'received') {
-                        m['received'] = true;
-                      }
-                      updated = true;
-                      break;
-                    }
-                  }
+                  localMessages = decoded.map((m) => Map<String, dynamic>.from(m)).toList();
+                } catch (_) {}
+              }
 
-                  if (updated) {
-                    await file.writeAsString(jsonEncode(localMessages));
+              final exists = localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
+              if (!exists) {
+                final localMsg = {
+                  'id': msgId,
+                  'messageId': msgId,
+                  'chatId': chatId,
+                  'senderId': senderId,
+                  'text': text,
+                  'mediaUrl': event['mediaUrl'],
+                  'mediaType': event['mediaType'],
+                  'createdAt': event['createdAt'] ?? DateTime.now().toIso8601String(),
+                  'received': true,
+                  'status': 'delivered',
+                };
+                localMessages.add(localMsg);
+                localMessages.sort((a, b) {
+                  final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+                  final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+                  return timeA.compareTo(timeB);
+                });
+
+                final dir = Directory('${directory.path}/chats');
+                if (!await dir.exists()) await dir.create(recursive: true);
+                await file.writeAsString(jsonEncode(localMessages));
+              }
+
+              // 2. Send 'delivered' status update back to sender online
+              WebSocketService().sendStatusUpdate(
+                chatId: chatId,
+                messageId: msgId,
+                recipientId: senderId,
+                status: 'delivered',
+              );
+
+              // 3. If currently in this active chat, send 'read' receipt immediately
+              if (activeChatId == chatId) {
+                WebSocketService().sendStatusUpdate(
+                  chatId: chatId,
+                  messageId: msgId,
+                  recipientId: senderId,
+                  status: 'read',
+                );
+              } else {
+                // Show in-app heads-up notification banner if user is elsewhere in the app
+                String senderName = 'New Message';
+                try {
+                  final profile = await getUserProfile(senderId);
+                  if (profile != null && profile['name'] != null && (profile['name'] as String).isNotEmpty) {
+                    senderName = profile['name'];
                   }
                 } catch (_) {}
+
+                final previewText = text.isNotEmpty ? text : (event['mediaUrl'] != null ? '📷 Media message' : 'New message');
+                FcmService().showHeadsUpBanner(senderName, previewText, chatId, senderId);
               }
             }
           }
+        } 
+        // Handle real-time status updates (delivered, read/seen)
+        else if (type == 'status') {
+          final chatId = event['chatId'] as String?;
+          final msgId = (event['messageId'] ?? event['id']) as String?;
+          final status = (event['status'] ?? '').toString();
+
+          if (chatId != null && msgId != null && status.isNotEmpty) {
+            final directory = await getApplicationDocumentsDirectory();
+            final file = File('${directory.path}/chats/${chatId}_messages.json');
+            if (await file.exists()) {
+              try {
+                final content = await file.readAsString();
+                final List<dynamic> decoded = jsonDecode(content);
+                final localMessages = decoded.map((m) => Map<String, dynamic>.from(m)).toList();
+                
+                bool updated = false;
+                for (var m in localMessages) {
+                  if (m['id'] == msgId || m['messageId'] == msgId) {
+                    m['status'] = status;
+                    if (status == 'read' || status == 'seen') {
+                      m['seen'] = true;
+                      m['received'] = true;
+                    } else if (status == 'delivered' || status == 'received') {
+                      m['received'] = true;
+                    }
+                    updated = true;
+                    break;
+                  }
+                }
+
+                if (updated) {
+                  await file.writeAsString(jsonEncode(localMessages));
+                }
+              } catch (_) {}
+            }
+          }
+        }
       } catch (e) {
         debugPrint('Error handling global WebSocket message: $e');
       }
