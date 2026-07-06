@@ -108,7 +108,7 @@ class _ForwardMessagePageState extends State<ForwardMessagePage> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.grey[950],
+        backgroundColor: const Color(0xFF121212),
         title: const Text('Forward to...', style: TextStyle(color: Colors.white)),
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white),

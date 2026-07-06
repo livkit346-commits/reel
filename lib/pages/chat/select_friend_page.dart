@@ -76,7 +76,7 @@ class _SelectFriendPageState extends State<SelectFriendPage> {
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            backgroundColor: Colors.grey[950],
+            backgroundColor: const Color(0xFF121212),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: const Text('Mutual Friends Only', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             content: Text(

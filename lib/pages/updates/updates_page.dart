@@ -238,7 +238,7 @@ class _UpdatesPageState extends State<UpdatesPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[950],
+        backgroundColor: const Color(0xFF121212),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Create New Channel', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         content: TextField(

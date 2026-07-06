@@ -248,7 +248,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
         showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            backgroundColor: Colors.grey[950],
+            backgroundColor: const Color(0xFF121212),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: const Text('Mutual Friends Only', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
             content: Text(
@@ -370,7 +370,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
   void _showSettingsBottomSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[950],
+      backgroundColor: const Color(0xFF121212),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -436,7 +436,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[950],
+        backgroundColor: const Color(0xFF121212),
         title: const Text('Privacy Settings', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         content: const Text(
           'Your chats are fully protected with secure end-to-end receipt purging. Messages are instantly deleted from our server the exact second your contact receives them.',
@@ -524,7 +524,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                                     : Container(
                                         height: 140,
                                         width: double.infinity,
-                                        color: isDark ? Colors.grey[950] : Colors.grey[300],
+                                        color: isDark ? const Color(0xFF121212) : Colors.grey[300],
                                       ),
                                 if (_uploadingCover)
                                   Positioned.fill(

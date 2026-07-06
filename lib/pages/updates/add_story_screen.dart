@@ -79,7 +79,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[950],
+        backgroundColor: const Color(0xFF121212),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text(
           'Permission Required',
@@ -239,7 +239,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   void _showAlbumSelectionSheet() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[950],
+      backgroundColor: const Color(0xFF121212),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -403,7 +403,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   void _openCameraPicker() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[950],
+      backgroundColor: const Color(0xFF121212),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -453,7 +453,7 @@ class _AddStoryScreenState extends State<AddStoryScreen> with SingleTickerProvid
   void _openSystemGalleryPicker() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[950],
+      backgroundColor: const Color(0xFF121212),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),

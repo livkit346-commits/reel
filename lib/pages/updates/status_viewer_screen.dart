@@ -305,7 +305,7 @@ class _StatusViewerPageState extends State<StatusViewerPage> with SingleTickerPr
   void _showViewersBottomSheet() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[950],
+      backgroundColor: const Color(0xFF121212),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),

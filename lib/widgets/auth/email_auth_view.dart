@@ -351,7 +351,7 @@ class _ForgotPasswordSheetState extends State<ForgotPasswordSheet> {
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).primaryColor;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final sheetBgColor = isDark ? Colors.grey[950]! : Colors.white;
+    final sheetBgColor = isDark ? const Color(0xFF121212) : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black87;
     final subtextColor = isDark ? Colors.white.withOpacity(0.6) : Colors.black54;
     final iconColor = isDark ? Colors.white38 : Colors.black45;

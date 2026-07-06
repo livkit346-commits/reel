@@ -1501,7 +1501,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[950],
+        backgroundColor: const Color(0xFF121212),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Report User', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         content: Column(
@@ -1573,7 +1573,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   void _showCameraOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[950],
+      backgroundColor: const Color(0xFF121212),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -1879,7 +1879,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[950],
+        backgroundColor: const Color(0xFF121212),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Leave Group', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         content: Text('Are you sure you want to leave "${widget.otherUserName}"?', style: const TextStyle(color: Colors.white70)),
@@ -3190,7 +3190,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.grey[950],
+      backgroundColor: const Color(0xFF121212),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),

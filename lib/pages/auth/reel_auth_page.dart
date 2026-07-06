@@ -277,7 +277,7 @@ class _OtpVerificationSheetState extends State<OtpVerificationSheet> {
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).primaryColor;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final sheetBgColor = isDark ? Colors.grey[950]! : Colors.white;
+    final sheetBgColor = isDark ? const Color(0xFF121212) : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black87;
     final subtextColor = isDark ? Colors.white.withOpacity(0.5) : Colors.black54;
     final iconColor = isDark ? Colors.white54 : Colors.black45;

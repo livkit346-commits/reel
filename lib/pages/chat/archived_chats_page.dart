@@ -291,7 +291,7 @@ class _ArchivedChatsPageState extends State<ArchivedChatsPage> {
                               const SizedBox(width: 4),
                               PopupMenuButton<String>(
                                 icon: const Icon(Icons.more_vert, color: Colors.white38, size: 20),
-                                color: Colors.grey[950],
+                                color: const Color(0xFF121212),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16),
                                   side: const BorderSide(color: Colors.white10),

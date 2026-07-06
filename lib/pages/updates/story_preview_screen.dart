@@ -94,7 +94,7 @@ class _StoryPreviewScreenState extends State<StoryPreviewScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[950],
+        backgroundColor: const Color(0xFF121212),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Add Text Overlay', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         content: TextField(

@@ -197,7 +197,7 @@ class _CreateGroupPageState extends State<CreateGroupPage> {
                           ),
                           child: CircleAvatar(
                             radius: 54,
-                            backgroundColor: Colors.grey[950],
+                            backgroundColor: const Color(0xFF121212),
                             backgroundImage: _groupIconFile != null ? FileImage(_groupIconFile!) : null,
                             child: _groupIconFile == null
                                 ? Icon(Icons.group, size: 48, color: Colors.indigoAccent.shade100)

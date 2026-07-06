@@ -505,7 +505,7 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                                 final confirm = await showDialog<bool>(
                                   context: context,
                                   builder: (context) => AlertDialog(
-                                    backgroundColor: Colors.grey[950],
+                                    backgroundColor: const Color(0xFF121212),
                                     title: const Text('Delete Comment', style: TextStyle(color: Colors.white)),
                                     content: const Text('Are you sure you want to delete this comment?', style: TextStyle(color: Colors.white70)),
                                     actions: [
