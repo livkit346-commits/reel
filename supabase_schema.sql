@@ -82,8 +82,10 @@ CREATE TABLE IF NOT EXISTS public.statuses (
   "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- Ensure mediaType column exists for legacy installations
+-- Ensure columns exist for legacy installations
 ALTER TABLE public.statuses ADD COLUMN IF NOT EXISTS "mediaType" TEXT DEFAULT 'image';
+ALTER TABLE public.statuses ADD COLUMN IF NOT EXISTS "text" TEXT;
+ALTER TABLE public.statuses ADD COLUMN IF NOT EXISTS "voiceUrl" TEXT;
 
 -- Enable RLS for statuses
 ALTER TABLE public.statuses ENABLE ROW LEVEL SECURITY;
