@@ -597,25 +597,22 @@ class SupabaseService {
     try {
       final participants = await client
           .from('chat_participants')
-          .select('chatId, chats(isGroup)')
+          .select('chatId')
           .eq('userId', myId);
 
       final nowStr = DateTime.now().toUtc().toIso8601String();
 
       for (final p in participants) {
-        final chat = p['chats'] as Map<String, dynamic>?;
-        if (chat != null && chat['isGroup'] == true) {
-          final chatId = p['chatId'] as String;
-          await client
-              .from('chat_participants')
-              .update({'joinedAt': nowStr})
-              .eq('chatId', chatId)
-              .eq('userId', myId);
-        }
+        final chatId = p['chatId'] as String;
+        await client
+            .from('chat_participants')
+            .update({'joinedAt': nowStr})
+            .eq('chatId', chatId)
+            .eq('userId', myId);
       }
-      debugPrint('Reset group join times on server for user $myId');
+      debugPrint('Reset all chat join times on server for user $myId');
     } catch (e) {
-      debugPrint('Error resetting group join times: $e');
+      debugPrint('Error resetting chat join times: $e');
     }
   }
 
@@ -2869,15 +2866,12 @@ class SupabaseService {
 
       final myId = currentUser?.id;
       if (myId != null) {
-        final chat = await client.from('chats').select('isGroup').eq('id', chatId).maybeSingle();
-        if (chat != null && chat['isGroup'] == true) {
-          await client
-              .from('chat_participants')
-              .update({'joinedAt': nowStr})
-              .eq('chatId', chatId)
-              .eq('userId', myId);
-          debugPrint('Updated joinedAt for group $chatId on server to $nowStr due to clear chat');
-        }
+        await client
+            .from('chat_participants')
+            .update({'joinedAt': nowStr})
+            .eq('chatId', chatId)
+            .eq('userId', myId);
+        debugPrint('Updated joinedAt for chat $chatId on server to $nowStr due to clear chat');
       }
     } catch (e) {
       debugPrint('Failed to clear chat locally: $e');
