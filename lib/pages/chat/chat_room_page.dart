@@ -647,6 +647,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
       final history = await WebSocketService().fetchHistory(widget.chatId, lastMessageId: lastMessageId);
       if (history.isNotEmpty) {
+        final clearTimestampStr = await LocalStorageService().getCachedJson('clear_timestamp_${widget.chatId}') as String?;
+        final clearTimestamp = clearTimestampStr != null ? DateTime.tryParse(clearTimestampStr) : null;
+
         setState(() {
           for (final msg in history) {
             final typedMsg = Map<String, dynamic>.from(msg);
@@ -658,6 +661,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
                   : DateTime.tryParse(typedMsg['createdAt'] ?? '');
               if (msgTime != null && msgTime.isBefore(_joinedAt!)) {
+                continue;
+              }
+            }
+
+            // Skip messages sent before clear timestamp
+            if (clearTimestamp != null) {
+              final msgTime = typedMsg['timestamp'] != null
+                  ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
+                  : DateTime.tryParse(typedMsg['createdAt'] ?? '');
+              if (msgTime != null && msgTime.isBefore(clearTimestamp)) {
                 continue;
               }
             }

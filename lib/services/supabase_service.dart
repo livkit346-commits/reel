@@ -589,6 +589,35 @@ class SupabaseService {
     }
   }
 
+  // Reset group join times for the current user to now() (e.g. on new device/session login)
+  Future<void> resetGroupJoinTimes() async {
+    final myId = currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
+    if (myId == null || myId.isEmpty) return;
+    try {
+      final participants = await client
+          .from('chat_participants')
+          .select('chatId, chats(isGroup)')
+          .eq('userId', myId);
+
+      final nowStr = DateTime.now().toUtc().toIso8601String();
+
+      for (final p in participants) {
+        final chat = p['chats'] as Map<String, dynamic>?;
+        if (chat != null && chat['isGroup'] == true) {
+          final chatId = p['chatId'] as String;
+          await client
+              .from('chat_participants')
+              .update({'joinedAt': nowStr})
+              .eq('chatId', chatId)
+              .eq('userId', myId);
+        }
+      }
+      debugPrint('Reset group join times on server for user $myId');
+    } catch (e) {
+      debugPrint('Error resetting group join times: $e');
+    }
+  }
+
   // Auth: Get Current User
   User? get currentUser {
     final user = client.auth.currentUser;
@@ -2835,6 +2864,19 @@ class SupabaseService {
       
       final nowStr = DateTime.now().toUtc().toIso8601String();
       await LocalStorageService().cacheJson('clear_timestamp_$chatId', nowStr);
+
+      final myId = currentUser?.id;
+      if (myId != null) {
+        final chat = await client.from('chats').select('isGroup').eq('id', chatId).maybeSingle();
+        if (chat != null && chat['isGroup'] == true) {
+          await client
+              .from('chat_participants')
+              .update({'joinedAt': nowStr})
+              .eq('chatId', chatId)
+              .eq('userId', myId);
+          debugPrint('Updated joinedAt for group $chatId on server to $nowStr due to clear chat');
+        }
+      }
     } catch (e) {
       debugPrint('Failed to clear chat locally: $e');
     }
