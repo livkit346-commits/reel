@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:reel/pages/chat/chat_room_page.dart';
 import 'package:reel/services/fcm_service.dart';
+import 'package:crypto/crypto.dart';
 
 class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
@@ -2578,7 +2579,7 @@ class SupabaseService {
   }
 
   // Comments: Add comment
-  Future<void> addComment(String postId, String text, {String? parentId, String? replyToUserName}) async {
+  Future<Map<String, dynamic>> addComment(String postId, String text, {String? parentId, String? replyToUserName}) async {
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
     try {
@@ -2597,7 +2598,8 @@ class SupabaseService {
       if (replyToUserName != null) {
         insertData['replyToUserName'] = replyToUserName;
       }
-      await client.from('comments').insert(insertData);
+      final response = await client.from('comments').insert(insertData).select().single();
+      return response;
     } catch (e) {
       rethrow;
     }
@@ -2902,5 +2904,132 @@ class SupabaseService {
     }
 
     await addGroupParticipant(chatId, myId);
+  }
+
+  // Get custom stickers for current user from database
+  Future<List<String>> getCustomStickers() async {
+    final myId = currentUser?.id;
+    if (myId == null) return [];
+
+    try {
+      final response = await client
+          .from('user_stickers')
+          .select('stickers(url)')
+          .eq('userId', myId);
+
+      final List<String> list = [];
+      for (final item in response) {
+        final sticker = item['stickers'] as Map<String, dynamic>?;
+        if (sticker != null && sticker['url'] != null) {
+          list.add(sticker['url'] as String);
+        }
+      }
+      // Cache locally
+      await LocalStorageService().cacheJson('custom_stickers_$myId', list);
+      return list;
+    } catch (e) {
+      debugPrint('Error getting custom stickers from server: $e');
+      // Offline fallback
+      final cached = await LocalStorageService().getCachedJson('custom_stickers_$myId');
+      if (cached != null && cached is List) {
+        return cached.cast<String>();
+      }
+      return [];
+    }
+  }
+
+  // Upload/Add custom sticker with SHA-256 deduplication
+  Future<String> addCustomSticker(File file) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    // 1. Calculate SHA-256 hash of the file
+    final bytes = await file.readAsBytes();
+    final hash = sha256.convert(bytes).toString();
+
+    // 2. Check if sticker with this hash already exists on the server
+    final existing = await client.from('stickers').select().eq('sha256', hash).maybeSingle();
+    String url;
+    String stickerId;
+
+    if (existing != null) {
+      url = existing['url'] as String;
+      stickerId = existing['id'] as String;
+      debugPrint('Sticker already exists on server, reusing url: $url');
+    } else {
+      // 3. Upload to R2 (with Supabase fallback)
+      url = await uploadToR2(file);
+      // Insert into stickers table
+      final newSticker = await client.from('stickers').insert({
+        'sha256': hash,
+        'url': url,
+      }).select('id').single();
+      stickerId = newSticker['id'] as String;
+      debugPrint('Sticker uploaded and saved as new entry: $url');
+    }
+
+    // 4. Associate user with this sticker in user_stickers junction table
+    final association = await client
+        .from('user_stickers')
+        .select()
+        .eq('userId', myId)
+        .eq('stickerId', stickerId)
+        .maybeSingle();
+
+    if (association == null) {
+      await client.from('user_stickers').insert({
+        'userId': myId,
+        'stickerId': stickerId,
+      });
+      debugPrint('Associated user $myId with sticker $stickerId');
+    }
+
+    // Sync local cache
+    await getCustomStickers();
+
+    return url;
+  }
+
+  // Delete sticker association, and delete file if no references remain
+  Future<void> removeCustomSticker(String url) async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+
+    try {
+      // 1. Find sticker ID
+      final sticker = await client.from('stickers').select().eq('url', url).maybeSingle();
+      if (sticker == null) return;
+
+      final stickerId = sticker['id'] as String;
+
+      // 2. Remove user association
+      await client.from('user_stickers').delete().eq('userId', myId).eq('stickerId', stickerId);
+      debugPrint('Removed association for user $myId and sticker $stickerId');
+
+      // 3. Check if any other users reference this sticker
+      final refs = await client.from('user_stickers').select('userId').eq('stickerId', stickerId);
+      if (refs.isEmpty) {
+        // No more references, delete sticker from DB
+        await client.from('stickers').delete().eq('id', stickerId);
+        debugPrint('Sticker $stickerId has 0 references, deleting from DB');
+
+        // Delete physical file from storage if it is in Supabase storage
+        if (url.contains('storage/v1/object/public/media/')) {
+          final parts = url.split('storage/v1/object/public/media/');
+          if (parts.length > 1) {
+            final storagePath = parts[1];
+            try {
+              await client.storage.from('media').remove([storagePath]);
+              debugPrint('Deleted sticker file from Supabase storage: $storagePath');
+            } catch (_) {}
+          }
+        }
+      }
+
+      // Sync local cache
+      await getCustomStickers();
+    } catch (e) {
+      debugPrint('Error removing custom sticker: $e');
+    }
   }
 }

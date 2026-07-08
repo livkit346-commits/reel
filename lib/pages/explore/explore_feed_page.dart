@@ -423,6 +423,8 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     Map<String, dynamic>? replyTarget; // {'parentId': String, 'userName': String}
     final Map<String, bool> expandedReplies = {};
     bool isStickerPickerActive = false;
+    List<dynamic>? localCommentsList;
+    bool loadingComments = true;
 
     showModalBottomSheet(
       context: context,
@@ -434,6 +436,15 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
+            if (localCommentsList == null && loadingComments) {
+              context.read<SupabaseService>().getComments(widget.post['id']).then((comments) {
+                setSheetState(() {
+                  localCommentsList = List.from(comments);
+                  loadingComments = false;
+                });
+              });
+            }
+
             Widget buildCommentItem(Map<String, dynamic> comment, {required bool isReply}) {
               final cId = (comment['id'] ?? '').toString();
               final cUser = comment['userName'] ?? 'User';
@@ -522,11 +533,12 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                                 );
                                 if (confirm == true) {
                                   await context.read<SupabaseService>().deleteComment(cId);
-                                  setSheetState(() {});
-                                  _loadCommentsCount();
-                                  if (widget.onPostUpdated != null) {
-                                    widget.onPostUpdated!();
-                                  }
+                                  setSheetState(() {
+                                    localCommentsList?.removeWhere((c) => (c['id'] ?? '').toString() == cId);
+                                  });
+                                  setState(() {
+                                    _commentsCount = (_commentsCount - 1).clamp(0, 999999);
+                                  });
                                 }
                               },
                             ),
@@ -693,95 +705,91 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                     ),
                     const SizedBox(height: 12),
                     Expanded(
-                      child: FutureBuilder<List<dynamic>>(
-                        future: context.read<SupabaseService>().getComments(widget.post['id']),
-                        builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return const Center(child: CircularProgressIndicator());
-                          }
-                          final allComments = snapshot.data ?? [];
-                          if (allComments.isEmpty) {
-                            return const Center(
-                              child: Text(
-                                'Be the first to reply!',
-                                style: TextStyle(color: Colors.white30, fontSize: 14),
-                              ),
-                            );
-                          }
+                      child: loadingComments
+                          ? const Center(child: CircularProgressIndicator())
+                          : (() {
+                              final allComments = localCommentsList ?? [];
+                              if (allComments.isEmpty) {
+                                return const Center(
+                                  child: Text(
+                                    'Be the first to reply!',
+                                    style: TextStyle(color: Colors.white30, fontSize: 14),
+                                  ),
+                                );
+                              }
 
-                          // Group comments: parents and child replies
-                          final parentComments = allComments
-                              .where((c) => c['parentId'] == null && c['parentid'] == null)
-                              .toList();
-                          final childReplies = <String, List<dynamic>>{};
-                          for (var c in allComments) {
-                            final parentIdVal = c['parentId'] ?? c['parentid'];
-                            if (parentIdVal != null) {
-                              final pIdStr = parentIdVal.toString();
-                              childReplies.putIfAbsent(pIdStr, () => []).add(c);
-                            }
-                          }
+                              // Group comments: parents and child replies
+                              final parentComments = allComments
+                                  .where((c) => c['parentId'] == null && c['parentid'] == null)
+                                  .toList();
+                              final childReplies = <String, List<dynamic>>{};
+                              for (var c in allComments) {
+                                final parentIdVal = c['parentId'] ?? c['parentid'];
+                                if (parentIdVal != null) {
+                                  final pIdStr = parentIdVal.toString();
+                                  childReplies.putIfAbsent(pIdStr, () => []).add(c);
+                                }
+                              }
 
-                          return ListView.builder(
-                            itemCount: parentComments.length,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            itemBuilder: (context, idx) {
-                              final parent = parentComments[idx];
-                              final pId = (parent['id'] ?? '').toString();
-                              final replies = childReplies[pId] ?? [];
-                              final isExpanded = expandedReplies[pId] ?? false;
+                              return ListView.builder(
+                                itemCount: parentComments.length,
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                itemBuilder: (context, idx) {
+                                  final parent = parentComments[idx];
+                                  final pId = (parent['id'] ?? '').toString();
+                                  final replies = childReplies[pId] ?? [];
+                                  final isExpanded = expandedReplies[pId] ?? false;
 
-                              return Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  buildCommentItem(parent, isReply: false),
-                                  if (replies.isNotEmpty) ...[
-                                    Padding(
-                                      padding: const EdgeInsets.only(left: 58.0, bottom: 4.0),
-                                      child: GestureDetector(
-                                        onTap: () {
-                                          setSheetState(() {
-                                            expandedReplies[pId] = !isExpanded;
-                                          });
-                                        },
-                                        child: Row(
-                                          children: [
-                                            Container(
-                                              width: 24,
-                                              height: 1,
-                                              color: Colors.white24,
+                                  return Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      buildCommentItem(parent, isReply: false),
+                                      if (replies.isNotEmpty) ...[
+                                        Padding(
+                                          padding: const EdgeInsets.only(left: 58.0, bottom: 4.0),
+                                          child: GestureDetector(
+                                            onTap: () {
+                                              setSheetState(() {
+                                                expandedReplies[pId] = !isExpanded;
+                                              });
+                                            },
+                                            child: Row(
+                                              children: [
+                                                Container(
+                                                  width: 24,
+                                                  height: 1,
+                                                  color: Colors.white24,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  isExpanded
+                                                      ? 'Hide replies'
+                                                      : 'View replies (${replies.length})',
+                                                  style: const TextStyle(
+                                                    color: Colors.white54,
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                            const SizedBox(width: 8),
-                                            Text(
-                                              isExpanded
-                                                  ? 'Hide replies'
-                                                  : 'View replies (${replies.length})',
-                                              style: const TextStyle(
-                                                color: Colors.white54,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                              ),
+                                          ),
+                                        ),
+                                        if (isExpanded)
+                                          Padding(
+                                            padding: const EdgeInsets.only(left: 40.0),
+                                            child: Column(
+                                              children: replies
+                                                  .map((r) => buildCommentItem(r, isReply: true))
+                                                  .toList(),
                                             ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    if (isExpanded)
-                                      Padding(
-                                        padding: const EdgeInsets.only(left: 40.0),
-                                        child: Column(
-                                          children: replies
-                                              .map((r) => buildCommentItem(r, isReply: true))
-                                              .toList(),
-                                        ),
-                                      ),
-                                  ],
-                                ],
+                                          ),
+                                      ],
+                                    ],
+                                  );
+                                },
                               );
-                            },
-                          );
-                        },
-                      ),
+                            }()),
                     ),
                     if (replyTarget != null)
                       Container(
@@ -855,19 +863,33 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                             onPressed: () async {
                               final text = textController.text.trim();
                               if (text.isEmpty) return;
-                              await context.read<SupabaseService>().addComment(
-                                widget.post['id'],
-                                text,
-                                parentId: replyTarget?['parentId'],
-                                replyToUserName: replyTarget?['userName'],
-                              );
+                              
+                              final targetParentId = replyTarget?['parentId'];
+                              final targetReplyToUserName = replyTarget?['userName'];
+                              
                               textController.clear();
                               setSheetState(() {
                                 replyTarget = null;
                               });
-                              _loadCommentsCount();
-                              if (widget.onPostUpdated != null) {
-                                widget.onPostUpdated!();
+
+                              try {
+                                final newComment = await context.read<SupabaseService>().addComment(
+                                  widget.post['id'],
+                                  text,
+                                  parentId: targetParentId,
+                                  replyToUserName: targetReplyToUserName,
+                                );
+
+                                setSheetState(() {
+                                  localCommentsList ??= [];
+                                  localCommentsList!.add(newComment);
+                                });
+
+                                setState(() {
+                                  _commentsCount++;
+                                });
+                              } catch (e) {
+                                debugPrint('Failed to add comment: $e');
                               }
                             },
                           ),
@@ -878,19 +900,32 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                       StickerPicker(
                         onStickerSelected: (url) async {
                           final stickerTag = '[STICKER:$url]';
-                          await context.read<SupabaseService>().addComment(
-                            widget.post['id'],
-                            stickerTag,
-                            parentId: replyTarget?['parentId'],
-                            replyToUserName: replyTarget?['userName'],
-                          );
+                          final targetParentId = replyTarget?['parentId'];
+                          final targetReplyToUserName = replyTarget?['userName'];
+                          
                           setSheetState(() {
-                            isStickerPickerActive = false;
                             replyTarget = null;
+                            // Keep isStickerPickerActive true so user can send more stickers (TikTok style)
                           });
-                          _loadCommentsCount();
-                          if (widget.onPostUpdated != null) {
-                            widget.onPostUpdated!();
+
+                          try {
+                            final newComment = await context.read<SupabaseService>().addComment(
+                              widget.post['id'],
+                              stickerTag,
+                              parentId: targetParentId,
+                              replyToUserName: targetReplyToUserName,
+                            );
+
+                            setSheetState(() {
+                              localCommentsList ??= [];
+                              localCommentsList!.add(newComment);
+                            });
+
+                            setState(() {
+                              _commentsCount++;
+                            });
+                          } catch (e) {
+                            debugPrint('Failed to add sticker comment: $e');
                           }
                         },
                       ),

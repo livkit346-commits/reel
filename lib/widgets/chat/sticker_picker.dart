@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
-import 'package:reel/services/local_storage_service.dart';
 
 class StickerPicker extends StatefulWidget {
   final Function(String url) onStickerSelected;
@@ -52,34 +51,18 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
 
   Future<void> _loadCustomStickers() async {
     final supabase = context.read<SupabaseService>();
-    final myId = supabase.currentUser?.id;
-    if (myId == null) return;
-
     try {
-      final cached = await LocalStorageService().getCachedJson('custom_stickers_$myId');
-      if (cached != null && cached is List) {
+      final stickers = await supabase.getCustomStickers();
+      if (mounted) {
         setState(() {
-          _customStickers = cached.cast<String>();
+          _customStickers = stickers;
         });
       }
     } catch (_) {}
   }
 
-  Future<void> _saveCustomStickers() async {
-    final supabase = context.read<SupabaseService>();
-    final myId = supabase.currentUser?.id;
-    if (myId == null) return;
-
-    try {
-      await LocalStorageService().cacheJson('custom_stickers_$myId', _customStickers);
-    } catch (_) {}
-  }
-
   Future<void> _addCustomSticker() async {
     final supabase = context.read<SupabaseService>();
-    final myId = supabase.currentUser?.id;
-    if (myId == null) return;
-
     try {
       final pickedFile = await _picker.pickImage(
         source: ImageSource.gallery,
@@ -95,15 +78,14 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
 
       final file = File(pickedFile.path);
 
-      // Upload directly to Cloudflare R2
-      final url = await supabase.uploadToR2(file);
+      // Upload with server SHA-256 deduplication and association
+      final url = await supabase.addCustomSticker(file);
 
       setState(() {
+        _customStickers.remove(url); // avoid duplicates in list
         _customStickers.insert(0, url);
         _isUploading = false;
       });
-
-      await _saveCustomStickers();
     } catch (e) {
       setState(() {
         _isUploading = false;
@@ -135,7 +117,8 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
               setState(() {
                 _customStickers.remove(url);
               });
-              await _saveCustomStickers();
+              final supabase = context.read<SupabaseService>();
+              await supabase.removeCustomSticker(url);
             },
             child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
           ),

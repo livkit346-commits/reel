@@ -3290,7 +3290,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
 
     setState(() {
       _localMessages.add(tempMsg);
-      _isStickerPickerActive = false;
+      // Keep sticker picker open (TikTok/WhatsApp style)
     });
     await _saveLocalMessages();
     _scrollToBottom();

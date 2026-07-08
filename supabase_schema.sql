@@ -392,3 +392,41 @@ AFTER DELETE ON auth.users
 FOR EACH ROW
 EXECUTE FUNCTION public.handle_deleted_user();
 
+
+-- ========================================================
+-- DEDUPLICATED CUSTOM STICKERS & REFERENCE COUNTING
+-- ========================================================
+
+-- Create stickers table for storing deduplicated custom stickers
+CREATE TABLE IF NOT EXISTS public.stickers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sha256 TEXT UNIQUE NOT NULL,
+  url TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS for stickers
+ALTER TABLE public.stickers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Stickers are viewable by everyone" ON public.stickers;
+CREATE POLICY "Stickers are viewable by everyone" ON public.stickers FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Stickers can be inserted by everyone" ON public.stickers;
+CREATE POLICY "Stickers can be inserted by everyone" ON public.stickers FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Stickers can be deleted by everyone" ON public.stickers;
+CREATE POLICY "Stickers can be deleted by everyone" ON public.stickers FOR DELETE USING (true);
+
+-- Create user_stickers junction table for reference counting
+CREATE TABLE IF NOT EXISTS public.user_stickers (
+  "userId" UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+  "stickerId" UUID REFERENCES public.stickers(id) ON DELETE CASCADE NOT NULL,
+  PRIMARY KEY ("userId", "stickerId")
+);
+
+-- Enable RLS for user_stickers
+ALTER TABLE public.user_stickers ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "User stickers are viewable by everyone" ON public.user_stickers;
+CREATE POLICY "User stickers are viewable by everyone" ON public.user_stickers FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Users can insert their own stickers" ON public.user_stickers;
+CREATE POLICY "Users can insert their own stickers" ON public.user_stickers FOR INSERT WITH CHECK (auth.uid() = "userId");
+DROP POLICY IF EXISTS "Users can delete their own stickers" ON public.user_stickers;
+CREATE POLICY "Users can delete their own stickers" ON public.user_stickers FOR DELETE USING (auth.uid() = "userId");
+
