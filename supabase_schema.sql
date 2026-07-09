@@ -345,6 +345,10 @@ DROP POLICY IF EXISTS "Comments viewable by everyone" ON public.comments;
 DROP POLICY IF EXISTS "Comments insertable by everyone" ON public.comments;
 CREATE POLICY "Comments viewable by everyone" ON public.comments FOR SELECT USING (true);
 CREATE POLICY "Comments insertable by everyone" ON public.comments FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Comments deletable by everyone" ON public.comments;
+CREATE POLICY "Comments deletable by everyone" ON public.comments FOR DELETE USING (true);
+DROP POLICY IF EXISTS "Comments updatable by everyone" ON public.comments;
+CREATE POLICY "Comments updatable by everyone" ON public.comments FOR UPDATE USING (true);
 
 -- Migration statements for existing databases:
 ALTER TABLE public.comments ADD COLUMN IF NOT EXISTS "parentId" UUID REFERENCES public.comments(id) ON DELETE CASCADE;

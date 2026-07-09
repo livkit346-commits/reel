@@ -2582,21 +2582,43 @@ class SupabaseService {
     try {
       final profile = await getUserProfile(myId);
       final userName = profile?['name'] ?? 'User';
-      final Map<String, dynamic> insertData = {
-        'postId': postId,
-        'userId': myId,
-        'userName': userName,
-        'text': text,
-        'createdAt': DateTime.now().toIso8601String(),
-      };
-      if (parentId != null) {
-        insertData['parentId'] = parentId;
+      
+      try {
+        // 1. Try camelCase format
+        final Map<String, dynamic> insertData = {
+          'postId': postId,
+          'userId': myId,
+          'userName': userName,
+          'text': text,
+          'createdAt': DateTime.now().toIso8601String(),
+        };
+        if (parentId != null) {
+          insertData['parentId'] = parentId;
+        }
+        if (replyToUserName != null) {
+          insertData['replyToUserName'] = replyToUserName;
+        }
+        final response = await client.from('comments').insert(insertData).select().single();
+        return response;
+      } catch (e1) {
+        debugPrint('Comment insert camelCase failed: $e1. Trying lowercase...');
+        // 2. Try lowercase format
+        final Map<String, dynamic> insertDataLower = {
+          'postid': postId,
+          'userid': myId,
+          'username': userName,
+          'text': text,
+          'createdat': DateTime.now().toIso8601String(),
+        };
+        if (parentId != null) {
+          insertDataLower['parentid'] = parentId;
+        }
+        if (replyToUserName != null) {
+          insertDataLower['replytousername'] = replyToUserName;
+        }
+        final response = await client.from('comments').insert(insertDataLower).select().single();
+        return response;
       }
-      if (replyToUserName != null) {
-        insertData['replyToUserName'] = replyToUserName;
-      }
-      final response = await client.from('comments').insert(insertData).select().single();
-      return response;
     } catch (e) {
       rethrow;
     }
@@ -2605,9 +2627,16 @@ class SupabaseService {
   // Comments: Get comments for post
   Future<List<dynamic>> getComments(String postId) async {
     try {
+      // 1. Try camelCase
       return await client.from('comments').select().eq('postId', postId).order('createdAt', ascending: true);
-    } catch (e) {
-      return [];
+    } catch (e1) {
+      try {
+        // 2. Try lowercase
+        return await client.from('comments').select().eq('postid', postId).order('createdat', ascending: true);
+      } catch (e2) {
+        debugPrint('Failed to get comments: $e2');
+        return [];
+      }
     }
   }
 
