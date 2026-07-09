@@ -738,15 +738,16 @@ class SupabaseService {
     if (myId == null) throw Exception('User not authenticated');
 
     try {
-      final fileName = 'avatar_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final storagePath = 'avatars/$myId/$fileName';
+      final photoUrl = await uploadToR2(imageFile);
 
-      // Upload to avatars bucket
-      await client.storage.from('media').upload(storagePath, imageFile);
-      final photoUrl = getMediaUrl('media', storagePath);
-
-      // Update users table
-      await client.from('users').update({'photoUrl': photoUrl}).eq('id', myId);
+      // Update users table (supporting camelCase and lowercase)
+      try {
+        await client.from('users').update({'photoUrl': photoUrl}).eq('id', myId);
+      } catch (_) {
+        try {
+          await client.from('users').update({'photourl': photoUrl}).eq('id', myId);
+        } catch (_) {}
+      }
       return photoUrl;
     } catch (e) {
       rethrow;
@@ -760,15 +761,16 @@ class SupabaseService {
     if (myId == null) throw Exception('User not authenticated');
 
     try {
-      final fileName = 'cover_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final storagePath = 'covers/$myId/$fileName';
+      final coverUrl = await uploadToR2(imageFile);
 
-      // Upload to media bucket
-      await client.storage.from('media').upload(storagePath, imageFile);
-      final coverUrl = getMediaUrl('media', storagePath);
-
-      // Update users table
-      await client.from('users').update({'coverUrl': coverUrl}).eq('id', myId);
+      // Update users table (supporting camelCase and lowercase)
+      try {
+        await client.from('users').update({'coverUrl': coverUrl}).eq('id', myId);
+      } catch (_) {
+        try {
+          await client.from('users').update({'coverurl': coverUrl}).eq('id', myId);
+        } catch (_) {}
+      }
       return coverUrl;
     } catch (e) {
       rethrow;
