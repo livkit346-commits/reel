@@ -133,7 +133,7 @@ class _StickerPickerState extends State<StickerPicker> with SingleTickerProvider
     final primaryColor = Theme.of(context).primaryColor;
     
     // Premium theme variables
-    final pickerBgColor = isDark ? const Color(0xFF0F0F14) : const Color(0xFFF7F7FA);
+    final pickerBgColor = isDark ? const Color(0xFF0F0F14) : Colors.white;
     final borderColor = isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06);
     final activeTabColor = isDark ? const Color(0xFF00BFFF) : primaryColor;
 

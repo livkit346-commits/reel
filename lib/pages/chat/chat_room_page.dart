@@ -1190,6 +1190,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   Widget _buildReplyComposePreview(String? myId) {
     if (_replyingToMessage == null) return const SizedBox.shrink();
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final msg = _replyingToMessage!;
     final rSenderId = msg['senderId'];
     
@@ -1232,18 +1233,18 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       contentWidget = Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(iconData, size: 14, color: Colors.white54),
+          Icon(iconData, size: 14, color: isDark ? Colors.white54 : Colors.black54),
           const SizedBox(width: 4),
           Text(
             mediaText,
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
+            style: TextStyle(color: isDark ? Colors.white70 : Colors.black87, fontSize: 12),
           ),
           if (rText != null && rText.trim().isNotEmpty) ...[
             const SizedBox(width: 6),
             Flexible(
               child: Text(
                 rText,
-                style: const TextStyle(color: Colors.white60, fontSize: 12),
+                style: TextStyle(color: isDark ? Colors.white60 : Colors.black54, fontSize: 12),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1254,7 +1255,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     } else {
       contentWidget = Text(
         rText ?? '',
-        style: const TextStyle(color: Colors.white70, fontSize: 12),
+        style: TextStyle(color: isDark ? Colors.white70 : Colors.black87, fontSize: 12),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       );
@@ -1268,13 +1269,13 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.03),
+            color: isDark ? Colors.white.withOpacity(0.03) : Colors.black.withOpacity(0.03),
             borderRadius: BorderRadius.circular(16),
             border: Border(
               left: BorderSide(color: themeColor, width: 4),
-              top: BorderSide(color: Colors.white.withOpacity(0.08)),
-              right: BorderSide(color: Colors.white.withOpacity(0.08)),
-              bottom: BorderSide(color: Colors.white.withOpacity(0.08)),
+              top: BorderSide(color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08)),
+              right: BorderSide(color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08)),
+              bottom: BorderSide(color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08)),
             ),
           ),
           child: Row(
@@ -1314,10 +1315,10 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                 child: Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.05),
+                    color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.close, color: Colors.white70, size: 16),
+                  child: Icon(Icons.close, color: isDark ? Colors.white70 : Colors.black54, size: 16),
                 ),
               ),
             ],
@@ -2859,15 +2860,15 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   _buildReplyComposePreview(myId),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  color: const Color(0xFF121212),
+                  color: isDark ? const Color(0xFF121212) : Colors.white,
                   child: !_canSendMessages
                       ? Container(
                           width: double.infinity,
                           padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: const Center(
+                          child: Center(
                             child: Text(
                               'Only admins can send messages to this group.',
-                              style: TextStyle(color: Colors.white54, fontSize: 14, fontStyle: FontStyle.italic),
+                              style: TextStyle(color: subColor, fontSize: 14, fontStyle: FontStyle.italic),
                             ),
                           ),
                         )
@@ -2879,8 +2880,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                   onTap: _togglePreviewPlay,
                                   child: Container(
                                     padding: const EdgeInsets.all(8),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.white10,
+                                    decoration: BoxDecoration(
+                                      color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
                                       shape: BoxShape.circle,
                                     ),
                                     child: Icon(
@@ -2898,7 +2899,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                       value: _previewDuration.inMilliseconds > 0
                                           ? _previewPosition.inMilliseconds / _previewDuration.inMilliseconds
                                           : 0.0,
-                                      backgroundColor: Colors.white10,
+                                      backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
                                       valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF00BFFF)),
                                       minHeight: 6,
                                     ),
@@ -2907,15 +2908,15 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                 const SizedBox(width: 12),
                                 Text(
                                   _formatDuration(_previewPosition) + ' / ' + _formatDuration(_previewDuration),
-                                  style: const TextStyle(color: Colors.white70, fontSize: 13, fontFamily: 'monospace'),
+                                  style: TextStyle(color: isDark ? Colors.white70 : Colors.black87, fontSize: 13, fontFamily: 'monospace'),
                                 ),
                                 const SizedBox(width: 12),
                                 GestureDetector(
                                   onTap: _cancelPreview,
                                   child: Container(
                                     padding: const EdgeInsets.all(8),
-                                    decoration: const BoxDecoration(
-                                      color: Colors.white10,
+                                    decoration: BoxDecoration(
+                                      color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
                                       shape: BoxShape.circle,
                                     ),
                                     child: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
@@ -2948,7 +2949,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                             const SizedBox(width: 8),
                             Text(
                               _isPaused ? 'Paused... $_recordingDurationStr' : 'Recording... $_recordingDurationStr',
-                              style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+                              style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 15, fontWeight: FontWeight.w500),
                             ),
                             const Spacer(),
                             GestureDetector(
@@ -2956,7 +2957,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                               child: Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
-                                  color: _isPaused ? Colors.yellowAccent.withValues(alpha: 0.15) : Colors.white10,
+                                  color: _isPaused ? Colors.yellowAccent.withValues(alpha: 0.15) : (isDark ? Colors.white10 : Colors.black.withOpacity(0.05)),
                                   shape: BoxShape.circle,
                                   border: Border.all(
                                     color: _isPaused ? Colors.yellowAccent : Colors.transparent,
@@ -2965,7 +2966,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                 ),
                                 child: Icon(
                                   _isPaused ? Icons.play_arrow : Icons.pause,
-                                  color: _isPaused ? Colors.yellowAccent : Colors.white70,
+                                  color: _isPaused ? Colors.yellowAccent : (isDark ? Colors.white70 : Colors.black54),
                                   size: 20,
                                 ),
                               ),
@@ -2975,8 +2976,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                               onTap: _cancelRecording,
                               child: Container(
                                 padding: const EdgeInsets.all(8),
-                                decoration: const BoxDecoration(
-                                  color: Colors.white10,
+                                decoration: BoxDecoration(
+                                  color: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(Icons.delete, color: Colors.redAccent, size: 20),
@@ -3001,9 +3002,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           children: [
                             GestureDetector(
                                onTap: _isBlocked ? null : () => _showCameraOptions(context),
-                               child: const Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 8),
-                                child: Icon(Icons.camera_alt, color: Colors.white70, size: 28),
+                               child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8),
+                                child: Icon(Icons.camera_alt, color: isDark ? Colors.white70 : Colors.black54, size: 28),
                               ),
                             ),
                             GestureDetector(
