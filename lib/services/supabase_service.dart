@@ -829,6 +829,33 @@ class SupabaseService {
   // Posts: Create post
   Future<void> createPost(String userId, String userName, String text, String? imageUrl) async {
     try {
+      // 1. Fetch AI vector embedding from Go Backend
+      List<double>? embedding;
+      try {
+        final uri = Uri.parse('$backendUrl/ai/embed');
+        final response = await http.post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'text': text}),
+        ).timeout(const Duration(seconds: 3));
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (data['embedding'] is List) {
+            embedding = List<double>.from((data['embedding'] as List).map((e) => (e as num).toDouble()));
+          }
+        }
+      } catch (embedError) {
+        debugPrint('Failed to fetch post embedding from backend: $embedError');
+      }
+
+      // Format vector array string if we have it, else null
+      String? embeddingStr;
+      if (embedding != null && embedding.isNotEmpty) {
+        embeddingStr = '[${embedding.join(',')}]';
+      }
+
+      // 2. Insert post to Supabase
       await client.from('posts').insert({
         'userId': userId,
         'userName': userName,
@@ -836,6 +863,7 @@ class SupabaseService {
         'imageUrl': imageUrl,
         'createdAt': DateTime.now().toIso8601String(),
         'likes': 0,
+        if (embeddingStr != null) 'embedding': embeddingStr,
       });
     } catch (e) {
       rethrow;
@@ -888,15 +916,96 @@ class SupabaseService {
           }
         }
       }
-      final response = await client.from('posts').select().order('createdAt', ascending: false).limit(25);
+
+      dynamic response;
+      if (myId != null) {
+        try {
+          response = await client.rpc('get_explore_feed_recommendations', params: {
+            'p_user_id': myId,
+            'p_limit': 25,
+          });
+        } catch (rpcError) {
+          debugPrint('get_explore_feed_recommendations RPC failed, falling back to standard feed: $rpcError');
+        }
+      }
+
+      if (response == null) {
+        response = await client.from('posts').select().order('createdAt', ascending: false).limit(25);
+      }
+
       await LocalStorageService().cacheJson('explore_feed', response);
-      return response;
+      return response as List<dynamic>;
     } catch (e) {
       final cached = await LocalStorageService().getCachedJson('explore_feed');
       if (cached != null && cached is List) {
         return cached;
       }
       return [];
+    }
+  }
+
+  // Posts: Report active user engagement metrics
+  Future<void> reportPostMetric({
+    required String postId,
+    int? watchedDuration,
+    bool? completed,
+    bool? skipped,
+    bool? shared,
+    bool? liked,
+    bool? commented,
+  }) async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+
+    try {
+      // 1. Log metric remotely in public.post_metrics
+      final existing = await client
+          .from('post_metrics')
+          .select()
+          .eq('postId', postId)
+          .eq('userId', myId)
+          .maybeSingle();
+
+      final payload = {
+        'postId': postId,
+        'userId': myId,
+        'updated_at': DateTime.now().toIso8601String(),
+        if (watchedDuration != null) 'watched_duration': watchedDuration,
+        if (completed != null) 'completed': completed,
+        if (skipped != null) 'skipped': skipped,
+        if (shared != null) 'shared': shared,
+        if (liked != null) 'liked': liked,
+        if (commented != null) 'commented': commented,
+      };
+
+      if (existing != null) {
+        await client
+            .from('post_metrics')
+            .update(payload)
+            .eq('postId', postId)
+            .eq('userId', myId);
+      } else {
+        await client.from('post_metrics').insert(payload);
+      }
+
+      // 2. Drift user interest vector if user liked or completed a video post
+      if (completed == true || liked == true) {
+        try {
+          final uri = Uri.parse('$backendUrl/ai/interact');
+          await http.post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'userId': myId,
+              'postId': postId,
+            }),
+          ).timeout(const Duration(seconds: 3));
+        } catch (driftError) {
+          debugPrint('Failed to drift user interest vector: $driftError');
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to report post metrics: $e');
     }
   }
 
@@ -2544,6 +2653,8 @@ class SupabaseService {
       final myId = currentUser?.id;
       if (myId != null) {
         await LocalStorageService().cacheJson('liked_posts_$myId', _likedPostIds.toList());
+        // Report like metrics in the background
+        reportPostMetric(postId: postId, liked: increment);
       }
     } catch (e) {
       rethrow;
@@ -2601,6 +2712,7 @@ class SupabaseService {
           insertData['replyToUserName'] = replyToUserName;
         }
         final response = await client.from('comments').insert(insertData).select().single();
+        reportPostMetric(postId: postId, commented: true);
         return response;
       } catch (e1) {
         debugPrint('Comment insert camelCase failed: $e1. Trying lowercase...');
@@ -2619,6 +2731,7 @@ class SupabaseService {
           insertDataLower['replytousername'] = replyToUserName;
         }
         final response = await client.from('comments').insert(insertDataLower).select().single();
+        reportPostMetric(postId: postId, commented: true);
         return response;
       }
     } catch (e) {
@@ -2646,6 +2759,7 @@ class SupabaseService {
   Future<void> repostPost(String postId, int currentReposts) async {
     try {
       await client.from('posts').update({'reposts': currentReposts + 1}).eq('id', postId);
+      reportPostMetric(postId: postId, shared: true);
     } catch (e) {
       rethrow;
     }

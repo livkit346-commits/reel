@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"google.golang.org/api/option"
+	"math"
 	"math/rand"
 	"regexp"
 )
@@ -150,6 +151,8 @@ func main() {
 	http.HandleFunc("/auth/login", handleLogin)
 	http.HandleFunc("/auth/refresh", handleRefresh)
 	http.HandleFunc("/auth/logout", handleLogout)
+	http.HandleFunc("/ai/embed", handleGenerateEmbedding)
+	http.HandleFunc("/ai/interact", handlePostInteraction)
 
 	log.Printf("Reel messaging gateway listening on port %s...", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
@@ -1551,5 +1554,264 @@ func syncUserToSupabase(userID, name, email string) error {
 	}
 
 	log.Printf("Successfully synced user %s to Supabase.", userID)
+
+	// Initialize user interest vector
+	if errInit := initializeUserInterestsInSupabase(userID); errInit != nil {
+		log.Printf("Warning: Failed to initialize user interests in Supabase: %v", errInit)
+	}
+
 	return nil
+}
+
+// initializeUserInterestsInSupabase sets a random 384-dimensional unit vector in Supabase
+func initializeUserInterestsInSupabase(userID string) error {
+	if supabaseUrl == "" || supabaseKey == "" {
+		return nil
+	}
+
+	vector := generateRandomUnitVector(384)
+	
+	vectorStr := "["
+	for i, val := range vector {
+		if i > 0 {
+			vectorStr += ","
+		}
+		vectorStr += fmt.Sprintf("%f", val)
+	}
+	vectorStr += "]"
+
+	payload := map[string]interface{}{
+		"userId":          userID,
+		"interest_vector": vectorStr,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", supabaseUrl+"/rest/v1/user_interests", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("apikey", supabaseKey)
+	req.Header.Set("Authorization", "Bearer "+supabaseKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Prefer", "resolution=merge-duplicates") // UPSERT equivalent
+
+	clientHttp := &http.Client{Timeout: 10 * time.Second}
+	resp, err := clientHttp.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("supabase user_interests init error (HTTP %d): %s", resp.StatusCode, string(body))
+	}
+
+	log.Printf("Successfully initialized user interest vector for %s in Supabase.", userID)
+	return nil
+}
+
+// handleGenerateEmbedding handles AI text vectorization HTTP request
+func handleGenerateEmbedding(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var req struct {
+		Text string `json:"text"`
+	}
+
+	if r.Method == "POST" {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+	} else {
+		req.Text = r.URL.Query().Get("text")
+	}
+
+	embedding, err := GenerateEmbedding(req.Text)
+	if err != nil {
+		log.Printf("Embedding generation error: %v", err)
+		http.Error(w, "Failed to generate embedding", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"embedding": embedding,
+		"status":    "success",
+	})
+}
+
+// Helper to make generic HTTP requests to Supabase REST endpoints
+func makeSupabaseRequest(method, path string, body []byte) ([]byte, int, error) {
+	req, err := http.NewRequest(method, supabaseUrl+path, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("apikey", supabaseKey)
+	req.Header.Set("Authorization", "Bearer "+supabaseKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	clientHttp := &http.Client{Timeout: 5 * time.Second}
+	resp, err := clientHttp.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	return respBody, resp.StatusCode, err
+}
+
+// Parses pgvector output format "[0.12,0.34,...]" into a float slice
+func parseVectorString(vecStr string) ([]float32, error) {
+	clean := strings.Trim(vecStr, "[]")
+	parts := strings.Split(clean, ",")
+	
+	result := make([]float32, len(parts))
+	for i, p := range parts {
+		var val float32
+		_, err := fmt.Sscanf(strings.TrimSpace(p), "%f", &val)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse float element: %v", err)
+		}
+		result[i] = val
+	}
+	return result, nil
+}
+
+// Drifts user interest vector slightly closer to interactive post embedding vector
+func updateUserInterest(userID, postID string) error {
+	if supabaseUrl == "" || supabaseKey == "" {
+		return nil
+	}
+
+	// 1. Fetch User Interest Vector
+	respBody, status, err := makeSupabaseRequest("GET", "/rest/v1/user_interests?userId=eq."+userID+"&select=interest_vector", nil)
+	if err != nil || status != 200 {
+		return fmt.Errorf("failed to fetch user interest (status %d): %v", status, err)
+	}
+
+	var userIntData []struct {
+		InterestVector string `json:"interest_vector"`
+	}
+	if err := json.Unmarshal(respBody, &userIntData); err != nil || len(userIntData) == 0 {
+		return fmt.Errorf("user interest not found or unmarshal error: %v", err)
+	}
+
+	// 2. Fetch Post Embedding Vector
+	respBodyPost, statusPost, err := makeSupabaseRequest("GET", "/rest/v1/posts?id=eq."+postID+"&select=embedding", nil)
+	if err != nil || statusPost != 200 {
+		return fmt.Errorf("failed to fetch post embedding (status %d): %v", statusPost, err)
+	}
+
+	var postData []struct {
+		Embedding string `json:"embedding"`
+	}
+	if err := json.Unmarshal(respBodyPost, &postData); err != nil || len(postData) == 0 || postData[0].Embedding == "" {
+		return nil // post has no embedding, ignore
+	}
+
+	// 3. Parse vectors
+	uVec, err := parseVectorString(userIntData[0].InterestVector)
+	if err != nil {
+		return err
+	}
+	pVec, err := parseVectorString(postData[0].Embedding)
+	if err != nil {
+		return err
+	}
+
+	if len(uVec) != 384 || len(pVec) != 384 {
+		return fmt.Errorf("vector dimensions mismatch (user: %d, post: %d)", len(uVec), len(pVec))
+	}
+
+	// 4. Update vector: (1 - alpha) * uVec + alpha * pVec
+	alpha := 0.15
+	newVec := make([]float32, 384)
+	var sumSquares float64
+	for i := 0; i < 384; i++ {
+		newVec[i] = float32((1.0-alpha)*float64(uVec[i]) + alpha*float64(pVec[i]))
+		sumSquares += float64(newVec[i] * newVec[i])
+	}
+
+	// Normalize vector to unit length
+	magnitude := math.Sqrt(sumSquares)
+	if magnitude > 0 {
+		for i := 0; i < 384; i++ {
+			newVec[i] = float32(float64(newVec[i]) / magnitude)
+		}
+	}
+
+	// 5. Update user_interests table in Supabase
+	newVecStr := "["
+	for i, val := range newVec {
+		if i > 0 {
+			newVecStr += ","
+		}
+		newVecStr += fmt.Sprintf("%f", val)
+	}
+	newVecStr += "]"
+
+	payload := map[string]interface{}{
+		"interest_vector": newVecStr,
+		"updated_at":      time.Now().Format(time.RFC3339),
+	}
+	payloadBytes, _ := json.Marshal(payload)
+
+	_, statusUpdate, err := makeSupabaseRequest("PATCH", "/rest/v1/user_interests?userId=eq."+userID, payloadBytes)
+	if err != nil || statusUpdate >= 300 {
+		return fmt.Errorf("failed to update user_interests (status %d): %v", statusUpdate, err)
+	}
+
+	log.Printf("Successfully updated user %s interest vector based on interaction with post %s.", userID, postID)
+	return nil
+}
+
+// handlePostInteraction processes user post interaction logs
+func handlePostInteraction(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var req struct {
+		UserID string `json:"userId"`
+		PostID string `json:"postId"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" || req.PostID == "" {
+		http.Error(w, "UserID and PostID are required", http.StatusBadRequest)
+		return
+	}
+
+	go func() {
+		err := updateUserInterest(req.UserID, req.PostID)
+		if err != nil {
+			log.Printf("Failed to update user interest vector: %v", err)
+		}
+	}()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }

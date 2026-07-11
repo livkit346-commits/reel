@@ -246,10 +246,14 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
 
   Map<String, dynamic>? _quotedPost;
   bool _loadingQuotedPost = false;
+  
+  // Tracking telemetry
+  late DateTime _viewStartTime;
 
   @override
   void initState() {
     super.initState();
+    _viewStartTime = DateTime.now();
     _likesCount = (widget.post['likes'] as num?)?.toInt() ?? 0;
     _repostsCount = (widget.post['reposts'] as num?)?.toInt() ?? 0;
     final supabase = context.read<SupabaseService>();
@@ -257,6 +261,24 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     _isSaved = supabase.savedPostIds.contains(widget.post['id']);
     _loadCommentsCount();
     _loadQuotedPost();
+  }
+
+  @override
+  void dispose() {
+    final duration = DateTime.now().difference(_viewStartTime).inSeconds;
+    if (duration > 0) {
+      final completed = duration >= 8;
+      final skipped = duration < 2;
+      
+      // Report watch metrics in the background
+      context.read<SupabaseService>().reportPostMetric(
+        postId: widget.post['id'],
+        watchedDuration: duration,
+        completed: completed,
+        skipped: skipped,
+      );
+    }
+    super.dispose();
   }
 
   Future<void> _loadQuotedPost() async {

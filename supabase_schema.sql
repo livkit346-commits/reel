@@ -436,3 +436,153 @@ CREATE POLICY "Users can insert their own stickers" ON public.user_stickers FOR 
 DROP POLICY IF EXISTS "Users can delete their own stickers" ON public.user_stickers;
 CREATE POLICY "Users can delete their own stickers" ON public.user_stickers FOR DELETE USING (auth.uid() = "userId");
 
+-- ==========================================
+-- EXPLORE FEED DISTRIBUTION & RECOMMENDATION
+-- ==========================================
+
+-- Enable the pgvector extension for AI similarity search
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Add distribution columns to posts table
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "embedding" vector(384);
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "tier" INTEGER DEFAULT 0; -- 0: Fresh/Evaluation, 1: Popular, 2: Viral
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "engagement_score" DOUBLE PRECISION DEFAULT 0.0;
+
+-- Create post_metrics table to track raw signals
+CREATE TABLE IF NOT EXISTS public.post_metrics (
+  "postId" UUID REFERENCES public.posts(id) ON DELETE CASCADE,
+  "userId" UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  "watched_duration" INTEGER DEFAULT 0, -- in seconds
+  "completed" BOOLEAN DEFAULT FALSE,
+  "skipped" BOOLEAN DEFAULT FALSE, -- scrolled away in <2 seconds
+  "shared" BOOLEAN DEFAULT FALSE,
+  "liked" BOOLEAN DEFAULT FALSE,
+  "commented" BOOLEAN DEFAULT FALSE,
+  "updated_at" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  PRIMARY KEY ("postId", "userId")
+);
+
+-- Enable RLS for post_metrics
+ALTER TABLE public.post_metrics ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Metrics viewable by everyone" ON public.post_metrics;
+CREATE POLICY "Metrics viewable by everyone" ON public.post_metrics FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Metrics insertable by everyone" ON public.post_metrics;
+CREATE POLICY "Metrics insertable by everyone" ON public.post_metrics FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Metrics updatable by everyone" ON public.post_metrics;
+CREATE POLICY "Metrics updatable by everyone" ON public.post_metrics FOR UPDATE USING (true);
+
+-- Create user_interests table to store user embedding profiles
+CREATE TABLE IF NOT EXISTS public.user_interests (
+  "userId" UUID REFERENCES public.users(id) ON DELETE CASCADE PRIMARY KEY,
+  "interest_vector" vector(384) NOT NULL,
+  "updated_at" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS for user_interests
+ALTER TABLE public.user_interests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Interests viewable by everyone" ON public.user_interests;
+CREATE POLICY "Interests viewable by everyone" ON public.user_interests FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Interests insertable by everyone" ON public.user_interests;
+CREATE POLICY "Interests insertable by everyone" ON public.user_interests FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Interests updatable by everyone" ON public.user_interests;
+CREATE POLICY "Interests updatable by everyone" ON public.user_interests FOR UPDATE USING (true);
+
+-- Create trigger function to update engagement scores
+CREATE OR REPLACE FUNCTION public.update_post_engagement_score()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_completions INT;
+  v_shares INT;
+  v_comments INT;
+  v_likes INT;
+  v_skips INT;
+  v_score DOUBLE PRECISION;
+  v_post_id UUID;
+BEGIN
+  v_post_id := COALESCE(NEW."postId", OLD."postId");
+  if v_post_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Count metrics for this postId
+  SELECT 
+    COUNT(CASE WHEN completed = TRUE THEN 1 END),
+    COUNT(CASE WHEN shared = TRUE THEN 1 END),
+    COUNT(CASE WHEN commented = TRUE THEN 1 END),
+    COUNT(CASE WHEN liked = TRUE THEN 1 END),
+    COUNT(CASE WHEN skipped = TRUE THEN 1 END)
+  INTO 
+    v_completions, v_shares, v_comments, v_likes, v_skips
+  FROM public.post_metrics
+  WHERE "postId" = v_post_id;
+
+  -- Calculate weighted score
+  v_score := (10 * v_completions) + (5 * v_shares) + (3 * v_comments) + (1 * v_likes) - (5 * v_skips);
+
+  -- Update post score and escalate tier if necessary
+  UPDATE public.posts
+  SET 
+    "engagement_score" = v_score,
+    "tier" = CASE 
+      WHEN v_score >= 100 THEN 2 -- Viral
+      WHEN v_score >= 20 THEN 1  -- Popular
+      ELSE 0                     -- Fresh
+    END
+  WHERE id = v_post_id;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Recreate trigger on post_metrics
+DROP TRIGGER IF EXISTS trg_update_post_engagement ON public.post_metrics;
+CREATE TRIGGER trg_update_post_engagement
+AFTER INSERT OR UPDATE OR DELETE ON public.post_metrics
+FOR EACH ROW
+EXECUTE FUNCTION public.update_post_engagement_score();
+
+-- RPC: Get Explore feed recommendations utilizing pgvector and tiered distribution
+CREATE OR REPLACE FUNCTION public.get_explore_feed_recommendations(
+  p_user_id UUID,
+  p_limit INT DEFAULT 25
+)
+RETURNS SETOF public.posts AS $$
+DECLARE
+  v_user_vector vector(384);
+BEGIN
+  -- 1. Try to get user's interest vector
+  SELECT interest_vector INTO v_user_vector
+  FROM public.user_interests
+  WHERE "userId" = p_user_id;
+
+  -- 2. If user has no vector, fall back to default order by recency
+  IF v_user_vector IS NULL THEN
+    RETURN QUERY 
+    SELECT * 
+    FROM public.posts
+    ORDER BY "createdAt" DESC
+    LIMIT p_limit;
+  ELSE
+    -- 3. Mix: 80% interest-matched (popular/viral), 20% fresh/evaluation posts (Tier 0)
+    RETURN QUERY
+    (
+      -- 80% Matched Tier 1 (Popular) or Tier 2 (Viral) posts, ordered by similarity
+      SELECT *
+      FROM public.posts
+      WHERE "tier" > 0 AND "embedding" IS NOT NULL
+      ORDER BY ("embedding" <=> v_user_vector) ASC
+      LIMIT (p_limit * 80 / 100)
+    )
+    UNION ALL
+    (
+      -- 20% Fresh Tier 0 posts, ordered by recency to give them a chance
+      SELECT *
+      FROM public.posts
+      WHERE "tier" = 0 OR "embedding" IS NULL
+      ORDER BY "createdAt" DESC
+      LIMIT (p_limit * 20 / 100)
+    );
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
