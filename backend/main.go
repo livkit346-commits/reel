@@ -26,6 +26,8 @@ import (
 	"math"
 	"math/rand"
 	"regexp"
+	"sort"
+	"strconv"
 )
 
 // Unified Message payload format
@@ -547,16 +549,10 @@ func getMessagesFromDynamoDB(chatID, since string) ([]ChatMessage, error) {
 		return []ChatMessage{}, nil
 	}
 
-	var keyCond string
+	// Always query all messages for the chatId since the table only stores undelivered/unseen messages
+	keyCond := "chatId = :chatId"
 	exprValues := map[string]types.AttributeValue{
 		":chatId": &types.AttributeValueMemberS{Value: chatID},
-	}
-
-	if since != "" {
-		keyCond = "chatId = :chatId AND messageId > :since"
-		exprValues[":since"] = &types.AttributeValueMemberS{Value: since}
-	} else {
-		keyCond = "chatId = :chatId"
 	}
 
 	input := &dynamodb.QueryInput{
@@ -600,16 +596,49 @@ func getMessagesFromDynamoDB(chatID, since string) ([]ChatMessage, error) {
 			msg.Status = val.Value
 		}
 		if val, ok := item["timestamp"].(*types.AttributeValueMemberN); ok {
-			var ts int64
-			fmt.Sscanf(val.Value, "%d", &ts)
-			msg.Timestamp = ts
+			if ts, err := strconv.ParseInt(val.Value, 10, 64); err == nil {
+				msg.Timestamp = ts
+			}
 		}
 
 		messages = append(messages, msg)
 	}
 
+	// Sort chronologically by timestamp
+	sort.Slice(messages, func(i, j int) bool {
+		return messages[i].Timestamp < messages[j].Timestamp
+	})
+
+	// If 'since' is specified, find its timestamp and filter
+	if since != "" {
+		var sinceTimestamp int64 = 0
+		foundSince := false
+		for _, m := range messages {
+			if m.MessageID == since {
+				sinceTimestamp = m.Timestamp
+				foundSince = true
+				break
+			}
+		}
+
+		filtered := make([]ChatMessage, 0)
+		for _, m := range messages {
+			if foundSince {
+				if m.Timestamp > sinceTimestamp {
+					filtered = append(filtered, m)
+				}
+			} else {
+				// If the 'since' message is not in DynamoDB (already deleted/seen),
+				// then since the DB only has undelivered messages, return all of them
+				filtered = append(filtered, m)
+			}
+		}
+		return filtered, nil
+	}
+
 	return messages, nil
 }
+
 
 // HTTP handler to fetch history
 func handleHistory(w http.ResponseWriter, r *http.Request) {

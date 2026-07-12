@@ -1923,7 +1923,11 @@ class SupabaseService {
         if (localMessages.isNotEmpty) {
           final nonPending = localMessages.where((m) => m['isPending'] != true).toList();
           if (nonPending.isNotEmpty) {
-            nonPending.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+            nonPending.sort((a, b) {
+              final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+              final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+              return timeA.compareTo(timeB);
+            });
             lastMessageId = nonPending.last['id'];
           }
         }
@@ -1960,13 +1964,7 @@ class SupabaseService {
             }
           }
 
-          // Filter out already read/seen messages if we are bootstrapping history after a fresh login (no local messages)
-          final isMe = typedMsg['senderId'] == myId;
-          final seenParticipants = List<String>.from(typedMsg['seenParticipants'] ?? []);
-          final isSeenByMe = typedMsg['seen'] == true || seenParticipants.contains(myId);
-          if (lastMessageId == null && (isMe || isSeenByMe)) {
-            continue;
-          }
+
 
           final exists = localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
           if (!exists) {
@@ -2009,6 +2007,16 @@ class SupabaseService {
               }
               // Immediately delete both database row and storage file from server
               await deleteMessageFromServer(msgId, deleteStorage: true);
+
+              // Notify the sender that B has received/delivered the message
+              if (WebSocketService().isConnected) {
+                WebSocketService().sendStatusUpdate(
+                  chatId: cid,
+                  messageId: msgId,
+                  recipientId: typedMsg['senderId'],
+                  status: 'delivered',
+                );
+              }
             }
           }
         }
@@ -2031,7 +2039,11 @@ class SupabaseService {
           // Sync the latest received message ID back to the server
           final nonPending = localMessages.where((m) => m['isPending'] != true).toList();
           if (nonPending.isNotEmpty) {
-            nonPending.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+            nonPending.sort((a, b) {
+              final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+              final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+              return timeA.compareTo(timeB);
+            });
             final latestId = nonPending.last['id'];
             updateLastReceivedMessageId(cid, latestId);
           }

@@ -619,7 +619,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       if (_localMessages.isNotEmpty) {
         final nonPending = _localMessages.where((m) => m['isPending'] != true).toList();
         if (nonPending.isNotEmpty) {
-          nonPending.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+          nonPending.sort((a, b) {
+            final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+            final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+            return timeA.compareTo(timeB);
+          });
           lastMessageId = nonPending.last['id'];
         }
       }
@@ -675,13 +679,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               }
             }
 
-            // Filter out already read/seen messages if we are bootstrapping history after a fresh login (no local messages)
-            final isMe = typedMsg['senderId'] == myId;
-            final seenParticipants = List<String>.from(typedMsg['seenParticipants'] ?? []);
-            final isSeenByMe = typedMsg['seen'] == true || seenParticipants.contains(myId);
-            if (lastMessageId == null && (isMe || isSeenByMe)) {
-              continue;
-            }
+            // Do not filter out seen/read messages during history sync to ensure complete scrollable logs
 
             final exists = _localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
             if (!exists) {
@@ -704,6 +702,16 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               _localMessages.add(localMsg);
 
               if (typedMsg['senderId'] != myId) {
+                // Send 'delivered' status update back to the sender
+                if (WebSocketService().isConnected) {
+                  WebSocketService().sendStatusUpdate(
+                    chatId: widget.chatId,
+                    messageId: msgId,
+                    recipientId: typedMsg['senderId'],
+                    status: 'delivered',
+                  );
+                }
+
                 final mType = typedMsg['mediaType'] as String?;
                 if (mType != 'image' && mType != 'video' && mType != 'audio') {
                   context.read<SupabaseService>().deleteMessageFromServer(msgId, deleteStorage: false);
@@ -725,7 +733,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         // Sync the latest received message ID back to Supabase
         final nonPending = _localMessages.where((m) => m['isPending'] != true).toList();
         if (nonPending.isNotEmpty) {
-          nonPending.sort((a, b) => (a['id'] as String).compareTo(b['id'] as String));
+          nonPending.sort((a, b) {
+            final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+            final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+            return timeA.compareTo(timeB);
+          });
           final latestId = nonPending.last['id'];
           context.read<SupabaseService>().updateLastReceivedMessageId(widget.chatId, latestId);
         }
