@@ -469,14 +469,14 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
 
             Widget buildCommentItem(Map<String, dynamic> comment, {required bool isReply}) {
               final cId = (comment['id'] ?? '').toString();
-              final cUser = comment['userName'] ?? 'User';
+              final cUser = comment['userName'] ?? comment['username'] ?? 'User';
               final cText = comment['text'] ?? '';
               final isSticker = cText.startsWith('[STICKER:') && cText.endsWith(']');
               String? stickerUrl;
               if (isSticker) {
                 stickerUrl = cText.substring(9, cText.length - 1);
               }
-              final cUserId = comment['userId'] ?? '';
+              final cUserId = comment['userId'] ?? comment['userid'] ?? '';
               final cCreatedAtStr = (comment['createdAt'] ?? comment['createdat']) as String?;
               final replyTo = comment['replyToUserName'] ?? comment['replytousername'] as String?;
               
@@ -585,122 +585,126 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                 );
               }
 
-              return Padding(
-                padding: EdgeInsets.symmetric(
-                  vertical: 6.0,
-                  horizontal: isReply ? 0.0 : 16.0,
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    UserAvatar(userId: cUserId, radius: isReply ? 12 : 16),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                cUser,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: isReply ? 12 : 13,
-                                ),
-                              ),
-                              if (cTimeStr.isNotEmpty) ...[
-                                const SizedBox(width: 6),
+              return GestureDetector(
+                onLongPress: () => showCommentOptions(context, setSheetState),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    vertical: 6.0,
+                    horizontal: isReply ? 0.0 : 16.0,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      UserAvatar(userId: cUserId, radius: isReply ? 12 : 16),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
                                 Text(
-                                  '• $cTimeStr',
-                                  style: const TextStyle(color: Colors.white38, fontSize: 11),
-                                ),
-                              ],
-                            ],
-                          ),
-                          if (isSticker && stickerUrl != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: stickerUrl.startsWith('emoji:')
-                                    ? Padding(
-                                        padding: const EdgeInsets.all(4.0),
-                                        child: Text(
-                                          stickerUrl.substring(6),
-                                          style: const TextStyle(fontSize: 54),
-                                        ),
-                                      )
-                                    : (stickerUrl.startsWith('assets/')
-                                        ? Image.asset(
-                                            stickerUrl,
-                                            width: 80,
-                                            height: 80,
-                                            fit: BoxFit.contain,
-                                          )
-                                        : Image.network(
-                                            stickerUrl,
-                                            width: 80,
-                                            height: 80,
-                                            fit: BoxFit.contain,
-                                            errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
-                                          )),
-                              ),
-                            )
-                          else
-                            RichText(
-                              text: TextSpan(
-                                style: const TextStyle(color: Colors.white70, fontSize: 14),
-                                children: [
-                                  if (isReply && replyTo != null && replyTo.isNotEmpty) ...[
-                                    TextSpan(
-                                      text: '@$replyTo ',
-                                      style: const TextStyle(
-                                        color: Color(0xFF00BFFF),
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                  TextSpan(text: cText),
-                                ],
-                              ),
-                            ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              GestureDetector(
-                                onTap: () {
-                                  setSheetState(() {
-                                    replyTarget = {
-                                      'parentId': comment['parentId'] ?? comment['parentid'] ?? comment['id'],
-                                      'userName': cUser,
-                                    };
-                                  });
-                                  commentFocusNode.requestFocus();
-                                },
-                                child: const Text(
-                                  'Reply',
+                                  cUser,
                                   style: TextStyle(
-                                    color: Colors.white54,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: isReply ? 12 : 13,
                                   ),
                                 ),
+                                if (cTimeStr.isNotEmpty) ...[
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '• $cTimeStr',
+                                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            if (isSticker && stickerUrl != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: stickerUrl.startsWith('emoji:')
+                                      ? Padding(
+                                          padding: const EdgeInsets.all(4.0),
+                                          child: Text(
+                                            stickerUrl.substring(6),
+                                            style: const TextStyle(fontSize: 54),
+                                          ),
+                                        )
+                                      : (stickerUrl.startsWith('assets/')
+                                          ? Image.asset(
+                                              stickerUrl,
+                                              width: 80,
+                                              height: 80,
+                                              fit: BoxFit.contain,
+                                            )
+                                          : Image.network(
+                                              stickerUrl,
+                                              width: 80,
+                                              height: 80,
+                                              fit: BoxFit.contain,
+                                              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
+                                            )),
+                                ),
+                              )
+                            else
+                              RichText(
+                                text: TextSpan(
+                                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                                  children: [
+                                    if (isReply && replyTo != null && replyTo.isNotEmpty) ...[
+                                      TextSpan(
+                                        text: '@$replyTo ',
+                                        style: const TextStyle(
+                                          color: Color(0xFF00BFFF),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                    TextSpan(text: cText),
+                                  ],
+                                ),
                               ),
-                            ],
-                          ),
-                        ],
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                GestureDetector(
+                                  onTap: () {
+                                    setSheetState(() {
+                                      replyTarget = {
+                                        'parentId': comment['parentId'] ?? comment['parentid'] ?? comment['id'],
+                                        'userName': cUser,
+                                      };
+                                    });
+                                    commentFocusNode.requestFocus();
+                                  },
+                                  child: const Text(
+                                    'Reply',
+                                    style: TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-
-
-                    IconButton(
-                      icon: const Icon(Icons.more_vert, color: Colors.white30, size: 18),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      onPressed: () => showCommentOptions(context, setSheetState),
-                    )
-                  ],
+  
+  
+                      IconButton(
+                        icon: const Icon(Icons.more_vert, color: Colors.white30, size: 18),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => showCommentOptions(context, setSheetState),
+                      )
+                    ],
+                  ),
                 ),
               );
             }
