@@ -1714,7 +1714,7 @@ class SupabaseService {
   }
 
   // Get active chats list for the current user with latest-message sorting and offline cache support
-  Future<List<dynamic>> getActiveChats() async {
+  Future<List<dynamic>> getActiveChats({bool forceRefresh = false}) async {
     final myId = currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
     if (myId == null || myId.isEmpty) {
       try {
@@ -1724,6 +1724,63 @@ class SupabaseService {
         }
       } catch (_) {}
       return [];
+    }
+
+    // Try loading from local cached active chats first if not forcing a refresh
+    if (!forceRefresh) {
+      try {
+        final cached = await LocalStorageService().getCachedJson('active_chats_$myId');
+        if (cached != null && cached is List && cached.isNotEmpty) {
+          final List<dynamic> resolvedChats = [];
+          for (final item in cached) {
+            final chatData = Map<String, dynamic>.from(item);
+            final cid = chatData['chatId'] as String?;
+            if (cid == null) continue;
+
+            // Load the latest message from local file cache dynamically
+            Map<String, dynamic>? latestMsg;
+            try {
+              final directory = await getApplicationDocumentsDirectory();
+              final file = File('${directory.path}/chats/${cid}_messages.json');
+              if (await file.exists()) {
+                final content = await file.readAsString();
+                final List<dynamic> decoded = jsonDecode(content);
+                if (decoded.isNotEmpty) {
+                  latestMsg = Map<String, dynamic>.from(decoded.last);
+                }
+              }
+            } catch (_) {}
+
+            if (latestMsg != null) {
+              chatData['latestMessageText'] = latestMsg['text'];
+              String? timeStr;
+              if (latestMsg['createdAt'] != null) {
+                timeStr = latestMsg['createdAt'] as String;
+              } else if (latestMsg['timestamp'] != null) {
+                final ts = latestMsg['timestamp'] as int;
+                timeStr = DateTime.fromMillisecondsSinceEpoch(ts).toIso8601String();
+              }
+              chatData['latestMessageTime'] = timeStr ?? '1970-01-01T00:00:00Z';
+              chatData['latestMessageType'] = latestMsg['mediaType'];
+
+              final isMe = latestMsg['senderId'] == myId;
+              final isSeen = latestMsg['seen'] as bool? ?? false;
+              chatData['hasUnread'] = !isMe && !isSeen;
+            }
+
+            resolvedChats.add(chatData);
+          }
+
+          // Sort chats descending by the latest message's timestamp
+          resolvedChats.sort((a, b) {
+            final timeA = DateTime.tryParse(a['latestMessageTime'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final timeB = DateTime.tryParse(b['latestMessageTime'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return timeB.compareTo(timeA);
+          });
+
+          return resolvedChats;
+        }
+      } catch (_) {}
     }
 
     try {

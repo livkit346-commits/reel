@@ -51,12 +51,12 @@ class _ChatListPageState extends State<ChatListPage> {
       if (type == 'message') {
         await supabase.saveIncomingMessage(event);
         if (mounted) {
-          _loadChats();
+          _loadChats(forceRefresh: false);
         }
       } else if (type == 'status') {
         await supabase.saveIncomingStatus(event);
         if (mounted) {
-          _loadChats();
+          _loadChats(forceRefresh: false);
         }
       }
     });
@@ -67,7 +67,7 @@ class _ChatListPageState extends State<ChatListPage> {
         final supabase = context.read<SupabaseService>();
         supabase.syncOfflineMessages().then((_) {
           if (mounted) {
-            _loadChats();
+            _loadChats(forceRefresh: false);
           }
         });
       }
@@ -98,13 +98,13 @@ class _ChatListPageState extends State<ChatListPage> {
         }
       }
     } catch (_) {}
-    await _loadChats();
+    await _loadChats(forceRefresh: true);
   }
 
-  Future<void> _loadChats() async {
+  Future<void> _loadChats({bool forceRefresh = false}) async {
     final supabase = context.read<SupabaseService>();
     try {
-      final freshChats = await supabase.getActiveChats();
+      final freshChats = await supabase.getActiveChats(forceRefresh: forceRefresh);
       if (mounted) {
         setState(() {
           if (freshChats.isNotEmpty || _chats.isEmpty) {
@@ -554,7 +554,7 @@ class _ChatListPageState extends State<ChatListPage> {
                                   isGroup: isGroup,
                                 ),
                               ),
-                            ).then((_) => _loadChats());
+                            ).then((_) => _loadChats(forceRefresh: false));
                           },
                         );
                       },
@@ -565,7 +565,7 @@ class _ChatListPageState extends State<ChatListPage> {
           Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => const SelectFriendPage()),
-          ).then((_) => _loadChats());
+          ).then((_) => _loadChats(forceRefresh: false));
         },
         backgroundColor: Theme.of(context).primaryColor,
         child: const Icon(Icons.chat, color: Colors.white),
