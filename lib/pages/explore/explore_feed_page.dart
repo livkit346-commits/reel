@@ -448,6 +448,10 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     List<dynamic>? localCommentsList;
     bool loadingComments = true;
 
+    String currentSortMode = 'Popular';
+    final Set<String> likedCommentIds = {};
+    bool loadedLikesCache = false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -459,6 +463,15 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
         return StatefulBuilder(
           builder: (context, setSheetState) {
             if (localCommentsList == null && loadingComments) {
+              final myId = context.read<SupabaseService>().currentUser?.id;
+              if (myId != null && !loadedLikesCache) {
+                LocalStorageService().getCachedJson('liked_comments_$myId').then((cached) {
+                  if (cached is List) {
+                    likedCommentIds.addAll(cached.map((e) => e.toString()));
+                  }
+                  loadedLikesCache = true;
+                });
+              }
               context.read<SupabaseService>().getComments(widget.post['id']).then((comments) {
                 setSheetState(() {
                   localCommentsList = List.from(comments);
@@ -491,6 +504,10 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
               final myId = context.read<SupabaseService>().currentUser?.id;
               final isCommentOwner = cUserId == myId;
               final isPostOwner = (widget.post['userId'] ?? widget.post['userid']) == myId;
+              final isCreator = cUserId == (widget.post['userId'] ?? widget.post['userid']);
+              final isPinned = comment['isPinned'] == true || comment['ispinned'] == true;
+              final isLiked = likedCommentIds.contains(cId);
+              final likesCount = comment['likes'] ?? 0;
 
               void showCommentOptions(BuildContext context, StateSetter setSheetState) {
                 showModalBottomSheet(
@@ -528,6 +545,58 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                                 );
                               }
                             },
+                          ),
+                          if (isPostOwner)
+                            ListTile(
+                              leading: Icon(
+                                isPinned ? Icons.push_pin_outlined : Icons.push_pin,
+                                color: Colors.white70,
+                              ),
+                              title: Text(
+                                isPinned ? 'Unpin Comment' : 'Pin Comment',
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              onTap: () async {
+                                final supabase = context.read<SupabaseService>();
+                                final navigator = Navigator.of(context);
+                                final scaffoldMessenger = ScaffoldMessenger.of(context);
+                                final currentlyPinned = isPinned;
+
+                                navigator.pop(); // Close comment options bottom sheet
+
+                                try {
+                                  // Unpin all other comments first to ensure only one is pinned
+                                  if (!currentlyPinned) {
+                                    for (var c in localCommentsList ?? []) {
+                                      if (c['isPinned'] == true || c['ispinned'] == true) {
+                                        c['isPinned'] = false;
+                                        c['ispinned'] = false;
+                                        await supabase.togglePinComment(c['id'].toString(), false);
+                                      }
+                                    }
+                                  }
+
+                                  await supabase.togglePinComment(cId, !currentlyPinned);
+                                  setSheetState(() {
+                                    comment['isPinned'] = !currentlyPinned;
+                                    comment['ispinned'] = !currentlyPinned;
+                                  });
+                                  scaffoldMessenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(currentlyPinned ? 'Comment unpinned' : 'Comment pinned to top'),
+                                      backgroundColor: const Color(0xFF00FF7F),
+                                    ),
+                                  );
+                                } catch (e) {
+                                  scaffoldMessenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text('Failed to pin/unpin comment: $e'),
+                                      backgroundColor: const Color(0xFF7E1C31),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
                           if (isCommentOwner || isPostOwner)
                             ListTile(
                               leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
@@ -624,11 +693,51 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                                     fontSize: isReply ? 12 : 13,
                                   ),
                                 ),
+                                if (isCreator) ...[
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFE2C55), // TikTok Red
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'Creator',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 if (cTimeStr.isNotEmpty) ...[
                                   const SizedBox(width: 6),
                                   Text(
                                     '• $cTimeStr',
                                     style: const TextStyle(color: Colors.white38, fontSize: 11),
+                                  ),
+                                ],
+                                if (isPinned) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.amber.withOpacity(0.5), width: 0.5),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: const [
+                                        Icon(Icons.push_pin, color: Colors.amber, size: 9),
+                                        SizedBox(width: 2),
+                                        Text(
+                                          'Pinned',
+                                          style: TextStyle(color: Colors.amber, fontSize: 9, fontWeight: FontWeight.bold),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ],
@@ -707,8 +816,47 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                           ],
                         ),
                       ),
-  
-  
+                      const SizedBox(width: 8),
+                      // TikTok-style Comment Like Heart and count on the right
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          GestureDetector(
+                            onTap: () async {
+                              final supabase = context.read<SupabaseService>();
+                              final myId = supabase.currentUser?.id;
+                              if (myId == null) return;
+
+                              final isIncrement = !isLiked;
+                              setSheetState(() {
+                                if (isIncrement) {
+                                  likedCommentIds.add(cId);
+                                  comment['likes'] = (comment['likes'] ?? 0) + 1;
+                                } else {
+                                  likedCommentIds.remove(cId);
+                                  comment['likes'] = ((comment['likes'] ?? 0) - 1).clamp(0, 999999);
+                                }
+                              });
+
+                              try {
+                                await supabase.toggleLikeComment(cId, likesCount, isIncrement);
+                                await LocalStorageService().cacheJson('liked_comments_$myId', likedCommentIds.toList());
+                              } catch (_) {}
+                            },
+                            child: Icon(
+                              isLiked ? Icons.favorite : Icons.favorite_border,
+                              color: isLiked ? const Color(0xFFFE2C55) : Colors.white30,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            likesCount > 0 ? '$likesCount' : '0',
+                            style: const TextStyle(color: Colors.white30, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 4),
                       IconButton(
                         icon: const Icon(Icons.more_vert, color: Colors.white30, size: 18),
                         padding: EdgeInsets.zero,
@@ -737,11 +885,46 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                    const Text(
-                      'Replies',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            localCommentsList != null
+                                ? '${localCommentsList!.where((c) => c['parentId'] == null && c['parentid'] == null).length} comments'
+                                : 'Comments',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                          DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: currentSortMode,
+                              dropdownColor: const Color(0xFF1E1E1E),
+                              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 16),
+                              style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'Popular',
+                                  child: Text('Popular'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Latest',
+                                  child: Text('Latest'),
+                                ),
+                              ],
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setSheetState(() {
+                                    currentSortMode = val;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     Expanded(
                       child: loadingComments
                           ? const Center(child: CircularProgressIndicator())
@@ -760,6 +943,26 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                               final parentComments = allComments
                                   .where((c) => c['parentId'] == null && c['parentid'] == null)
                                   .toList();
+                              
+                              parentComments.sort((a, b) {
+                                final aPinned = a['isPinned'] == true || a['ispinned'] == true;
+                                final bPinned = b['isPinned'] == true || b['ispinned'] == true;
+                                if (aPinned && !bPinned) return -1;
+                                if (!aPinned && bPinned) return 1;
+
+                                if (currentSortMode == 'Popular') {
+                                  final aLikes = a['likes'] ?? 0;
+                                  final bLikes = b['likes'] ?? 0;
+                                  if (aLikes != bLikes) {
+                                    return bLikes.compareTo(aLikes);
+                                  }
+                                }
+
+                                final aTime = DateTime.tryParse(a['createdAt'] ?? a['createdat'] ?? '') ?? DateTime.now();
+                                final bTime = DateTime.tryParse(b['createdAt'] ?? b['createdat'] ?? '') ?? DateTime.now();
+                                return bTime.compareTo(aTime);
+                              });
+
                               final childReplies = <String, List<dynamic>>{};
                               for (var c in allComments) {
                                 final parentIdVal = c['parentId'] ?? c['parentid'];
@@ -771,7 +974,7 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
 
                               return ListView.builder(
                                 itemCount: parentComments.length,
-                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
                                 itemBuilder: (context, idx) {
                                   final parent = parentComments[idx];
                                   final pId = (parent['id'] ?? '').toString();

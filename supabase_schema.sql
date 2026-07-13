@@ -633,3 +633,8 @@ CREATE POLICY "App settings modifiable by admins only" ON public.app_settings
     auth.uid() IN (SELECT id FROM public.users WHERE role = 'admin' OR role = 'super_admin')
   );
 
+-- Migration statements for comment likes and pinned status:
+ALTER TABLE public.comments ADD COLUMN IF NOT EXISTS "likes" INT DEFAULT 0;
+ALTER TABLE public.comments ADD COLUMN IF NOT EXISTS "isPinned" BOOLEAN DEFAULT false;
+
+

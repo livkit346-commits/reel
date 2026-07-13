@@ -2693,6 +2693,36 @@ class SupabaseService {
     }
   }
 
+  // Comments: Toggle Like
+  Future<void> toggleLikeComment(String commentId, int currentLikes, bool increment) async {
+    try {
+      final newLikes = increment ? currentLikes + 1 : currentLikes - 1;
+      await client.from('comments').update({'likes': newLikes >= 0 ? newLikes : 0}).eq('id', commentId);
+    } catch (e) {
+      try {
+        final newLikes = increment ? currentLikes + 1 : currentLikes - 1;
+        await client.from('comments').update({'likes': newLikes >= 0 ? newLikes : 0}).eq('id', commentId);
+      } catch (e2) {
+        debugPrint('Failed to toggle comment likes: $e2');
+        rethrow;
+      }
+    }
+  }
+
+  // Comments: Toggle Pin
+  Future<void> togglePinComment(String commentId, bool pin) async {
+    try {
+      await client.from('comments').update({'isPinned': pin}).eq('id', commentId);
+    } catch (e1) {
+      try {
+        await client.from('comments').update({'ispinned': pin}).eq('id', commentId);
+      } catch (e2) {
+        debugPrint('Failed to toggle pin comment: $e2');
+        rethrow;
+      }
+    }
+  }
+
   // Posts: Report post
   Future<void> reportPost(String postId) async {
     final myId = currentUser?.id;
