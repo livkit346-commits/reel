@@ -2014,19 +2014,17 @@ class SupabaseService {
           // Skip messages sent before the user joined
           if (joinedAt != null) {
             final msgTime = typedMsg['timestamp'] != null
-                ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
+                ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt(), isUtc: true)
                 : DateTime.tryParse(typedMsg['createdAt'] ?? '');
             if (msgTime != null && msgTime.isBefore(joinedAt)) {
               continue;
             }
           }
 
-
-
           final exists = localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
           if (!exists) {
             final createdAtStr = typedMsg['timestamp'] != null
-                ? DateTime.fromMillisecondsSinceEpoch(typedMsg['timestamp']).toIso8601String()
+                ? DateTime.fromMillisecondsSinceEpoch(typedMsg['timestamp'], isUtc: true).toIso8601String()
                 : DateTime.now().toIso8601String();
 
             // Skip history messages before cleared timestamp
@@ -2132,7 +2130,7 @@ class SupabaseService {
       if (clearTimestamp != null) {
         final timestampVal = event['timestamp'];
         final msgTime = timestampVal != null
-            ? DateTime.fromMillisecondsSinceEpoch((timestampVal as num).toInt())
+            ? DateTime.fromMillisecondsSinceEpoch((timestampVal as num).toInt(), isUtc: true)
             : DateTime.now();
         if (msgTime.isBefore(clearTimestamp)) {
           return;
@@ -2164,7 +2162,7 @@ class SupabaseService {
           'mediaUrl': event['mediaUrl'],
           'mediaType': event['mediaType'],
           'createdAt': event['timestamp'] != null
-              ? DateTime.fromMillisecondsSinceEpoch((event['timestamp'] as num).toInt()).toIso8601String()
+              ? DateTime.fromMillisecondsSinceEpoch((event['timestamp'] as num).toInt(), isUtc: true).toIso8601String()
               : DateTime.now().toIso8601String(),
           'received': true,
         };

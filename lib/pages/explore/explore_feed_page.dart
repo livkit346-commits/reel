@@ -528,39 +528,51 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                                 );
                               }
                             },
-                          ),
                           if (isCommentOwner || isPostOwner)
                             ListTile(
                               leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
                               title: const Text('Delete Comment', style: TextStyle(color: Colors.redAccent)),
                               onTap: () async {
-                                Navigator.pop(context);
+                                final supabase = context.read<SupabaseService>();
+                                final navigator = Navigator.of(context);
+                                final scaffoldMessenger = ScaffoldMessenger.of(context);
+
                                 final confirm = await showDialog<bool>(
                                   context: context,
-                                  builder: (context) => AlertDialog(
+                                  builder: (dialogCtx) => AlertDialog(
                                     backgroundColor: const Color(0xFF121212),
                                     title: const Text('Delete Comment', style: TextStyle(color: Colors.white)),
                                     content: const Text('Are you sure you want to delete this comment?', style: TextStyle(color: Colors.white70)),
                                     actions: [
                                       TextButton(
-                                        onPressed: () => Navigator.pop(context, false),
+                                        onPressed: () => Navigator.pop(dialogCtx, false),
                                         child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
                                       ),
                                       TextButton(
-                                        onPressed: () => Navigator.pop(context, true),
+                                        onPressed: () => Navigator.pop(dialogCtx, true),
                                         child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
                                       ),
                                     ],
                                   ),
                                 );
                                 if (confirm == true) {
-                                  await context.read<SupabaseService>().deleteComment(cId);
-                                  setSheetState(() {
-                                    localCommentsList?.removeWhere((c) => (c['id'] ?? '').toString() == cId);
-                                  });
-                                  setState(() {
-                                    _commentsCount = (_commentsCount - 1).clamp(0, 999999);
-                                  });
+                                  navigator.pop(); // Close comment options bottom sheet safely
+                                  try {
+                                    await supabase.deleteComment(cId);
+                                    setSheetState(() {
+                                      localCommentsList?.removeWhere((c) => (c['id'] ?? '').toString() == cId);
+                                    });
+                                    setState(() {
+                                      _commentsCount = (_commentsCount - 1).clamp(0, 999999);
+                                    });
+                                  } catch (e) {
+                                    scaffoldMessenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text('Failed to delete comment: $e'),
+                                        backgroundColor: const Color(0xFF7E1C31),
+                                      ),
+                                    );
+                                  }
                                 }
                               },
                             ),

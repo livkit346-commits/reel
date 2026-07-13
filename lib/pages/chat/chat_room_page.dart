@@ -638,10 +638,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           final joinedTime = DateTime.tryParse(details['joinedAt']);
           if (joinedTime != null) {
             _joinedAt = joinedTime;
-            // Filter out existing local messages sent before the user joined
             _localMessages.removeWhere((m) {
               final msgTime = m['timestamp'] != null
-                  ? DateTime.fromMillisecondsSinceEpoch((m['timestamp'] as num).toInt())
+                  ? DateTime.fromMillisecondsSinceEpoch((m['timestamp'] as num).toInt(), isUtc: true)
                   : DateTime.tryParse(m['createdAt'] ?? '');
               return msgTime != null && msgTime.isBefore(joinedTime);
             });
@@ -664,7 +663,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           // Skip messages sent before user joined the chat/group
           if (_joinedAt != null) {
             final msgTime = typedMsg['timestamp'] != null
-                ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
+                ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt(), isUtc: true)
                 : DateTime.tryParse(typedMsg['createdAt'] ?? '');
             if (msgTime != null && msgTime.isBefore(_joinedAt!)) {
               continue;
@@ -674,7 +673,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           // Skip messages sent before clear timestamp
           if (clearTimestamp != null) {
             final msgTime = typedMsg['timestamp'] != null
-                ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
+                ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt(), isUtc: true)
                 : DateTime.tryParse(typedMsg['createdAt'] ?? '');
             if (msgTime != null && msgTime.isBefore(clearTimestamp)) {
               continue;
@@ -697,7 +696,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               'mediaUrl': typedMsg['mediaUrl'],
               'mediaType': typedMsg['mediaType'],
               'createdAt': typedMsg['timestamp'] != null
-                  ? DateTime.fromMillisecondsSinceEpoch(typedMsg['timestamp']).toIso8601String()
+                  ? DateTime.fromMillisecondsSinceEpoch(typedMsg['timestamp'], isUtc: true).toIso8601String()
                   : DateTime.now().toIso8601String(),
               'received': true,
             };
@@ -792,9 +791,8 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           _localMessages[index]['id'] = messageId;
           _localMessages[index]['messageId'] = messageId;
           _localMessages[index]['isPending'] = false;
-          if (timestamp != null) {
             _localMessages[index]['createdAt'] =
-                DateTime.fromMillisecondsSinceEpoch(timestamp).toIso8601String();
+                DateTime.fromMillisecondsSinceEpoch(timestamp, isUtc: true).toIso8601String();
           }
         }
       });
@@ -873,7 +871,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
       // Skip messages sent before user joined the chat/group
       if (_joinedAt != null) {
         final msgTime = event['timestamp'] != null
-            ? DateTime.fromMillisecondsSinceEpoch((event['timestamp'] as num).toInt())
+            ? DateTime.fromMillisecondsSinceEpoch((event['timestamp'] as num).toInt(), isUtc: true)
             : DateTime.tryParse(event['createdAt'] ?? '');
         if (msgTime != null && msgTime.isBefore(_joinedAt!)) {
           return;
@@ -890,7 +888,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           'mediaUrl': event['mediaUrl'],
           'mediaType': event['mediaType'],
           'createdAt': event['timestamp'] != null
-              ? DateTime.fromMillisecondsSinceEpoch((event['timestamp'] as num).toInt()).toIso8601String()
+              ? DateTime.fromMillisecondsSinceEpoch((event['timestamp'] as num).toInt(), isUtc: true).toIso8601String()
               : DateTime.now().toIso8601String(),
           'received': true,
           'seen': true, // actively in chat room, so it is read immediately
@@ -1088,7 +1086,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             _localMessages[i]['isPending'] = false;
             if (msg['timestamp'] != null) {
               _localMessages[i]['createdAt'] =
-                  DateTime.fromMillisecondsSinceEpoch(msg['timestamp']).toIso8601String();
+                  DateTime.fromMillisecondsSinceEpoch(msg['timestamp'], isUtc: true).toIso8601String();
             } else if (msg['createdAt'] != null) {
               _localMessages[i]['createdAt'] = msg['createdAt'];
             }
