@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:reel/main.dart';
@@ -155,6 +156,7 @@ class FcmService {
             title: title,
             body: body,
             senderId: senderId,
+            supabaseService: _supabaseService,
             onTap: () {
               if (chatId != null) {
                 _navigateToChat(chatId);
@@ -177,6 +179,7 @@ class _HeadsUpNotificationBanner extends StatefulWidget {
   final String title;
   final String body;
   final String? senderId;
+  final SupabaseService supabaseService;
   final VoidCallback onTap;
   final VoidCallback onDismiss;
 
@@ -184,6 +187,7 @@ class _HeadsUpNotificationBanner extends StatefulWidget {
     required this.title,
     required this.body,
     this.senderId,
+    required this.supabaseService,
     required this.onTap,
     required this.onDismiss,
   });
@@ -195,27 +199,36 @@ class _HeadsUpNotificationBanner extends StatefulWidget {
 class _HeadsUpNotificationBannerState extends State<_HeadsUpNotificationBanner> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<Offset> _offsetAnimation;
+  double _dragOffset = 0.0;
+  Map<String, dynamic>? _senderProfile;
 
   @override
   void initState() {
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 350),
+      duration: const Duration(milliseconds: 300),
     );
     _offsetAnimation = Tween<Offset>(
       begin: const Offset(0, -1.5),
       end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
 
     _controller.forward();
+    _fetchSenderProfile();
+  }
 
-    // Auto-dismiss after 4 seconds
-    Future.delayed(const Duration(seconds: 4), () {
-      if (mounted) {
-        _dismiss();
+  Future<void> _fetchSenderProfile() async {
+    final sId = widget.senderId;
+    if (sId == null || sId.isEmpty) return;
+    try {
+      final profile = await widget.supabaseService.getUserProfile(sId);
+      if (profile != null && mounted) {
+        setState(() {
+          _senderProfile = profile;
+        });
       }
-    });
+    } catch (_) {}
   }
 
   void _dismiss() async {
@@ -235,79 +248,140 @@ class _HeadsUpNotificationBannerState extends State<_HeadsUpNotificationBanner> 
     
     return SlideTransition(
       position: _offsetAnimation,
-      child: GestureDetector(
-        onVerticalDragUpdate: (details) {
-          if (details.primaryDelta! < -5) {
+      child: Transform.translate(
+        offset: Offset(0, _dragOffset.clamp(-200.0, 0.0)),
+        child: GestureDetector(
+          onVerticalDragUpdate: (details) {
+            setState(() {
+              _dragOffset += details.delta.dy;
+            });
+          },
+          onVerticalDragEnd: (details) {
+            if (_dragOffset < -30 || details.velocity.pixelsPerSecond.dy < -200) {
+              _dismiss();
+            } else {
+              setState(() {
+                _dragOffset = 0.0;
+              });
+            }
+          },
+          onTap: () {
+            widget.onTap();
             _dismiss();
-          }
-        },
-        onTap: () {
-          widget.onTap();
-          _dismiss();
-        },
-        child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E1E24) : Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.06),
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.15),
-                blurRadius: 16,
-                spreadRadius: 2,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: Row(
-              children: [
-                // Sender Icon/Avatar
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.08),
-                  child: Icon(Icons.person, color: isDark ? Colors.white30 : Colors.black38, size: 20),
+          },
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.25),
+                  blurRadius: 20,
+                  spreadRadius: 2,
+                  offset: const Offset(0, 8),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xE01E1E24) : const Color(0xF0FFFFFF),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.05),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Row(
                     children: [
-                      Text(
-                        widget.title,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white : Colors.black87,
-                          fontSize: 14,
+                      // Elegant Profile Avatar with green online status dot
+                      Stack(
+                        children: [
+                          CircleAvatar(
+                            radius: 22,
+                            backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.06),
+                            backgroundImage: (_senderProfile != null && _senderProfile!['photoUrl'] != null)
+                                ? NetworkImage(_senderProfile!['photoUrl'])
+                                : null,
+                            child: (_senderProfile == null || _senderProfile!['photoUrl'] == null)
+                                ? Icon(Icons.person, color: isDark ? Colors.white54 : Colors.black45, size: 22)
+                                : null,
+                          ),
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00FF7F), // Spring Green
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: isDark ? const Color(0xFF1E1E24) : Colors.white,
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _senderProfile != null ? (_senderProfile!['name'] ?? widget.title) : widget.title,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                color: isDark ? Colors.white : Colors.black87,
+                                fontSize: 14,
+                                letterSpacing: 0.1,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              widget.body,
+                              style: TextStyle(
+                                color: isDark ? Colors.white70 : Colors.black54,
+                                fontSize: 13,
+                                height: 1.2,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      Text(
-                        widget.body,
-                        style: TextStyle(
-                          color: isDark ? Colors.white70 : Colors.black54,
-                          fontSize: 13,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                      const SizedBox(width: 10),
+                      // Modern Drag/Dismiss Hint Handle
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.keyboard_arrow_up,
+                            color: isDark ? Colors.white30 : Colors.black26,
+                            size: 18,
+                          ),
+                          Text(
+                            "SWIPE UP",
+                            style: TextStyle(
+                              fontSize: 8,
+                              fontWeight: FontWeight.w800,
+                              color: isDark ? Colors.white24 : Colors.black26,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-                // Swipe-up drag handle
-                Icon(
-                  Icons.drag_handle,
-                  color: isDark ? Colors.white24 : Colors.black26,
-                  size: 16,
-                ),
-              ],
+              ),
             ),
           ),
         ),
