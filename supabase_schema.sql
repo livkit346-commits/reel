@@ -586,3 +586,50 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+
+-- ========================================================
+-- ADMIN PORTAL SYSTEM CONFIGURATIONS
+-- ========================================================
+
+-- Add role column to public.users table if it does not exist (defaults to 'user')
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user' NOT NULL;
+
+-- Create admin_audit_logs table to track administrative actions
+CREATE TABLE IF NOT EXISTS public.admin_audit_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "adminId" UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  "adminName" TEXT NOT NULL,
+  action TEXT NOT NULL,
+  details TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS for admin_audit_logs
+ALTER TABLE public.admin_audit_logs ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admin logs viewable by admins only" ON public.admin_audit_logs;
+CREATE POLICY "Admin logs viewable by admins only" ON public.admin_audit_logs
+  FOR SELECT USING (
+    auth.uid() IN (SELECT id FROM public.users WHERE role = 'admin' OR role = 'super_admin')
+  );
+DROP POLICY IF EXISTS "Admins can insert audit logs" ON public.admin_audit_logs;
+CREATE POLICY "Admins can insert audit logs" ON public.admin_audit_logs
+  FOR INSERT WITH CHECK (true);
+
+-- Create app_settings table to store global configuration settings
+CREATE TABLE IF NOT EXISTS public.app_settings (
+  key TEXT PRIMARY KEY,
+  value BOOLEAN NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Enable RLS for app_settings
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "App settings viewable by everyone" ON public.app_settings;
+CREATE POLICY "App settings viewable by everyone" ON public.app_settings
+  FOR SELECT USING (true);
+DROP POLICY IF EXISTS "App settings modifiable by admins only" ON public.app_settings;
+CREATE POLICY "App settings modifiable by admins only" ON public.app_settings
+  FOR ALL USING (
+    auth.uid() IN (SELECT id FROM public.users WHERE role = 'admin' OR role = 'super_admin')
+  );
+
