@@ -654,90 +654,104 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         final clearTimestampStr = await LocalStorageService().getCachedJson('clear_timestamp_${widget.chatId}') as String?;
         final clearTimestamp = clearTimestampStr != null ? DateTime.tryParse(clearTimestampStr) : null;
 
-        setState(() {
-          for (final msg in history) {
-            final typedMsg = Map<String, dynamic>.from(msg);
-            final msgId = typedMsg['messageId'] ?? typedMsg['id'];
+        final List<Map<String, dynamic>> messagesToAdd = [];
+        final List<Map<String, dynamic>> messagesToProcess = [];
 
-            // Skip messages sent before user joined the chat/group
-            if (_joinedAt != null) {
-              final msgTime = typedMsg['timestamp'] != null
-                  ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
-                  : DateTime.tryParse(typedMsg['createdAt'] ?? '');
-              if (msgTime != null && msgTime.isBefore(_joinedAt!)) {
-                continue;
-              }
-            }
+        for (final msg in history) {
+          final typedMsg = Map<String, dynamic>.from(msg);
+          final msgId = typedMsg['messageId'] ?? typedMsg['id'];
 
-            // Skip messages sent before clear timestamp
-            if (clearTimestamp != null) {
-              final msgTime = typedMsg['timestamp'] != null
-                  ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
-                  : DateTime.tryParse(typedMsg['createdAt'] ?? '');
-              if (msgTime != null && msgTime.isBefore(clearTimestamp)) {
-                continue;
-              }
-            }
-
-            // Do not filter out seen/read messages during history sync to ensure complete scrollable logs
-
-            final exists = _localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
-            if (!exists) {
-              if (_mergeIncomingUserMessage(typedMsg)) {
-                continue;
-              }
-              final localMsg = {
-                'id': msgId,
-                'messageId': msgId,
-                'chatId': typedMsg['chatId'],
-                'senderId': typedMsg['senderId'],
-                'text': typedMsg['text'],
-                'mediaUrl': typedMsg['mediaUrl'],
-                'mediaType': typedMsg['mediaType'],
-                'createdAt': typedMsg['timestamp'] != null
-                    ? DateTime.fromMillisecondsSinceEpoch(typedMsg['timestamp']).toIso8601String()
-                    : DateTime.now().toIso8601String(),
-                'received': true,
-              };
-              _localMessages.add(localMsg);
-
-              if (typedMsg['senderId'] != myId) {
-                // Send 'delivered' status update back to the sender
-                if (WebSocketService().isConnected) {
-                  WebSocketService().sendStatusUpdate(
-                    chatId: widget.chatId,
-                    messageId: msgId,
-                    recipientId: typedMsg['senderId'],
-                    status: 'delivered',
-                  );
-                }
-
-                final mediaUrl = typedMsg['mediaUrl'] as String?;
-                if (mediaUrl != null && mediaUrl.isNotEmpty) {
-                  // Pre-cache media file locally first so we don't lose it
-                  try {
-                    await LocalStorageService().getCachedFile(mediaUrl, ttl: const Duration(days: 30));
-                    debugPrint('Pre-cached foreground history media file: $mediaUrl');
-                  } catch (e) {
-                    debugPrint('Failed to pre-cache foreground history media: $e');
-                  }
-                  context.read<SupabaseService>().deleteMessageFromServer(msgId, deleteStorage: true);
-                } else {
-                  context.read<SupabaseService>().deleteMessageFromServer(msgId, deleteStorage: false);
-                }
-              }
+          // Skip messages sent before user joined the chat/group
+          if (_joinedAt != null) {
+            final msgTime = typedMsg['timestamp'] != null
+                ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
+                : DateTime.tryParse(typedMsg['createdAt'] ?? '');
+            if (msgTime != null && msgTime.isBefore(_joinedAt!)) {
+              continue;
             }
           }
 
-          // Sort chronologically
-          _localMessages.sort((a, b) {
-            final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
-            final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
-            return timeA.compareTo(timeB);
+          // Skip messages sent before clear timestamp
+          if (clearTimestamp != null) {
+            final msgTime = typedMsg['timestamp'] != null
+                ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt())
+                : DateTime.tryParse(typedMsg['createdAt'] ?? '');
+            if (msgTime != null && msgTime.isBefore(clearTimestamp)) {
+              continue;
+            }
+          }
+
+          // Do not filter out seen/read messages during history sync to ensure complete scrollable logs
+
+          final exists = _localMessages.any((m) => m['id'] == msgId || m['messageId'] == msgId);
+          if (!exists) {
+            if (_mergeIncomingUserMessage(typedMsg)) {
+              continue;
+            }
+            final localMsg = {
+              'id': msgId,
+              'messageId': msgId,
+              'chatId': typedMsg['chatId'],
+              'senderId': typedMsg['senderId'],
+              'text': typedMsg['text'],
+              'mediaUrl': typedMsg['mediaUrl'],
+              'mediaType': typedMsg['mediaType'],
+              'createdAt': typedMsg['timestamp'] != null
+                  ? DateTime.fromMillisecondsSinceEpoch(typedMsg['timestamp']).toIso8601String()
+                  : DateTime.now().toIso8601String(),
+              'received': true,
+            };
+            messagesToAdd.add(localMsg);
+            messagesToProcess.add(typedMsg);
+          }
+        }
+
+        if (messagesToAdd.isNotEmpty) {
+          setState(() {
+            _localMessages.addAll(messagesToAdd);
+            // Sort chronologically
+            _localMessages.sort((a, b) {
+              final timeA = DateTime.tryParse(a['createdAt'] ?? '') ?? DateTime.now();
+              final timeB = DateTime.tryParse(b['createdAt'] ?? '') ?? DateTime.now();
+              return timeA.compareTo(timeB);
+            });
           });
-        });
-        await _saveLocalMessages();
-        _markAllMessagesAsSeen();
+          await _saveLocalMessages();
+          _markAllMessagesAsSeen();
+        }
+
+        // Process status updates, pre-caching, and deletions asynchronously outside setState
+        for (final typedMsg in messagesToProcess) {
+          final msgId = typedMsg['messageId'] ?? typedMsg['id'];
+          if (typedMsg['senderId'] != myId) {
+            // Send 'delivered' status update back to the sender
+            if (WebSocketService().isConnected) {
+              WebSocketService().sendStatusUpdate(
+                chatId: widget.chatId,
+                messageId: msgId,
+                recipientId: typedMsg['senderId'],
+                status: 'delivered',
+              );
+            }
+
+            final mediaUrl = typedMsg['mediaUrl'] as String?;
+            if (mediaUrl != null && mediaUrl.isNotEmpty) {
+              try {
+                await LocalStorageService().getCachedFile(mediaUrl, ttl: const Duration(days: 30));
+                debugPrint('Pre-cached foreground history media file: $mediaUrl');
+              } catch (e) {
+                debugPrint('Failed to pre-cache foreground history media: $e');
+              }
+              if (mounted) {
+                context.read<SupabaseService>().deleteMessageFromServer(msgId, deleteStorage: true);
+              }
+            } else {
+              if (mounted) {
+                context.read<SupabaseService>().deleteMessageFromServer(msgId, deleteStorage: false);
+              }
+            }
+          }
+        }
 
         // Sync the latest received message ID back to Supabase
         final nonPending = _localMessages.where((m) => m['isPending'] != true).toList();
@@ -748,7 +762,9 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             return timeA.compareTo(timeB);
           });
           final latestId = nonPending.last['id'];
-          context.read<SupabaseService>().updateLastReceivedMessageId(widget.chatId, latestId);
+          if (mounted) {
+            context.read<SupabaseService>().updateLastReceivedMessageId(widget.chatId, latestId);
+          }
         }
       }
     } catch (e) {
@@ -756,7 +772,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     }
   }
 
-  void _handleWebSocketEvent(Map<String, dynamic> event) {
+  Future<void> _handleWebSocketEvent(Map<String, dynamic> event) async {
     if (!mounted) return;
 
     final type = event['type'] ?? 'message';
