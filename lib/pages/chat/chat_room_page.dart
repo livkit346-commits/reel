@@ -712,8 +712,17 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                   );
                 }
 
-                final mType = typedMsg['mediaType'] as String?;
-                if (mType != 'image' && mType != 'video' && mType != 'audio') {
+                final mediaUrl = typedMsg['mediaUrl'] as String?;
+                if (mediaUrl != null && mediaUrl.isNotEmpty) {
+                  // Pre-cache media file locally first so we don't lose it
+                  try {
+                    await LocalStorageService().getCachedFile(mediaUrl, ttl: const Duration(days: 30));
+                    debugPrint('Pre-cached foreground history media file: $mediaUrl');
+                  } catch (e) {
+                    debugPrint('Failed to pre-cache foreground history media: $e');
+                  }
+                  context.read<SupabaseService>().deleteMessageFromServer(msgId, deleteStorage: true);
+                } else {
                   context.read<SupabaseService>().deleteMessageFromServer(msgId, deleteStorage: false);
                 }
               }
@@ -896,9 +905,22 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           recipientId: senderId,
           status: 'seen',
         );
-        final mType = event['mediaType'] as String?;
-        if (mType != 'image' && mType != 'video' && mType != 'audio') {
-          supabase.deleteMessageFromServer(messageId, deleteStorage: false);
+        final mediaUrl = event['mediaUrl'] as String?;
+        if (mediaUrl != null && mediaUrl.isNotEmpty) {
+          // Pre-cache media file locally first so we don't lose it
+          try {
+            await LocalStorageService().getCachedFile(mediaUrl, ttl: const Duration(days: 30));
+            debugPrint('Pre-cached foreground WebSocket media file: $mediaUrl');
+          } catch (e) {
+            debugPrint('Failed to pre-cache foreground WebSocket media: $e');
+          }
+          if (messageId != null) {
+            supabase.deleteMessageFromServer(messageId, deleteStorage: true);
+          }
+        } else {
+          if (messageId != null) {
+            supabase.deleteMessageFromServer(messageId, deleteStorage: false);
+          }
         }
       }
 
