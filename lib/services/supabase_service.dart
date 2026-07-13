@@ -944,6 +944,47 @@ class SupabaseService {
     }
   }
 
+  // Posts: Get following feed (posts only from followed users)
+  Future<List<dynamic>> getFollowingFeed() async {
+    try {
+      final myId = currentUser?.id;
+      if (myId == null) return [];
+      
+      final followsList = await client
+          .from('follows')
+          .select('followingId')
+          .eq('followerId', myId);
+          
+      final followedIds = (followsList as List)
+          .map((f) => (f['followingId'] ?? f['followingid'] ?? '').toString())
+          .where((id) => id.isNotEmpty)
+          .toList();
+          
+      if (followedIds.isEmpty) {
+        return [];
+      }
+      
+      try {
+        return await client
+            .from('posts')
+            .select()
+            .inFilter('userId', followedIds)
+            .order('createdAt', ascending: false)
+            .limit(25);
+      } catch (_) {
+        return await client
+            .from('posts')
+            .select()
+            .inFilter('userid', followedIds)
+            .order('createdat', ascending: false)
+            .limit(25);
+      }
+    } catch (e) {
+      debugPrint('Failed to get following feed: $e');
+      return [];
+    }
+  }
+
   // Posts: Report active user engagement metrics
   Future<void> reportPostMetric({
     required String postId,

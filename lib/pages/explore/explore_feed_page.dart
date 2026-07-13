@@ -19,6 +19,7 @@ class ExploreFeedPage extends StatefulWidget {
 
 class _ExploreFeedPageState extends State<ExploreFeedPage> {
   late Future<List<dynamic>> _feedFuture;
+  String _activeTab = 'For You';
 
   @override
   void initState() {
@@ -28,8 +29,53 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
 
   Future<void> _refreshFeed() async {
     setState(() {
-      _feedFuture = context.read<SupabaseService>().getExploreFeed();
+      _feedFuture = _activeTab == 'For You'
+          ? context.read<SupabaseService>().getExploreFeed()
+          : context.read<SupabaseService>().getFollowingFeed();
     });
+  }
+
+  Widget _buildTabButton(String tabName, BuildContext context) {
+    final isActive = _activeTab == tabName;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return GestureDetector(
+      onTap: () {
+        if (_activeTab != tabName) {
+          setState(() {
+            _activeTab = tabName;
+            _feedFuture = _activeTab == 'For You'
+                ? context.read<SupabaseService>().getExploreFeed()
+                : context.read<SupabaseService>().getFollowingFeed();
+          });
+        }
+      },
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            tabName,
+            style: TextStyle(
+              fontSize: isActive ? 16 : 14.5,
+              fontWeight: isActive ? FontWeight.bold : FontWeight.w600,
+              color: isActive
+                  ? (isDark ? Colors.white : Colors.black)
+                  : (isDark ? Colors.white54 : Colors.black54),
+            ),
+          ),
+          const SizedBox(height: 4),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            height: 2.5,
+            width: isActive ? 24 : 0,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFE2C55), // TikTok Accent Pink/Red
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -44,8 +90,15 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
         backgroundColor: scaffoldBgColor.withOpacity(0.8),
         elevation: 0,
         iconTheme: IconThemeData(color: textColor),
-        title: Text('Explore', style: TextStyle(fontWeight: FontWeight.bold, color: textColor)),
-        centerTitle: false,
+        centerTitle: true,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildTabButton('Following', context),
+            const SizedBox(width: 28),
+            _buildTabButton('For You', context),
+          ],
+        ),
       ),
       body: RefreshIndicator(
         onRefresh: _refreshFeed,
@@ -189,8 +242,57 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
                 ),
                 // Feed: X-Style Posts
                 if (posts.isEmpty)
-                  const SliverFillRemaining(
-                    child: Center(child: Text('No posts yet', style: TextStyle(color: Colors.white54))),
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              _activeTab == 'Following' ? Icons.people_outline : Icons.post_add_outlined,
+                              color: _activeTab == 'Following' ? const Color(0xFFFE2C55).withOpacity(0.6) : Colors.white30,
+                              size: 72,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              _activeTab == 'Following'
+                                  ? 'No posts from creators you follow'
+                                  : 'No posts available',
+                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _activeTab == 'Following'
+                                  ? 'Follow creators to see their latest updates here, or switch to For You to discover new content.'
+                                  : 'Be the first to post something on Reel!',
+                              style: const TextStyle(color: Colors.white38, fontSize: 13, height: 1.3),
+                              textAlign: TextAlign.center,
+                            ),
+                            if (_activeTab == 'Following') ...[
+                              const SizedBox(height: 24),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFFE2C55),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _activeTab = 'For You';
+                                    _feedFuture = context.read<SupabaseService>().getExploreFeed();
+                                  });
+                                },
+                                child: const Text('Explore For You', style: TextStyle(fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
                   )
                 else
                   SliverList(
