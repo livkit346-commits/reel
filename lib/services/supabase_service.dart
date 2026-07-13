@@ -827,7 +827,14 @@ class SupabaseService {
   }
 
   // Posts: Create post
-  Future<void> createPost(String userId, String userName, String text, String? imageUrl) async {
+  Future<void> createPost(
+    String userId,
+    String userName,
+    String text,
+    String? imageUrl, {
+    String? videoUrl,
+    String? mediaType,
+  }) async {
     try {
       // 1. Fetch AI vector embedding from Go Backend
       List<double>? embedding;
@@ -861,6 +868,8 @@ class SupabaseService {
         'userName': userName,
         'text': text,
         'imageUrl': imageUrl,
+        'videoUrl': videoUrl,
+        'mediaType': mediaType ?? (videoUrl != null ? 'video' : (imageUrl != null ? 'image' : 'text')),
         'createdAt': DateTime.now().toIso8601String(),
         'likes': 0,
         if (embeddingStr != null) 'embedding': embeddingStr,
@@ -892,9 +901,91 @@ class SupabaseService {
         }
       }
 
-      await createPost(myId, userName, text, imageUrl);
+      await createPost(myId, userName, text, imageUrl, mediaType: imageFile != null ? 'image' : 'text');
     } catch (e) {
       rethrow;
+    }
+  }
+
+  // Posts: Upload video and create video post
+  Future<void> uploadAndCreateVideoPost(String text, File videoFile, {Function(double)? onProgress}) async {
+    final myId = currentUser?.id;
+    if (myId == null) throw Exception('User not authenticated');
+
+    try {
+      final userProfile = await getUserProfile(myId);
+      final userName = userProfile?['name'] ?? 'User';
+
+      final fileName = 'video_${DateTime.now().millisecondsSinceEpoch}.mp4';
+      final storagePath = 'posts/$myId/$fileName';
+
+      // supabse storage upload with manual updates or direct upload
+      await client.storage.from('media').upload(storagePath, videoFile);
+      final videoUrl = getMediaUrl('media', storagePath);
+
+      await createPost(myId, userName, text, null, videoUrl: videoUrl, mediaType: 'video');
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  // Posts: Get video feed posts
+  Future<List<dynamic>> getVideoFeed({bool followingOnly = false}) async {
+    try {
+      final myId = currentUser?.id;
+      
+      if (followingOnly && myId != null) {
+        final followsList = await client
+            .from('follows')
+            .select('followingId')
+            .eq('followerId', myId);
+            
+        final followedIds = (followsList as List)
+            .map((f) => (f['followingId'] ?? f['followingid'] ?? '').toString())
+            .where((id) => id.isNotEmpty)
+            .toList();
+            
+        if (followedIds.isEmpty) {
+          return [];
+        }
+        
+        try {
+          return await client
+              .from('posts')
+              .select()
+              .eq('mediaType', 'video')
+              .inFilter('userId', followedIds)
+              .order('createdAt', ascending: false)
+              .limit(20);
+        } catch (_) {
+          return await client
+              .from('posts')
+              .select()
+              .eq('mediatype', 'video')
+              .inFilter('userid', followedIds)
+              .order('createdat', ascending: false)
+              .limit(20);
+        }
+      } else {
+        try {
+          return await client
+              .from('posts')
+              .select()
+              .eq('mediaType', 'video')
+              .order('createdAt', ascending: false)
+              .limit(25);
+        } catch (_) {
+          return await client
+              .from('posts')
+              .select()
+              .eq('mediatype', 'video')
+              .order('createdat', ascending: false)
+              .limit(25);
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to get video feed: $e');
+      return [];
     }
   }
 

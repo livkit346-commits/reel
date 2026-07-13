@@ -1,14 +1,17 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/explore/create_post_screen.dart';
+import 'package:reel/pages/explore/create_video_post_page.dart';
 import 'package:reel/widgets/chat/sticker_picker.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 import 'package:reel/pages/explore/full_screen_image_viewer.dart';
 import 'package:reel/pages/updates/status_viewer_screen.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/status_ring_painter.dart';
+import 'package:video_player/video_player.dart';
 
 class ExploreFeedPage extends StatefulWidget {
   const ExploreFeedPage({super.key});
@@ -78,6 +81,8 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
     );
   }
 
+  String _feedMode = 'text'; // 'text' or 'video'
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -91,6 +96,18 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
         elevation: 0,
         iconTheme: IconThemeData(color: textColor),
         centerTitle: true,
+        leading: IconButton(
+          icon: Icon(
+            _feedMode == 'text' ? Icons.play_circle_outline : Icons.article_outlined,
+            color: textColor,
+          ),
+          onPressed: () {
+            setState(() {
+              _feedMode = _feedMode == 'text' ? 'video' : 'text';
+            });
+          },
+          tooltip: _feedMode == 'text' ? 'Switch to Video Feed' : 'Switch to Text Feed',
+        ),
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -100,230 +117,233 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
           ],
         ),
       ),
-      body: RefreshIndicator(
-        onRefresh: _refreshFeed,
-        color: Theme.of(context).primaryColor,
-        backgroundColor: scaffoldBgColor,
-        child: FutureBuilder<List<dynamic>>(
-          future: _feedFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.white54)));
-            }
-            
-            final posts = snapshot.data ?? [];
+      body: _feedMode == 'video'
+          ? ShortVideoFeedView(
+              followingOnly: _activeTab == 'Following',
+              onBackToText: () {
+                setState(() {
+                  _feedMode = 'text';
+                });
+              },
+            )
+          : RefreshIndicator(
+              onRefresh: _refreshFeed,
+              color: Theme.of(context).primaryColor,
+              backgroundColor: scaffoldBgColor,
+              child: FutureBuilder<List<dynamic>>(
+                future: _feedFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snapshot.hasError) {
+                    return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.white54)));
+                  }
+                  
+                  final posts = snapshot.data ?? [];
 
-            return CustomScrollView(
-              slivers: [
-                // Top Row: Active Status Updates
-                SliverToBoxAdapter(
-                  child: Container(
-                    height: 110,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    decoration: const BoxDecoration(
-                      border: Border(bottom: BorderSide(color: Colors.white12, width: 0.5)),
-                    ),
-                    child: FutureBuilder<List<dynamic>>(
-                      future: context.read<SupabaseService>().getExploreStatuses(),
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)));
-                        }
-                        final rawStatuses = snapshot.data ?? [];
-                        if (rawStatuses.isEmpty) {
-                          return const Center(
-                            child: Text(
-                              'No recent active status updates',
-                              style: TextStyle(color: Colors.white38, fontSize: 12),
-                            ),
-                          );
-                        }
+                  return CustomScrollView(
+                    slivers: [
+                      // Top Row: Active Status Updates
+                      SliverToBoxAdapter(
+                        child: Container(
+                          height: 110,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          decoration: const BoxDecoration(
+                            border: Border(bottom: BorderSide(color: Colors.white12, width: 0.5)),
+                          ),
+                          child: FutureBuilder<List<dynamic>>(
+                            future: context.read<SupabaseService>().getExploreStatuses(),
+                            builder: (context, snapshot) {
+                              if (snapshot.connectionState == ConnectionState.waiting) {
+                                return const Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)));
+                              }
+                              final rawStatuses = snapshot.data ?? [];
+                              if (rawStatuses.isEmpty) {
+                                return const Center(
+                                  child: Text(
+                                    'No recent active status updates',
+                                    style: TextStyle(color: Colors.white38, fontSize: 12),
+                                  ),
+                                );
+                              }
 
-                        // Group statuses by userId
-                        final Map<String, List<dynamic>> groupedMap = {};
-                        final Map<String, String> userNames = {};
-                        
-                        for (var status in rawStatuses) {
-                          final userId = (status['userId'] ?? status['userid'] ?? '').toString();
-                          if (userId.isEmpty) continue;
-                          
-                          userNames[userId] = status['userName'] ?? status['username'] ?? 'User';
-                          
-                          if (!groupedMap.containsKey(userId)) {
-                            groupedMap[userId] = [];
-                          }
-                          groupedMap[userId]!.add(status);
-                        }
-                        
-                        final List<Map<String, dynamic>> userStatusGroups = [];
-                        for (var entry in groupedMap.entries) {
-                          final userId = entry.key;
-                          final userStatuses = entry.value;
-                          
-                          // Sort user's statuses from oldest to newest (WhatsApp style play order)
-                          userStatuses.sort((a, b) {
-                            final dateA = DateTime.parse(a['createdAt'] ?? a['createdat'] ?? '');
-                            final dateB = DateTime.parse(b['createdAt'] ?? b['createdat'] ?? '');
-                            return dateA.compareTo(dateB);
-                          });
-                          
-                          userStatusGroups.add({
-                            'userId': userId,
-                            'userName': userNames[userId],
-                            'statuses': userStatuses,
-                            'latestUpdate': userStatuses.last['createdAt'] ?? userStatuses.last['createdat'],
-                          });
-                        }
-                        
-                        // Sort user status groups by who has the most recent status (descending)
-                        userStatusGroups.sort((a, b) {
-                          final dateA = DateTime.parse(a['latestUpdate'] ?? '');
-                          final dateB = DateTime.parse(b['latestUpdate'] ?? '');
-                          return dateB.compareTo(dateA);
-                        });
+                              // Group statuses by userId
+                              final Map<String, List<dynamic>> groupedMap = {};
+                              final Map<String, String> userNames = {};
+                              
+                              for (var status in rawStatuses) {
+                                final userId = (status['userId'] ?? status['userid'] ?? '').toString();
+                                if (userId.isEmpty) continue;
+                                
+                                userNames[userId] = status['userName'] ?? status['username'] ?? 'User';
+                                
+                                if (!groupedMap.containsKey(userId)) {
+                                  groupedMap[userId] = [];
+                                }
+                                groupedMap[userId]!.add(status);
+                              }
+                              
+                              final List<Map<String, dynamic>> userStatusGroups = [];
+                              for (var entry in groupedMap.entries) {
+                                final userId = entry.key;
+                                final userStatuses = entry.value;
+                                
+                                // Sort user's statuses from oldest to newest (WhatsApp style play order)
+                                userStatuses.sort((a, b) {
+                                  final dateA = DateTime.parse(a['createdAt'] ?? a['createdat'] ?? '');
+                                  final dateB = DateTime.parse(b['createdAt'] ?? b['createdat'] ?? '');
+                                  return dateA.compareTo(dateB);
+                                });
+                                
+                                userStatusGroups.add({
+                                  'userId': userId,
+                                  'userName': userNames[userId] ?? 'User',
+                                  'statuses': userStatuses,
+                                });
+                              }
 
-                        return ListView.builder(
-                          scrollDirection: Axis.horizontal,
-                          itemCount: userStatusGroups.length,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          itemBuilder: (context, index) {
-                            final group = userStatusGroups[index];
-                            final userName = group['userName'];
-                            final userId = group['userId'];
-                            final List<dynamic> userStatuses = group['statuses'];
+                              return ListView.builder(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: userStatusGroups.length,
+                                padding: const EdgeInsets.symmetric(horizontal: 12),
+                                itemBuilder: (context, index) {
+                                  final group = userStatusGroups[index];
+                                  final userName = group['userName'];
+                                  final userId = group['userId'];
+                                  final List<dynamic> userStatuses = group['statuses'];
 
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8),
-                              child: Column(
-                                children: [
-                                  GestureDetector(
-                                    onTap: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) => StatusViewerPage(
-                                            statuses: userStatuses.cast<Map<String, dynamic>>(),
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    child: Column(
+                                      children: [
+                                        GestureDetector(
+                                          onTap: () {
+                                            Navigator.push(
+                                              context,
+                                              MaterialPageRoute(
+                                                builder: (context) => StatusViewerPage(
+                                                  statuses: userStatuses.cast<Map<String, dynamic>>(),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          child: CustomPaint(
+                                            painter: StatusRingPainter(
+                                              statusCount: userStatuses.length,
+                                              viewedCount: 0,
+                                              unviewedColor: const Color(0xFF00BFFF), // Premium Cyan theme
+                                              viewedColor: Colors.grey,
+                                            ),
+                                            child: Container(
+                                              padding: const EdgeInsets.all(4),
+                                              child: UserAvatar(
+                                                userId: userId,
+                                                radius: 24,
+                                              ),
+                                            ),
                                           ),
                                         ),
-                                      );
-                                    },
-                                    child: CustomPaint(
-                                      painter: StatusRingPainter(
-                                        statusCount: userStatuses.length,
-                                        viewedCount: 0,
-                                        unviewedColor: const Color(0xFF00BFFF), // Premium Cyan theme
-                                        viewedColor: Colors.grey,
-                                      ),
-                                      child: Container(
-                                        padding: const EdgeInsets.all(4),
-                                        child: UserAvatar(
-                                          userId: userId,
-                                          radius: 24,
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          userName,
+                                          style: const TextStyle(color: Colors.white70, fontSize: 11),
                                         ),
-                                      ),
+                                      ],
                                     ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    userName,
-                                    style: const TextStyle(color: Colors.white70, fontSize: 11),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ),
-                // Feed: X-Style Posts
-                if (posts.isEmpty)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              _activeTab == 'Following' ? Icons.people_outline : Icons.post_add_outlined,
-                              color: _activeTab == 'Following' ? const Color(0xFFFE2C55).withOpacity(0.6) : Colors.white30,
-                              size: 72,
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              _activeTab == 'Following'
-                                  ? 'No posts from creators you follow'
-                                  : 'No posts available',
-                              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _activeTab == 'Following'
-                                  ? 'Follow creators to see their latest updates here, or switch to For You to discover new content.'
-                                  : 'Be the first to post something on Reel!',
-                              style: const TextStyle(color: Colors.white38, fontSize: 13, height: 1.3),
-                              textAlign: TextAlign.center,
-                            ),
-                            if (_activeTab == 'Following') ...[
-                              const SizedBox(height: 24),
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFFE2C55),
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _activeTab = 'For You';
-                                    _feedFuture = context.read<SupabaseService>().getExploreFeed();
-                                  });
+                                  );
                                 },
-                                child: const Text('Explore For You', style: TextStyle(fontWeight: FontWeight.bold)),
-                              ),
-                            ],
-                          ],
+                              );
+                            },
+                          ),
                         ),
                       ),
-                    ),
-                  )
-                else
-                  SliverList(
-                    delegate: SliverChildBuilderDelegate(
-                      (context, index) {
-                        return ExplorePostItem(
-                          post: posts[index],
-                          onPostUpdated: _refreshFeed,
-                        );
-                      },
-                      childCount: posts.length,
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const CreatePostScreen()),
-          );
-          if (result == true) {
-            _refreshFeed();
-          }
-        },
-        backgroundColor: Theme.of(context).primaryColor,
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
+                      // Feed: X-Style Posts
+                      if (posts.isEmpty)
+                        SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    _activeTab == 'Following' ? Icons.people_outline : Icons.post_add_outlined,
+                                    color: _activeTab == 'Following' ? const Color(0xFFFE2C55).withOpacity(0.6) : Colors.white30,
+                                    size: 72,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    _activeTab == 'Following'
+                                        ? 'No posts from creators you follow'
+                                        : 'No posts available',
+                                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    _activeTab == 'Following'
+                                        ? 'Follow creators to see their latest updates here, or switch to For You to discover new content.'
+                                        : 'Be the first to post something on Reel!',
+                                    style: const TextStyle(color: Colors.white38, fontSize: 13, height: 1.3),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  if (_activeTab == 'Following') ...[
+                                    const SizedBox(height: 24),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFFFE2C55),
+                                        foregroundColor: Colors.white,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                                      ),
+                                      onPressed: () {
+                                        setState(() {
+                                          _activeTab = 'For You';
+                                          _feedFuture = context.read<SupabaseService>().getExploreFeed();
+                                        });
+                                      },
+                                      child: const Text('Explore For You', style: TextStyle(fontWeight: FontWeight.bold)),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        SliverList(
+                          delegate: SliverChildBuilderDelegate(
+                            (context, index) {
+                              return ExplorePostItem(
+                                post: posts[index],
+                                onPostUpdated: _refreshFeed,
+                              );
+                            },
+                            childCount: posts.length,
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
+      floatingActionButton: _feedMode == 'video'
+          ? null
+          : FloatingActionButton(
+              onPressed: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CreatePostScreen()),
+                );
+                if (result == true) {
+                  _refreshFeed();
+                }
+              },
+              backgroundColor: Theme.of(context).primaryColor,
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
     );
   }
 }
@@ -1671,20 +1691,1307 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     );
   }
 
-  Widget _buildPostAction(IconData icon, String label, {bool active = false, Color? activeColor}) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final defaultActiveColor = isDark ? Colors.white : Colors.black87;
-    final effectiveActiveColor = activeColor ?? defaultActiveColor;
-    final inactiveColor = isDark ? Colors.white54 : Colors.black45;
+  }
+}
 
-    return Row(
-      children: [
-        Icon(icon, color: active ? effectiveActiveColor : inactiveColor, size: 18),
-        if (label.isNotEmpty) ...[
-          const SizedBox(width: 4),
-          Text(label, style: TextStyle(color: active ? effectiveActiveColor : inactiveColor, fontSize: 12)),
+// Immersive Vertical Paging Short Video Feed View
+class ShortVideoFeedView extends StatefulWidget {
+  final bool followingOnly;
+  final VoidCallback onBackToText;
+  const ShortVideoFeedView({
+    super.key,
+    required this.followingOnly,
+    required this.onBackToText,
+  });
+
+  @override
+  State<ShortVideoFeedView> createState() => _ShortVideoFeedViewState();
+}
+
+class _ShortVideoFeedViewState extends State<ShortVideoFeedView> {
+  late Future<List<dynamic>> _videoFeedFuture;
+  final PageController _pageController = PageController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVideoFeed();
+  }
+
+  @override
+  void didUpdateWidget(covariant ShortVideoFeedView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.followingOnly != widget.followingOnly) {
+      _loadVideoFeed();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _loadVideoFeed() {
+    setState(() {
+      _videoFeedFuture = context.read<SupabaseService>().getVideoFeed(followingOnly: widget.followingOnly);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<dynamic>>(
+      future: _videoFeedFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator(color: Color(0xFFFE2C55)));
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.white54)));
+        }
+
+        final videos = snapshot.data ?? [];
+
+        if (videos.isEmpty) {
+          return Stack(
+            children: [
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.video_collection_outlined, color: Colors.white30, size: 72),
+                      const SizedBox(height: 16),
+                      Text(
+                        widget.followingOnly ? 'No videos from creators you follow' : 'No short videos posted yet',
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.followingOnly
+                            ? 'Follow creators to see their video updates, or discover new videos on For You.'
+                            : 'Click the plus button in the top right to upload the first short video!',
+                        style: const TextStyle(color: Colors.white38, fontSize: 13, height: 1.3),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 16,
+                right: 16,
+                child: _buildCreateVideoBtn(context),
+              ),
+            ],
+          );
+        }
+
+        return Stack(
+          children: [
+            // Vertical PageView
+            PageView.builder(
+              scrollDirection: Axis.vertical,
+              controller: _pageController,
+              itemCount: videos.length,
+              itemBuilder: (context, index) {
+                return ShortVideoFeedItem(
+                  post: videos[index],
+                  onPostUpdated: _loadVideoFeed,
+                );
+              },
+            ),
+            // Floating Create Video button at the top right overlay
+            Positioned(
+              top: 16,
+              right: 16,
+              child: _buildCreateVideoBtn(context),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildCreateVideoBtn(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black45,
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white24, width: 1.5),
+      ),
+      child: IconButton(
+        icon: const Icon(Icons.add, color: Colors.white, size: 22),
+        onPressed: () async {
+          final result = await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const CreateVideoPostScreen()),
+          );
+          if (result == true) {
+            _loadVideoFeed();
+          }
+        },
+        tooltip: 'Publish Short Video',
+      ),
+    );
+  }
+}
+
+// Stateful short video player and overlay options
+class ShortVideoFeedItem extends StatefulWidget {
+  final Map<String, dynamic> post;
+  final VoidCallback onPostUpdated;
+  const ShortVideoFeedItem({
+    super.key,
+    required this.post,
+    required this.onPostUpdated,
+  });
+
+  @override
+  State<ShortVideoFeedItem> createState() => _ShortVideoFeedItemState();
+}
+
+class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTickerProviderStateMixin {
+  VideoPlayerController? _videoController;
+  late AnimationController _discController;
+  bool _isPlaying = false;
+  bool _isLiked = false;
+  late int _likesCount;
+  bool _showPlayPauseOverlay = false;
+  bool _playIconIsPlay = false;
+
+  // Custom heart pop coordinate list
+  final List<Offset> _hearts = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _likesCount = (widget.post['likes'] as num?)?.toInt() ?? 0;
+    final supabase = context.read<SupabaseService>();
+    _isLiked = supabase.likedPostIds.contains(widget.post['id']);
+
+    _discController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 4),
+    )..repeat();
+
+    _initializeVideo();
+  }
+
+  void _initializeVideo() {
+    final videoUrl = widget.post['videoUrl'] as String?;
+    if (videoUrl != null && videoUrl.isNotEmpty) {
+      _videoController = VideoPlayerController.networkUrl(Uri.parse(videoUrl))
+        ..initialize().then((_) {
+          if (mounted) {
+            setState(() {
+              _isPlaying = true;
+            });
+            _videoController!.setLooping(true);
+            _videoController!.play();
+          }
+        });
+    }
+  }
+
+  @override
+  void dispose() {
+    _videoController?.dispose();
+    _discController.dispose();
+    super.dispose();
+  }
+
+  void _togglePlayPause() {
+    if (_videoController == null || !_videoController!.value.isInitialized) return;
+    setState(() {
+      if (_isPlaying) {
+        _videoController!.pause();
+        _isPlaying = false;
+        _discController.stop();
+        _playIconIsPlay = false;
+      } else {
+        _videoController!.play();
+        _isPlaying = true;
+        _discController.repeat();
+        _playIconIsPlay = true;
+      }
+      _showPlayPauseOverlay = true;
+    });
+
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) {
+        setState(() {
+          _showPlayPauseOverlay = false;
+        });
+      }
+    });
+  }
+
+  void _onDoubleTap(TapDragUpDetails details) async {
+    final localOffset = details.localPosition;
+    setState(() {
+      _hearts.add(localOffset);
+    });
+
+    if (!_isLiked) {
+      final supabase = context.read<SupabaseService>();
+      final myId = supabase.currentUser?.id;
+      if (myId != null) {
+        setState(() {
+          _isLiked = true;
+          _likesCount++;
+        });
+        try {
+          await supabase.toggleLikePost(widget.post['id'], _likesCount - 1, true);
+        } catch (_) {}
+      }
+    }
+
+    // Auto-remove heart animation
+    Future.delayed(const Duration(milliseconds: 650), () {
+      if (mounted) {
+        setState(() {
+          _hearts.remove(localOffset);
+        });
+      }
+    });
+  }
+
+  void _toggleLike() async {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (myId == null) return;
+
+    final increment = !_isLiked;
+    setState(() {
+      _isLiked = increment;
+      _likesCount = increment ? _likesCount + 1 : (_likesCount - 1).clamp(0, 999999);
+    });
+
+    try {
+      await supabase.toggleLikePost(widget.post['id'], _likesCount + (increment ? -1 : 1), increment);
+    } catch (_) {}
+  }
+
+  void _showCommentsSheet() {
+    final textController = TextEditingController();
+    final FocusNode commentFocusNode = FocusNode();
+    Map<String, dynamic>? replyTarget;
+    final Map<String, bool> expandedReplies = {};
+    bool isStickerPickerActive = false;
+    List<dynamic>? localCommentsList;
+    bool loadingComments = true;
+    String currentSortMode = 'Popular';
+    final Set<String> likedCommentIds = {};
+    bool loadedLikesCache = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF161616),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            if (localCommentsList == null && loadingComments) {
+              final myId = context.read<SupabaseService>().currentUser?.id;
+              if (myId != null && !loadedLikesCache) {
+                LocalStorageService().getCachedJson('liked_comments_$myId').then((cached) {
+                  if (cached is List) {
+                    likedCommentIds.addAll(cached.map((e) => e.toString()));
+                  }
+                  loadedLikesCache = true;
+                });
+              }
+              context.read<SupabaseService>().getComments(widget.post['id']).then((comments) {
+                setSheetState(() {
+                  localCommentsList = List.from(comments);
+                  loadingComments = false;
+                });
+              });
+            }
+
+            Widget buildCommentItem(Map<String, dynamic> comment, {required bool isReply}) {
+              final cId = (comment['id'] ?? '').toString();
+              final cUser = comment['userName'] ?? comment['username'] ?? 'User';
+              final cText = comment['text'] ?? '';
+              final isSticker = cText.startsWith('[STICKER:') && cText.endsWith(']');
+              String? stickerUrl;
+              if (isSticker) {
+                stickerUrl = cText.substring(9, cText.length - 1);
+              }
+              final cUserId = comment['userId'] ?? comment['userid'] ?? '';
+              final cCreatedAtStr = (comment['createdAt'] ?? comment['createdat']) as String?;
+              final replyTo = comment['replyToUserName'] ?? comment['replytousername'] as String?;
+              
+              String cTimeStr = '';
+              if (cCreatedAtStr != null) {
+                try {
+                  final parsed = DateTime.parse(cCreatedAtStr).toLocal();
+                  cTimeStr = '${parsed.hour.toString().padLeft(2, '0')}:${parsed.minute.toString().padLeft(2, '0')}';
+                } catch (_) {}
+              }
+              
+              final myId = context.read<SupabaseService>().currentUser?.id;
+              final isCommentOwner = cUserId == myId;
+              final isPostOwner = (widget.post['userId'] ?? widget.post['userid']) == myId;
+              final isCreator = cUserId == (widget.post['userId'] ?? widget.post['userid']);
+              final isPinned = comment['isPinned'] == true || comment['ispinned'] == true;
+              final isLiked = likedCommentIds.contains(cId);
+              final likesCount = comment['likes'] ?? 0;
+
+              void showCommentOptions(BuildContext context, StateSetter setSheetState) {
+                showModalBottomSheet(
+                  context: context,
+                  backgroundColor: const Color(0xFF161616),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                  ),
+                  builder: (context) {
+                    return SafeArea(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            margin: const EdgeInsets.symmetric(vertical: 8),
+                            width: 36,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white24,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                          ListTile(
+                            leading: const Icon(Icons.copy, color: Colors.white70),
+                            title: const Text('Copy Comment', style: TextStyle(color: Colors.white)),
+                            onTap: () async {
+                              await Clipboard.setData(ClipboardData(text: cText));
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Comment copied to clipboard'),
+                                    duration: Duration(seconds: 1),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                          if (isPostOwner)
+                            ListTile(
+                              leading: Icon(
+                                isPinned ? Icons.push_pin_outlined : Icons.push_pin,
+                                color: Colors.white70,
+                              ),
+                              title: Text(
+                                isPinned ? 'Unpin Comment' : 'Pin Comment',
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              onTap: () async {
+                                final supabase = context.read<SupabaseService>();
+                                final navigator = Navigator.of(context);
+                                final scaffoldMessenger = ScaffoldMessenger.of(context);
+                                final currentlyPinned = isPinned;
+
+                                navigator.pop(); // Close comment options bottom sheet
+
+                                try {
+                                  if (!currentlyPinned) {
+                                    for (var c in localCommentsList ?? []) {
+                                      if (c['isPinned'] == true || c['ispinned'] == true) {
+                                        c['isPinned'] = false;
+                                        c['ispinned'] = false;
+                                        await supabase.togglePinComment(c['id'].toString(), false);
+                                      }
+                                    }
+                                  }
+
+                                  await supabase.togglePinComment(cId, !currentlyPinned);
+                                  setSheetState(() {
+                                    comment['isPinned'] = !currentlyPinned;
+                                    comment['ispinned'] = !currentlyPinned;
+                                  });
+                                  scaffoldMessenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(currentlyPinned ? 'Comment unpinned' : 'Comment pinned to top'),
+                                      backgroundColor: const Color(0xFF00FF7F),
+                                    ),
+                                  );
+                                } catch (e) {
+                                  scaffoldMessenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text('Failed to pin/unpin comment: $e'),
+                                      backgroundColor: const Color(0xFF7E1C31),
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          if (isCommentOwner || isPostOwner)
+                            ListTile(
+                              leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                              title: const Text('Delete Comment', style: TextStyle(color: Colors.redAccent)),
+                              onTap: () async {
+                                final supabase = context.read<SupabaseService>();
+                                final navigator = Navigator.of(context);
+                                final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder: (dialogCtx) => AlertDialog(
+                                    backgroundColor: const Color(0xFF121212),
+                                    title: const Text('Delete Comment', style: TextStyle(color: Colors.white)),
+                                    content: const Text('Are you sure you want to delete this comment?', style: TextStyle(color: Colors.white70)),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(dialogCtx, false),
+                                        child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+                                      ),
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(dialogCtx, true),
+                                        child: const Text('Delete', style: TextStyle(color: Colors.redAccent)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (confirm == true) {
+                                  navigator.pop(); // Close comment options bottom sheet safely
+                                  try {
+                                    await supabase.deleteComment(cId);
+                                    setSheetState(() {
+                                      localCommentsList?.removeWhere((c) => (c['id'] ?? '').toString() == cId);
+                                    });
+                                  } catch (e) {
+                                    scaffoldMessenger.showSnackBar(
+                                      SnackBar(
+                                        content: Text('Failed to delete comment: $e'),
+                                        backgroundColor: const Color(0xFF7E1C31),
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                          if (!isCommentOwner)
+                            ListTile(
+                              leading: const Icon(Icons.report_problem_outlined, color: Colors.amber),
+                              title: const Text('Report Comment', style: TextStyle(color: Colors.white)),
+                              onTap: () {
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Comment reported. Thank you for keeping Reel safe!'),
+                                    backgroundColor: Color(0xFF7E1C31),
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              }
+
+              return GestureDetector(
+                onLongPress: () => showCommentOptions(context, setSheetState),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    vertical: 6.0,
+                    horizontal: isReply ? 0.0 : 16.0,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      UserAvatar(userId: cUserId, radius: isReply ? 12 : 16),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  cUser,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: isReply ? 12 : 13,
+                                  ),
+                                ),
+                                if (isCreator) ...[
+                                  const SizedBox(width: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFFFE2C55),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'Creator',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                                if (cTimeStr.isNotEmpty) ...[
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '• $cTimeStr',
+                                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                                  ),
+                                ],
+                                if (isPinned) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: Colors.amber.withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: Colors.amber.withOpacity(0.5), width: 0.5),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: const [
+                                        Icon(Icons.push_pin, color: Colors.amber, size: 9),
+                                        SizedBox(width: 2),
+                                        Text(
+                                          'Pinned',
+                                          style: TextStyle(color: Colors.amber, fontSize: 9, fontWeight: FontWeight.bold),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                            if (isSticker && stickerUrl != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 4.0, bottom: 4.0),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: stickerUrl.startsWith('emoji:')
+                                      ? Padding(
+                                          padding: const EdgeInsets.all(4.0),
+                                          child: Text(
+                                            stickerUrl.substring(6),
+                                            style: const TextStyle(fontSize: 54),
+                                          ),
+                                        )
+                                      : (stickerUrl.startsWith('assets/')
+                                          ? Image.asset(
+                                              stickerUrl,
+                                              width: 80,
+                                              height: 80,
+                                              fit: BoxFit.contain,
+                                            )
+                                          : Image.network(
+                                              stickerUrl,
+                                              width: 80,
+                                              height: 80,
+                                              fit: BoxFit.contain,
+                                              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, color: Colors.white24, size: 24),
+                                            )),
+                                ),
+                              )
+                            else
+                              RichText(
+                                text: TextSpan(
+                                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                                  children: [
+                                    if (isReply && replyTo != null && replyTo.isNotEmpty) ...[
+                                      TextSpan(
+                                        text: '@$replyTo ',
+                                        style: const TextStyle(
+                                          color: Color(0xFF00BFFF),
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                    TextSpan(text: cText),
+                                  ],
+                                ),
+                              ),
+                            const SizedBox(height: 4),
+                            Row(
+                              children: [
+                                GestureDetector(
+                                  onTap: () {
+                                    setSheetState(() {
+                                      replyTarget = {
+                                        'parentId': comment['parentId'] ?? comment['parentid'] ?? comment['id'],
+                                        'userName': cUser,
+                                      };
+                                    });
+                                    commentFocusNode.requestFocus();
+                                  },
+                                  child: const Text(
+                                    'Reply',
+                                    style: TextStyle(
+                                      color: Colors.white54,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          GestureDetector(
+                            onTap: () async {
+                              final supabase = context.read<SupabaseService>();
+                              final myId = supabase.currentUser?.id;
+                              if (myId == null) return;
+
+                              final isIncrement = !isLiked;
+                              setSheetState(() {
+                                if (isIncrement) {
+                                  likedCommentIds.add(cId);
+                                  comment['likes'] = (comment['likes'] ?? 0) + 1;
+                                } else {
+                                  likedCommentIds.remove(cId);
+                                  comment['likes'] = ((comment['likes'] ?? 0) - 1).clamp(0, 999999);
+                                }
+                              });
+
+                              try {
+                                await supabase.toggleLikeComment(cId, likesCount, isIncrement);
+                                await LocalStorageService().cacheJson('liked_comments_$myId', likedCommentIds.toList());
+                              } catch (_) {}
+                            },
+                            child: Icon(
+                              isLiked ? Icons.favorite : Icons.favorite_border,
+                              color: isLiked ? const Color(0xFFFE2C55) : Colors.white30,
+                              size: 18,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            likesCount > 0 ? '$likesCount' : '0',
+                            style: const TextStyle(color: Colors.white30, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.more_vert, color: Colors.white30, size: 18),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => showCommentOptions(context, setSheetState),
+                      )
+                    ],
+                  ),
+                ),
+              );
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+              child: Container(
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.7),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.symmetric(vertical: 12),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            localCommentsList != null
+                                ? '${localCommentsList!.where((c) => c['parentId'] == null && c['parentid'] == null).length} comments'
+                                : 'Comments',
+                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                          DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: currentSortMode,
+                              dropdownColor: const Color(0xFF1E1E1E),
+                              icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 16),
+                              style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold),
+                              items: const [
+                                DropdownMenuItem(
+                                  value: 'Popular',
+                                  child: Text('Popular'),
+                                ),
+                                DropdownMenuItem(
+                                  value: 'Latest',
+                                  child: Text('Latest'),
+                                ),
+                              ],
+                              onChanged: (val) {
+                                if (val != null) {
+                                  setSheetState(() {
+                                    currentSortMode = val;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: loadingComments
+                          ? const Center(child: CircularProgressIndicator())
+                          : (() {
+                              final allComments = localCommentsList ?? [];
+                              if (allComments.isEmpty) {
+                                return const Center(
+                                  child: Text(
+                                    'Be the first to reply!',
+                                    style: TextStyle(color: Colors.white30, fontSize: 14),
+                                  ),
+                                );
+                              }
+
+                              final parentComments = allComments
+                                  .where((c) => c['parentId'] == null && c['parentid'] == null)
+                                  .toList();
+                              
+                              parentComments.sort((a, b) {
+                                final aPinned = a['isPinned'] == true || a['ispinned'] == true;
+                                final bPinned = b['isPinned'] == true || b['ispinned'] == true;
+                                if (aPinned && !bPinned) return -1;
+                                if (!aPinned && bPinned) return 1;
+
+                                if (currentSortMode == 'Popular') {
+                                  final aLikes = a['likes'] ?? 0;
+                                  final bLikes = b['likes'] ?? 0;
+                                  if (aLikes != bLikes) {
+                                    return bLikes.compareTo(aLikes);
+                                  }
+                                }
+
+                                final aTime = DateTime.tryParse(a['createdAt'] ?? a['createdat'] ?? '') ?? DateTime.now();
+                                final bTime = DateTime.tryParse(b['createdAt'] ?? b['createdat'] ?? '') ?? DateTime.now();
+                                return bTime.compareTo(aTime);
+                              });
+
+                              final childReplies = <String, List<dynamic>>{};
+                              for (var c in allComments) {
+                                final parentIdVal = c['parentId'] ?? c['parentid'];
+                                if (parentIdVal != null) {
+                                  final pIdStr = parentIdVal.toString();
+                                  childReplies.putIfAbsent(pIdStr, () => []).add(c);
+                                }
+                              }
+
+                              return ListView.builder(
+                                itemCount: parentComments.length,
+                                padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                                itemBuilder: (context, idx) {
+                                  final parent = parentComments[idx];
+                                  final pId = (parent['id'] ?? '').toString();
+                                  final replies = childReplies[pId] ?? [];
+                                  final isExpanded = expandedReplies[pId] ?? false;
+
+                                  return Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      buildCommentItem(parent, isReply: false),
+                                      if (replies.isNotEmpty) ...[
+                                        Padding(
+                                          padding: const EdgeInsets.only(left: 58.0, bottom: 4.0),
+                                          child: GestureDetector(
+                                            onTap: () {
+                                              setSheetState(() {
+                                                expandedReplies[pId] = !isExpanded;
+                                              });
+                                            },
+                                            child: Row(
+                                              children: [
+                                                Container(
+                                                  width: 24,
+                                                  height: 1,
+                                                  color: Colors.white24,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  isExpanded
+                                                      ? 'Hide replies'
+                                                      : 'View replies (${replies.length})',
+                                                  style: const TextStyle(
+                                                    color: Colors.white54,
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        if (isExpanded)
+                                          Padding(
+                                            padding: const EdgeInsets.only(left: 40.0),
+                                            child: Column(
+                                              children: replies
+                                                  .map((r) => buildCommentItem(r, isReply: true))
+                                                  .toList(),
+                                            ),
+                                          ),
+                                      ],
+                                    ],
+                                  );
+                                },
+                              );
+                            }()),
+                    ),
+                    if (replyTarget != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        color: Colors.white.withOpacity(0.05),
+                        child: Row(
+                          children: [
+                            Text(
+                              'Replying to @${replyTarget!['userName']}',
+                              style: const TextStyle(color: Color(0xFF00BFFF), fontSize: 12, fontWeight: FontWeight.bold),
+                            ),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: () {
+                                setSheetState(() {
+                                    replyTarget = null;
+                                });
+                              },
+                              child: const Icon(Icons.close, color: Colors.white54, size: 16),
+                            ),
+                          ],
+                        ),
+                      ),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1F1F1F),
+                        border: Border(top: BorderSide(color: Colors.white.withOpacity(0.08))),
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: Icon(
+                              isStickerPickerActive ? Icons.keyboard : Icons.face,
+                              color: Colors.white70,
+                            ),
+                            onPressed: () {
+                              setSheetState(() {
+                                isStickerPickerActive = !isStickerPickerActive;
+                                if (isStickerPickerActive) {
+                                  commentFocusNode.unfocus();
+                                } else {
+                                  commentFocusNode.requestFocus();
+                                }
+                              });
+                            },
+                          ),
+                          Expanded(
+                            child: TextField(
+                              controller: textController,
+                              focusNode: commentFocusNode,
+                              style: const TextStyle(color: Colors.white),
+                              decoration: const InputDecoration(
+                                hintText: 'Add a comment...',
+                                hintStyle: TextStyle(color: Colors.white38),
+                                border: InputBorder.none,
+                              ),
+                              onTap: () {
+                                if (isStickerPickerActive) {
+                                  setSheetState(() {
+                                    isStickerPickerActive = false;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.send, color: Color(0xFF00BFFF)),
+                            onPressed: () async {
+                              final text = textController.text.trim();
+                              if (text.isEmpty) return;
+                              final supabase = context.read<SupabaseService>();
+                              final myProfile = await supabase.getUserProfile(supabase.currentUser!.id);
+                              final userName = myProfile?['name'] ?? 'User';
+
+                              try {
+                                final newComment = await supabase.createComment(
+                                  widget.post['id'],
+                                  text,
+                                  parentId: replyTarget?['parentId'],
+                                  replyToUserName: replyTarget?.containsKey('userName') == true ? replyTarget!['userName'] : null,
+                                );
+                                setSheetState(() {
+                                  localCommentsList?.add(newComment);
+                                  textController.clear();
+                                  replyTarget = null;
+                                });
+                                setState(() {
+                                  _commentsCount++;
+                                });
+                              } catch (e) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Failed to post comment: $e'),
+                                    backgroundColor: const Color(0xFF7E1C31),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (isStickerPickerActive)
+                      SizedBox(
+                        height: 250,
+                        child: StickerPicker(
+                          onStickerSelected: (stickerPath) async {
+                            final stickerText = '[STICKER:$stickerPath]';
+                            final supabase = context.read<SupabaseService>();
+                            final myProfile = await supabase.getUserProfile(supabase.currentUser!.id);
+                            final userName = myProfile?['name'] ?? 'User';
+
+                            try {
+                              final newComment = await supabase.createComment(
+                                widget.post['id'],
+                                stickerText,
+                                parentId: replyTarget?['parentId'],
+                                replyToUserName: replyTarget?.containsKey('userName') == true ? replyTarget!['userName'] : null,
+                              );
+                              setSheetState(() {
+                                localCommentsList?.add(newComment);
+                                replyTarget = null;
+                                isStickerPickerActive = false;
+                              });
+                              setState(() {
+                                _commentsCount++;
+                              });
+                            } catch (e) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Failed to post sticker: $e'),
+                                  backgroundColor: const Color(0xFF7E1C31),
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final videoUrl = widget.post['videoUrl'] as String?;
+    final caption = widget.post['text'] ?? '';
+    final creatorId = widget.post['userId'] ?? widget.post['userid'] ?? '';
+    final creatorName = widget.post['userName'] ?? widget.post['username'] ?? 'User';
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // Video Player
+          if (_videoController != null && _videoController!.value.isInitialized)
+            GestureDetector(
+              onTap: _togglePlayPause,
+              onTapDragUp: _onDoubleTap,
+              child: SizedBox.expand(
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: _videoController!.value.size.width,
+                    height: _videoController!.value.size.height,
+                    child: VideoPlayer(_videoController!),
+                  ),
+                ),
+              ),
+            )
+          else
+            const Center(
+              child: CircularProgressIndicator(color: Color(0xFFFE2C55)),
+            ),
+
+          // Custom Play/Pause Overlay indicator
+          if (_showPlayPauseOverlay)
+            Center(
+              child: AnimatedOpacity(
+                opacity: _showPlayPauseOverlay ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 300),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: const BoxDecoration(
+                    color: Colors.black45,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    _playIconIsPlay ? Icons.play_arrow : Icons.pause,
+                    color: Colors.white,
+                    size: 40,
+                  ),
+                ),
+              ),
+            ),
+
+          // Heart Coordinate pop animations
+          ..._hearts.map((offset) {
+            return Positioned(
+              left: offset.dx - 40,
+              top: offset.dy - 40,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(begin: 0.0, end: 1.0),
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.elasticOut,
+                builder: (context, scale, child) {
+                  return Transform.scale(
+                    scale: scale,
+                    child: Opacity(
+                      opacity: (2.0 - scale * 2.0).clamp(0.0, 1.0),
+                      child: const Icon(
+                        Icons.favorite,
+                        color: Color(0xFFFE2C55),
+                        size: 80,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          }),
+
+          // Dark vignette overlays
+          IgnorePointer(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black54,
+                    Colors.transparent,
+                    Colors.transparent,
+                    Colors.black87,
+                  ],
+                  stops: [0.0, 0.2, 0.8, 1.0],
+                ),
+              ),
+            ),
+          ),
+
+          // Left/Bottom Creator Profile and Description Details
+          Positioned(
+            left: 16,
+            bottom: 40,
+            right: 80,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                GestureDetector(
+                  onTap: () {
+                    if (creatorId.isNotEmpty) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ReelProfilePage(userId: creatorId),
+                        ),
+                      );
+                    }
+                  },
+                  child: Text(
+                    '@$creatorName',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  caption,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                  ),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    const Icon(Icons.music_note, color: Colors.white70, size: 14),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: SizedBox(
+                        height: 20,
+                        child: Text(
+                          'Original Audio - $creatorName',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Right Vertical Button Overlay actions
+          Positioned(
+            right: 16,
+            bottom: 60,
+            child: Column(
+              children: [
+                // Avatar with creator badge
+                GestureDetector(
+                  onTap: () {
+                    if (creatorId.isNotEmpty) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ReelProfilePage(userId: creatorId),
+                        ),
+                      );
+                    }
+                  },
+                  child: Stack(
+                    alignment: Alignment.bottomCenter,
+                    clipBehavior: Clip.none,
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 1.5),
+                        ),
+                        child: UserAvatar(userId: creatorId, radius: 22),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Heart/Like
+                _buildActionItem(
+                  icon: _isLiked ? Icons.favorite : Icons.favorite_border,
+                  label: '$_likesCount',
+                  color: _isLiked ? const Color(0xFFFE2C55) : Colors.white,
+                  onTap: _toggleLike,
+                ),
+                const SizedBox(height: 20),
+
+                // Comments
+                _buildActionItem(
+                  icon: Icons.comment_bank_outlined,
+                  label: 'Comment',
+                  onTap: _showCommentsSheet,
+                ),
+                const SizedBox(height: 20),
+
+                // Share / Repost
+                _buildActionItem(
+                  icon: Icons.reply_outlined,
+                  label: 'Share',
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: caption));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Video description copied to clipboard'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 28),
+
+                // Rotating Music Vinyl disc
+                RotationTransition(
+                  turns: _discController,
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          Color(0xFF272727),
+                          Colors.black,
+                        ],
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.album,
+                      color: Colors.white30,
+                      size: 26,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
-      ],
+      ),
+    );
+  }
+
+  Widget _buildActionItem({
+    required IconData icon,
+    required String label,
+    Color color = Colors.white,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.black45,
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withOpacity(0.06), width: 1.0),
+            ),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

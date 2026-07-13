@@ -637,4 +637,8 @@ CREATE POLICY "App settings modifiable by admins only" ON public.app_settings
 ALTER TABLE public.comments ADD COLUMN IF NOT EXISTS "likes" INT DEFAULT 0;
 ALTER TABLE public.comments ADD COLUMN IF NOT EXISTS "isPinned" BOOLEAN DEFAULT false;
 
+-- Migration statements for short-video posts support:
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "videoUrl" TEXT;
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "mediaType" TEXT DEFAULT 'text';
+
 
