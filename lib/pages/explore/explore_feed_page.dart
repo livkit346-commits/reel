@@ -1943,7 +1943,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
 
   late int _repostsCount;
   bool _isReposted = false;
-  BoxFit _fitMode = BoxFit.cover;
+  BoxFit _fitMode = BoxFit.contain;
 
   // Custom heart pop coordinate list
   final List<Offset> _hearts = [];
@@ -3314,7 +3314,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
           // Right Vertical Button Overlay actions
           Positioned(
             right: 16,
-            bottom: 50,
+            bottom: 96,
             child: Column(
               children: [
                 // Avatar with creator badge
@@ -3343,7 +3343,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                     ],
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
 
                 // Heart/Like
                 _buildActionItem(
@@ -3352,7 +3352,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                   color: _isLiked ? const Color(0xFFFE2C55) : Colors.white,
                   onTap: _toggleLike,
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
 
                 // Comments (TikTok style speech bubble)
                 _buildActionItem(
@@ -3360,7 +3360,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                   label: '$_commentsCount',
                   onTap: _showCommentsSheet,
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
 
                 // Repost Button
                 _buildActionItem(
@@ -3369,7 +3369,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                   color: _isReposted ? const Color(0xFF00FF7F) : Colors.white,
                   onTap: _toggleRepost,
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
 
                 // Share
                 _buildActionItem(
@@ -3377,7 +3377,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                   label: 'Share',
                   onTap: _showShareSheet,
                 ),
-                const SizedBox(height: 18),
+                const SizedBox(height: 14),
 
                 // Video Resize / Fit Mode Toggle
                 _buildActionItem(
@@ -3389,30 +3389,33 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                     });
                   },
                 ),
-                const SizedBox(height: 20),
+              ],
+            ),
+          ),
 
-                // Rotating Music Vinyl disc
-                RotationTransition(
-                  turns: _discController,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: const BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          Color(0xFF272727),
-                          Colors.black,
-                        ],
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.album,
-                      color: Colors.white30,
-                      size: 26,
-                    ),
+          // Rotating Music Vinyl disc
+          Positioned(
+            right: 16,
+            bottom: 30,
+            child: RotationTransition(
+              turns: _discController,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      Color(0xFF272727),
+                      Colors.black,
+                    ],
                   ),
                 ),
-              ],
+                child: const Icon(
+                  Icons.album,
+                  color: Colors.white30,
+                  size: 26,
+                ),
+              ),
             ),
           ),
         ],
@@ -3430,22 +3433,32 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
       onTap: onTap,
       child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.black45,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withOpacity(0.06), width: 1.0),
-            ),
-            child: Icon(icon, color: color, size: 24),
+          Icon(
+            icon,
+            color: color,
+            size: 30,
+            shadows: [
+              Shadow(
+                color: Colors.black.withOpacity(0.6),
+                offset: const Offset(0, 1),
+                blurRadius: 3,
+              ),
+            ],
           ),
           const SizedBox(height: 4),
           Text(
             label,
             style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 11,
+              color: Colors.white,
+              fontSize: 12,
               fontWeight: FontWeight.bold,
+              shadows: [
+                Shadow(
+                  color: Colors.black45,
+                  offset: Offset(0, 1),
+                  blurRadius: 2,
+                ),
+              ],
             ),
           ),
         ],
