@@ -1859,6 +1859,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   bool _isPlaying = false;
   bool _isLiked = false;
   late int _likesCount;
+  int _commentsCount = 0;
   bool _showPlayPauseOverlay = false;
   bool _playIconIsPlay = false;
 
@@ -1878,6 +1879,18 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     )..repeat();
 
     _initializeVideo();
+    _loadCommentsCount();
+  }
+
+  Future<void> _loadCommentsCount() async {
+    try {
+      final comments = await context.read<SupabaseService>().getComments(widget.post['id']);
+      if (mounted) {
+        setState(() {
+          _commentsCount = comments.length;
+        });
+      }
+    } catch (_) {}
   }
 
   void _initializeVideo() {
@@ -1929,7 +1942,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     });
   }
 
-  void _onDoubleTap(TapDragUpDetails details) async {
+  void _onDoubleTap(TapDownDetails details) async {
     final localOffset = details.localPosition;
     setState(() {
       _hearts.add(localOffset);
@@ -2636,7 +2649,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                               final userName = myProfile?['name'] ?? 'User';
 
                               try {
-                                final newComment = await supabase.createComment(
+                                final newComment = await supabase.addComment(
                                   widget.post['id'],
                                   text,
                                   parentId: replyTarget?['parentId'],
@@ -2674,7 +2687,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                             final userName = myProfile?['name'] ?? 'User';
 
                             try {
-                              final newComment = await supabase.createComment(
+                              final newComment = await supabase.addComment(
                                 widget.post['id'],
                                 stickerText,
                                 parentId: replyTarget?['parentId'],
@@ -2724,7 +2737,8 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
           if (_videoController != null && _videoController!.value.isInitialized)
             GestureDetector(
               onTap: _togglePlayPause,
-              onTapDragUp: _onDoubleTap,
+              onDoubleTap: () {},
+              onDoubleTapDown: _onDoubleTap,
               child: SizedBox.expand(
                 child: FittedBox(
                   fit: BoxFit.cover,
@@ -2912,7 +2926,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                 // Comments
                 _buildActionItem(
                   icon: Icons.comment_bank_outlined,
-                  label: 'Comment',
+                  label: '$_commentsCount',
                   onTap: _showCommentsSheet,
                 ),
                 const SizedBox(height: 20),
