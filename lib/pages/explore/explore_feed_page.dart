@@ -12,6 +12,7 @@ import 'package:reel/pages/updates/status_viewer_screen.dart';
 import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/status_ring_painter.dart';
 import 'package:video_player/video_player.dart';
+import 'package:reel/services/local_storage_service.dart';
 
 class ExploreFeedPage extends StatefulWidget {
   const ExploreFeedPage({super.key});
@@ -1691,6 +1692,21 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     );
   }
 
+  Widget _buildPostAction(IconData icon, String label, {bool active = false, Color? activeColor}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final defaultActiveColor = isDark ? Colors.white : Colors.black87;
+    final effectiveActiveColor = activeColor ?? defaultActiveColor;
+    final inactiveColor = isDark ? Colors.white54 : Colors.black45;
+
+    return Row(
+      children: [
+        Icon(icon, color: active ? effectiveActiveColor : inactiveColor, size: 18),
+        if (label.isNotEmpty) ...[
+          const SizedBox(width: 4),
+          Text(label, style: TextStyle(color: active ? effectiveActiveColor : inactiveColor, fontSize: 12)),
+        ],
+      ],
+    );
   }
 }
 
