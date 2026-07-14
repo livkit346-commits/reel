@@ -916,16 +916,14 @@ class SupabaseService {
       final userProfile = await getUserProfile(myId);
       final userName = userProfile?['name'] ?? 'User';
 
-      final fileName = 'video_${DateTime.now().millisecondsSinceEpoch}.mp4';
-      final storagePath = 'posts/$myId/$fileName';
-
-      // supabse storage upload with manual updates or direct upload
-      await client.storage.from('media').upload(storagePath, videoFile);
-      final videoUrl = getMediaUrl('media', storagePath);
+      statusUploadProgress.value = 0.0;
+      final videoUrl = await uploadToR2(videoFile);
 
       await createPost(myId, userName, text, null, videoUrl: videoUrl, mediaType: 'video');
     } catch (e) {
       rethrow;
+    } finally {
+      statusUploadProgress.value = null;
     }
   }
 

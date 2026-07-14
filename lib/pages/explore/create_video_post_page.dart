@@ -338,16 +338,31 @@ class _CreateVideoPostScreenState extends State<CreateVideoPostScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 24.0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const CircularProgressIndicator(color: Color(0xFFFE2C55)),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Uploading video post...',
-                          style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87),
-                        ),
-                      ],
+                    child: ValueListenableBuilder<double?>(
+                      valueListenable: context.read<SupabaseService>().statusUploadProgress,
+                      builder: (context, progress, _) {
+                        final displayPercent = progress != null ? (progress * 100).toInt() : null;
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(
+                              value: progress,
+                              color: const Color(0xFFFE2C55),
+                              backgroundColor: isDark ? Colors.white12 : Colors.black12,
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              displayPercent != null
+                                  ? 'Uploading video ($displayPercent%)...'
+                                  : 'Publishing post...',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ),
