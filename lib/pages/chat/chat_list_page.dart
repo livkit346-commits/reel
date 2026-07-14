@@ -285,7 +285,7 @@ class _ChatListPageState extends State<ChatListPage> {
                           onLongPress: () => _toggleSelection(chatId),
                           leading: isGroup
                               ? CircleAvatar(
-                                  radius: 26,
+                                  radius: 22,
                                   backgroundColor: Colors.indigo.withOpacity(0.3),
                                   backgroundImage: chatIcon != null && chatIcon.isNotEmpty
                                       ? NetworkImage(chatIcon)
@@ -296,7 +296,7 @@ class _ChatListPageState extends State<ChatListPage> {
                                 )
                               : UserAvatar(
                                   userId: otherUserId,
-                                  radius: 26,
+                                  radius: 22,
                                   onTap: () {
                                     if (_selectedChats.isNotEmpty) {
                                       _toggleSelection(chatId);

@@ -13,6 +13,8 @@ import 'package:reel/widgets/user_avatar.dart';
 import 'package:reel/widgets/status_ring_painter.dart';
 import 'package:video_player/video_player.dart';
 import 'package:reel/services/local_storage_service.dart';
+import 'package:reel/pages/explore/explore_search_page.dart';
+import 'package:reel/pages/explore/full_screen_video_viewer.dart';
 
 class ExploreFeedPage extends StatefulWidget {
   final bool isActive;
@@ -118,6 +120,18 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
             _buildTabButton('For You', context),
           ],
         ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.search, color: textColor),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ExploreSearchPage()),
+              );
+            },
+            tooltip: 'Search Reel',
+          ),
+        ],
       ),
       body: _feedMode == 'video'
           ? ShortVideoFeedView(
@@ -1650,6 +1664,67 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                             ),
                           ),
                         ),
+                      if (widget.post['mediaType'] == 'video' && widget.post['videoUrl'] != null)
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => FullScreenVideoViewer(
+                                  videoUrl: widget.post['videoUrl'],
+                                  post: widget.post,
+                                ),
+                              ),
+                            );
+                          },
+                          child: Container(
+                            margin: const EdgeInsets.only(top: 12),
+                            width: double.infinity,
+                            height: 200,
+                            decoration: BoxDecoration(
+                              color: Colors.black,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: borderSideColor, width: 0.5),
+                            ),
+                            child: Stack(
+                              alignment: Alignment.center,
+                              children: [
+                                Container(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(16),
+                                    color: Colors.white.withOpacity(0.05),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black54,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.play_arrow, color: Color(0xFFFE2C55), size: 36),
+                                ),
+                                Positioned(
+                                  bottom: 12,
+                                  left: 12,
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.videocam_outlined, color: Colors.white70, size: 16),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Short Video',
+                                        style: TextStyle(
+                                          color: Colors.white.withOpacity(0.8),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                     ],
                     const SizedBox(height: 12),
                     Row(
@@ -1893,6 +1968,10 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   bool _showPlayPauseOverlay = false;
   bool _playIconIsPlay = false;
 
+  late int _repostsCount;
+  bool _isReposted = false;
+  BoxFit _fitMode = BoxFit.cover;
+
   // Custom heart pop coordinate list
   final List<Offset> _hearts = [];
 
@@ -1900,8 +1979,10 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   void initState() {
     super.initState();
     _likesCount = (widget.post['likes'] as num?)?.toInt() ?? 0;
+    _repostsCount = (widget.post['reposts'] as num?)?.toInt() ?? 0;
     final supabase = context.read<SupabaseService>();
     _isLiked = supabase.likedPostIds.contains(widget.post['id']);
+    _isReposted = false;
 
     _discController = AnimationController(
       vsync: this,
@@ -2052,6 +2133,293 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     try {
       await supabase.toggleLikePost(widget.post['id'], _likesCount + (increment ? -1 : 1), increment);
     } catch (_) {}
+  }
+
+  Future<void> _toggleRepost() async {
+    final quoteText = await showDialog<String?>(
+      context: context,
+      builder: (context) {
+        final controller = TextEditingController();
+        return AlertDialog(
+          backgroundColor: const Color(0xFF161618),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: Colors.white12),
+          ),
+          title: const Text('Repost or Quote Video?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Add your thoughts (Quote) or leave empty for a normal Repost:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                maxLines: 3,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: "What do you think of this video?",
+                  hintStyle: const TextStyle(color: Colors.white30),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.05),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+              onPressed: () {
+                Navigator.pop(context, controller.text.trim());
+              },
+              child: const Text('Share'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (quoteText == null) return;
+
+    setState(() {
+      _isReposted = true;
+      _repostsCount++;
+    });
+
+    try {
+      final supabase = context.read<SupabaseService>();
+      final myId = supabase.currentUser?.id;
+      if (myId != null) {
+        final userProfile = await supabase.getUserProfile(myId);
+        final userName = userProfile?['name'] ?? 'User';
+        if (quoteText.isEmpty) {
+          await supabase.createPost(myId, userName, '[REPOST:${widget.post['id']}]', null);
+        } else {
+          await supabase.createPost(myId, userName, '[QUOTE:${widget.post['id']}] $quoteText', null);
+        }
+        await supabase.repostPost(widget.post['id'], widget.post['reposts'] ?? 0);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Video reposted successfully')),
+          );
+          widget.onPostUpdated();
+        }
+      }
+    } catch (e) {
+      debugPrint("Error reposting: $e");
+    }
+  }
+
+  void _showShareSheet() async {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    final videoUrl = widget.post['videoUrl'] as String? ?? '';
+    final caption = widget.post['text'] ?? '';
+
+    List<dynamic> activeChats = [];
+    bool loadingChats = true;
+
+    if (myId != null) {
+      try {
+        activeChats = await supabase.getActiveChats();
+        loadingChats = false;
+      } catch (_) {
+        loadingChats = false;
+      }
+    }
+
+    if (mounted) {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: const Color(0xFF16161C),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (context) {
+          return StatefulBuilder(
+            builder: (context, setShareState) {
+              return Container(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.bottom(16),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const Text(
+                      'Send to',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    // Horizontal Send list
+                    SizedBox(
+                      height: 90,
+                      child: loadingChats
+                          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFE2C55)))
+                          : activeChats.isEmpty
+                              ? const Center(child: Text('No active chats', style: TextStyle(color: Colors.white30, fontSize: 13)))
+                              : ListView.builder(
+                                  scrollDirection: Axis.horizontal,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                                  itemCount: activeChats.length,
+                                  itemBuilder: (context, index) {
+                                    final chat = activeChats[index];
+                                    final chatName = chat['chatName'] ?? 'Chat';
+                                    final otherUserId = chat['otherUserId'] ?? '';
+                                    
+                                    return GestureDetector(
+                                      onTap: () async {
+                                        Navigator.pop(context);
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(content: Text('Sending video...')),
+                                        );
+                                        try {
+                                          await supabase.sendMessage(
+                                            chatId: chat['chatId'],
+                                            text: caption.isNotEmpty ? caption : 'Shared a video',
+                                            mediaUrl: videoUrl,
+                                            mediaType: 'video',
+                                          );
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('Sent to $chatName'),
+                                                backgroundColor: Colors.green,
+                                              ),
+                                            );
+                                          }
+                                        } catch (e) {
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(
+                                                content: Text('Failed to send: $e'),
+                                                backgroundColor: const Color(0xFF7E1C31),
+                                              ),
+                                            );
+                                          }
+                                        }
+                                      },
+                                      child: Container(
+                                        width: 80,
+                                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                                        child: Column(
+                                          children: [
+                                            UserAvatar(userId: otherUserId, radius: 24),
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              chatName,
+                                              style: const TextStyle(color: Colors.white70, fontSize: 11),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              textAlign: TextAlign.center,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                    ),
+                    
+                    const Divider(color: Colors.white12, height: 24),
+                    
+                    // Utilities row
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _buildShareAction(
+                            icon: Icons.link,
+                            label: 'Copy Link',
+                            onTap: () {
+                              Navigator.pop(context);
+                              Clipboard.setData(ClipboardData(text: videoUrl));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Video link copied to clipboard')),
+                              );
+                            },
+                          ),
+                          _buildShareAction(
+                            icon: Icons.repeat,
+                            label: 'Repost',
+                            onTap: () {
+                              Navigator.pop(context);
+                              _toggleRepost();
+                            },
+                          ),
+                          _buildShareAction(
+                            icon: Icons.save_alt,
+                            label: 'Save Video',
+                            onTap: () {
+                              Navigator.pop(context);
+                              Clipboard.setData(ClipboardData(text: videoUrl));
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Video link copied to clipboard. Paste in browser to download!')),
+                              );
+                            },
+                          ),
+                          _buildShareAction(
+                            icon: Icons.report,
+                            label: 'Report',
+                            onTap: () async {
+                              Navigator.pop(context);
+                              await supabase.reportPost(widget.post['id']);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Video reported successfully')),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      );
+    }
+  }
+
+  Widget _buildShareAction({required IconData icon, required String label, required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.06),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: Colors.white, size: 24),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white70, fontSize: 11),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showCommentsSheet() {
@@ -2807,7 +3175,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
               onDoubleTapDown: _onDoubleTap,
               child: SizedBox.expand(
                 child: FittedBox(
-                  fit: BoxFit.cover,
+                  fit: _fitMode,
                   child: SizedBox(
                     width: _videoController!.value.size.width,
                     height: _videoController!.value.size.height,
@@ -2890,7 +3258,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
           // Left/Bottom Creator Profile and Description Details
           Positioned(
             left: 16,
-            bottom: 40,
+            bottom: 30,
             right: 80,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -2922,10 +3290,10 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                     color: Colors.white,
                     fontSize: 14,
                   ),
-                  maxLines: 3,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 8),
                 Row(
                   children: [
                     const Icon(Icons.music_note, color: Colors.white70, size: 14),
@@ -2942,6 +3310,30 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                     ),
                   ],
                 ),
+                const SizedBox(height: 12),
+                
+                // Bottom TikTok-Style Add Comment Input Bar Overlay
+                GestureDetector(
+                  onTap: _showCommentsSheet,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.white.withOpacity(0.05)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_outlined, color: Colors.white.withOpacity(0.6), size: 14),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Add comment...',
+                          style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -2949,7 +3341,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
           // Right Vertical Button Overlay actions
           Positioned(
             right: 16,
-            bottom: 60,
+            bottom: 50,
             child: Column(
               children: [
                 // Avatar with creator badge
@@ -2978,7 +3370,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                     ],
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
 
                 // Heart/Like
                 _buildActionItem(
@@ -2987,31 +3379,44 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                   color: _isLiked ? const Color(0xFFFE2C55) : Colors.white,
                   onTap: _toggleLike,
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
 
-                // Comments
+                // Comments (TikTok style speech bubble)
                 _buildActionItem(
-                  icon: Icons.comment_bank_outlined,
+                  icon: Icons.chat_bubble,
                   label: '$_commentsCount',
                   onTap: _showCommentsSheet,
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
 
-                // Share / Repost
+                // Repost Button
+                _buildActionItem(
+                  icon: Icons.repeat,
+                  label: '$_repostsCount',
+                  color: _isReposted ? const Color(0xFF00FF7F) : Colors.white,
+                  onTap: _toggleRepost,
+                ),
+                const SizedBox(height: 18),
+
+                // Share
                 _buildActionItem(
                   icon: Icons.reply_outlined,
                   label: 'Share',
+                  onTap: _showShareSheet,
+                ),
+                const SizedBox(height: 18),
+
+                // Video Resize / Fit Mode Toggle
+                _buildActionItem(
+                  icon: _fitMode == BoxFit.cover ? Icons.aspect_ratio : Icons.fullscreen,
+                  label: _fitMode == BoxFit.cover ? 'Fit' : 'Cover',
                   onTap: () {
-                    Clipboard.setData(ClipboardData(text: caption));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Video description copied to clipboard'),
-                        duration: Duration(seconds: 1),
-                      ),
-                    );
+                    setState(() {
+                      _fitMode = _fitMode == BoxFit.cover ? BoxFit.contain : BoxFit.cover;
+                    });
                   },
                 ),
-                const SizedBox(height: 28),
+                const SizedBox(height: 20),
 
                 // Rotating Music Vinyl disc
                 RotationTransition(
