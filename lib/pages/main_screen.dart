@@ -28,14 +28,6 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
-  final List<Widget> _pages = [
-    const ChatListPage(),
-    const ExploreFeedPage(),
-    const UpdatesPage(),
-    const AddFriendsPage(),
-    const ReelProfilePage(),
-  ];
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -46,7 +38,13 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       body: IndexedStack(
         index: _selectedIndex,
-        children: _pages,
+        children: [
+          const ChatListPage(),
+          ExploreFeedPage(isActive: _selectedIndex == 1),
+          const UpdatesPage(),
+          const AddFriendsPage(),
+          const ReelProfilePage(),
+        ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,

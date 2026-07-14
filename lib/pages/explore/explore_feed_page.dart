@@ -15,7 +15,8 @@ import 'package:video_player/video_player.dart';
 import 'package:reel/services/local_storage_service.dart';
 
 class ExploreFeedPage extends StatefulWidget {
-  const ExploreFeedPage({super.key});
+  final bool isActive;
+  const ExploreFeedPage({super.key, this.isActive = true});
 
   @override
   State<ExploreFeedPage> createState() => _ExploreFeedPageState();
@@ -121,6 +122,7 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
       body: _feedMode == 'video'
           ? ShortVideoFeedView(
               followingOnly: _activeTab == 'Following',
+              isParentActive: widget.isActive,
               onBackToText: () {
                 setState(() {
                   _feedMode = 'text';
@@ -1713,10 +1715,12 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
 // Immersive Vertical Paging Short Video Feed View
 class ShortVideoFeedView extends StatefulWidget {
   final bool followingOnly;
+  final bool isParentActive;
   final VoidCallback onBackToText;
   const ShortVideoFeedView({
     super.key,
     required this.followingOnly,
+    required this.isParentActive,
     required this.onBackToText,
   });
 
@@ -1727,6 +1731,7 @@ class ShortVideoFeedView extends StatefulWidget {
 class _ShortVideoFeedViewState extends State<ShortVideoFeedView> {
   late Future<List<dynamic>> _videoFeedFuture;
   final PageController _pageController = PageController();
+  int _focusedIndex = 0;
 
   @override
   void initState() {
@@ -1812,9 +1817,15 @@ class _ShortVideoFeedViewState extends State<ShortVideoFeedView> {
               scrollDirection: Axis.vertical,
               controller: _pageController,
               itemCount: videos.length,
+              onPageChanged: (index) {
+                setState(() {
+                  _focusedIndex = index;
+                });
+              },
               itemBuilder: (context, index) {
                 return ShortVideoFeedItem(
                   post: videos[index],
+                  isActive: widget.isParentActive && (index == _focusedIndex),
                   onPostUpdated: _loadVideoFeed,
                 );
               },
@@ -1858,10 +1869,12 @@ class _ShortVideoFeedViewState extends State<ShortVideoFeedView> {
 // Stateful short video player and overlay options
 class ShortVideoFeedItem extends StatefulWidget {
   final Map<String, dynamic> post;
+  final bool isActive;
   final VoidCallback onPostUpdated;
   const ShortVideoFeedItem({
     super.key,
     required this.post,
+    required this.isActive,
     required this.onPostUpdated,
   });
 
@@ -1871,6 +1884,7 @@ class ShortVideoFeedItem extends StatefulWidget {
 
 class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTickerProviderStateMixin {
   VideoPlayerController? _videoController;
+  bool _isControllerFromCache = false;
   late AnimationController _discController;
   bool _isPlaying = false;
   bool _isLiked = false;
@@ -1892,10 +1906,39 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     _discController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 4),
-    )..repeat();
+    );
 
     _initializeVideo();
     _loadCommentsCount();
+  }
+
+  @override
+  void didUpdateWidget(covariant ShortVideoFeedItem oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isActive != widget.isActive) {
+      _handlePlaybackState();
+    }
+  }
+
+  void _handlePlaybackState() {
+    if (_videoController == null || !_videoController!.value.isInitialized) return;
+    if (widget.isActive) {
+      if (!_isPlaying) {
+        _videoController!.play();
+        setState(() {
+          _isPlaying = true;
+          _discController.repeat();
+        });
+      }
+    } else {
+      if (_isPlaying) {
+        _videoController!.pause();
+        setState(() {
+          _isPlaying = false;
+          _discController.stop();
+        });
+      }
+    }
   }
 
   Future<void> _loadCommentsCount() async {
@@ -1909,25 +1952,32 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     } catch (_) {}
   }
 
-  void _initializeVideo() {
+  void _initializeVideo() async {
     final videoUrl = widget.post['videoUrl'] as String?;
     if (videoUrl != null && videoUrl.isNotEmpty) {
-      _videoController = VideoPlayerController.networkUrl(Uri.parse(videoUrl))
-        ..initialize().then((_) {
-          if (mounted) {
-            setState(() {
-              _isPlaying = true;
-            });
-            _videoController!.setLooping(true);
-            _videoController!.play();
-          }
-        });
+      try {
+        final controller = await VideoControllerCache.getController(videoUrl);
+        if (mounted) {
+          setState(() {
+            _videoController = controller;
+            _isControllerFromCache = true;
+          });
+          _videoController!.setLooping(true);
+          _handlePlaybackState();
+        }
+      } catch (e) {
+        debugPrint("Error loading cached video: $e");
+      }
     }
   }
 
   @override
   void dispose() {
-    _videoController?.dispose();
+    if (!_isControllerFromCache) {
+      _videoController?.dispose();
+    } else {
+      _videoController?.pause();
+    }
     _discController.dispose();
     super.dispose();
   }
@@ -3023,5 +3073,43 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
         ],
       ),
     );
+  }
+}
+
+// LRU Video Controller Cache to avoid redownloading videos when leaving/scrolling
+class VideoControllerCache {
+  static final Map<String, VideoPlayerController> _cache = {};
+  static final List<String> _keys = [];
+  static const int _maxSize = 10;
+
+  static Future<VideoPlayerController> getController(String url) async {
+    if (_cache.containsKey(url)) {
+      final controller = _cache[url]!;
+      _keys.remove(url);
+      _keys.add(url);
+      return controller;
+    }
+
+    final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+    await controller.initialize();
+    
+    _cache[url] = controller;
+    _keys.add(url);
+
+    if (_keys.length > _maxSize) {
+      final oldestUrl = _keys.removeAt(0);
+      final oldestController = _cache.remove(oldestUrl);
+      oldestController?.dispose();
+    }
+
+    return controller;
+  }
+
+  static void clear() {
+    for (final controller in _cache.values) {
+      controller.dispose();
+    }
+    _cache.clear();
+    _keys.clear();
   }
 }
