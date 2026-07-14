@@ -211,7 +211,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                           ),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(20),
-                            child: Image.file(_image!, maxHeight: 400, width: double.infinity, fit: BoxFit.cover),
+                            child: Image.file(_image!, height: 400, width: double.infinity, fit: BoxFit.cover),
                           ),
                         ),
                         Positioned(

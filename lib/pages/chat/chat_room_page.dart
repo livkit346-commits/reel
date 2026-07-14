@@ -791,6 +791,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
           _localMessages[index]['id'] = messageId;
           _localMessages[index]['messageId'] = messageId;
           _localMessages[index]['isPending'] = false;
+          if (timestamp != null) {
             _localMessages[index]['createdAt'] =
                 DateTime.fromMillisecondsSinceEpoch(timestamp, isUtc: true).toIso8601String();
           }
