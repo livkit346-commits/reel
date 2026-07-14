@@ -346,7 +346,7 @@ class _HeadsUpNotificationBannerState extends State<_HeadsUpNotificationBanner> 
                               Text(
                                 widget.body,
                                 style: TextStyle(
-                                  color: isDark ? Colors.white70 : Colors.black65,
+                                  color: isDark ? Colors.white70 : Colors.black54,
                                   fontSize: 12.5,
                                   height: 1.2,
                                 ),

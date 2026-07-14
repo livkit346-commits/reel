@@ -2225,7 +2225,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      margin: const EdgeInsets.bottom(16),
+                      margin: const EdgeInsets.only(bottom: 16),
                       width: 40,
                       height: 4,
                       decoration: BoxDecoration(

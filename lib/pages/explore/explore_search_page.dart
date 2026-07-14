@@ -138,8 +138,8 @@ class _ExploreSearchPageState extends State<ExploreSearchPage> with SingleTicker
             onSubmitted: _performSearch,
             decoration: InputDecoration(
               hintText: 'Search Reel...',
-              hintStyle: TextStyle(color: isDark ? Colors.white30 : Colors.black30, fontSize: 14),
-              prefixIcon: Icon(Icons.search, color: isDark ? Colors.white30 : Colors.black30, size: 20),
+              hintStyle: TextStyle(color: isDark ? Colors.white30 : Colors.black38, fontSize: 14),
+              prefixIcon: Icon(Icons.search, color: isDark ? Colors.white30 : Colors.black38, size: 20),
               suffixIcon: _searchController.text.isNotEmpty
                   ? IconButton(
                       icon: Icon(Icons.clear, color: textColor, size: 18),
