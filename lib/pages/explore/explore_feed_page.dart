@@ -86,6 +86,7 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
   }
 
   String _feedMode = 'text'; // 'text' or 'video'
+  final GlobalKey<ShortVideoFeedViewState> _videoFeedKey = GlobalKey<ShortVideoFeedViewState>();
 
   @override
   Widget build(BuildContext context) {
@@ -121,6 +122,20 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
           ],
         ),
         actions: [
+          if (_feedMode == 'video')
+            IconButton(
+              icon: Icon(Icons.add_box_outlined, color: textColor),
+              onPressed: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CreateVideoPostScreen()),
+                );
+                if (result == true) {
+                  _videoFeedKey.currentState?.loadVideoFeed();
+                }
+              },
+              tooltip: 'Publish Short Video',
+            ),
           IconButton(
             icon: Icon(Icons.search, color: textColor),
             onPressed: () {
@@ -135,6 +150,7 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
       ),
       body: _feedMode == 'video'
           ? ShortVideoFeedView(
+              key: _videoFeedKey,
               followingOnly: _activeTab == 'Following',
               isParentActive: widget.isActive,
               onBackToText: () {
@@ -1800,10 +1816,10 @@ class ShortVideoFeedView extends StatefulWidget {
   });
 
   @override
-  State<ShortVideoFeedView> createState() => _ShortVideoFeedViewState();
+  State<ShortVideoFeedView> createState() => ShortVideoFeedViewState();
 }
 
-class _ShortVideoFeedViewState extends State<ShortVideoFeedView> {
+class ShortVideoFeedViewState extends State<ShortVideoFeedView> {
   late Future<List<dynamic>> _videoFeedFuture;
   final PageController _pageController = PageController();
   int _focusedIndex = 0;
@@ -1811,14 +1827,14 @@ class _ShortVideoFeedViewState extends State<ShortVideoFeedView> {
   @override
   void initState() {
     super.initState();
-    _loadVideoFeed();
+    loadVideoFeed();
   }
 
   @override
   void didUpdateWidget(covariant ShortVideoFeedView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.followingOnly != widget.followingOnly) {
-      _loadVideoFeed();
+      loadVideoFeed();
     }
   }
 
@@ -1828,7 +1844,7 @@ class _ShortVideoFeedViewState extends State<ShortVideoFeedView> {
     super.dispose();
   }
 
-  void _loadVideoFeed() {
+  void loadVideoFeed() {
     setState(() {
       _videoFeedFuture = context.read<SupabaseService>().getVideoFeed(followingOnly: widget.followingOnly);
     });
@@ -1849,94 +1865,51 @@ class _ShortVideoFeedViewState extends State<ShortVideoFeedView> {
         final videos = snapshot.data ?? [];
 
         if (videos.isEmpty) {
-          return Stack(
-            children: [
-              Center(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.video_collection_outlined, color: Colors.white30, size: 72),
-                      const SizedBox(height: 16),
-                      Text(
-                        widget.followingOnly ? 'No videos from creators you follow' : 'No short videos posted yet',
-                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        widget.followingOnly
-                            ? 'Follow creators to see their video updates, or discover new videos on For You.'
-                            : 'Click the plus button in the top right to upload the first short video!',
-                        style: const TextStyle(color: Colors.white38, fontSize: 13, height: 1.3),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.video_collection_outlined, color: Colors.white30, size: 72),
+                  const SizedBox(height: 16),
+                  Text(
+                    widget.followingOnly ? 'No videos from creators you follow' : 'No short videos posted yet',
+                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  Text(
+                    widget.followingOnly
+                        ? 'Follow creators to see their video updates, or discover new videos on For You.'
+                        : 'Click the plus button in the top right to upload the first short video!',
+                    style: const TextStyle(color: Colors.white38, fontSize: 13, height: 1.3),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
-              Positioned(
-                top: 16,
-                right: 16,
-                child: _buildCreateVideoBtn(context),
-              ),
-            ],
+            ),
           );
         }
 
-        return Stack(
-          children: [
-            // Vertical PageView
-            PageView.builder(
-              scrollDirection: Axis.vertical,
-              controller: _pageController,
-              itemCount: videos.length,
-              onPageChanged: (index) {
-                setState(() {
-                  _focusedIndex = index;
-                });
-              },
-              itemBuilder: (context, index) {
-                return ShortVideoFeedItem(
-                  post: videos[index],
-                  isActive: widget.isParentActive && (index == _focusedIndex),
-                  onPostUpdated: _loadVideoFeed,
-                );
-              },
-            ),
-            // Floating Create Video button at the top right overlay
-            Positioned(
-              top: 16,
-              right: 16,
-              child: _buildCreateVideoBtn(context),
-            ),
-          ],
+        return PageView.builder(
+          scrollDirection: Axis.vertical,
+          controller: _pageController,
+          itemCount: videos.length,
+          onPageChanged: (index) {
+            setState(() {
+              _focusedIndex = index;
+            });
+          },
+          itemBuilder: (context, index) {
+            return ShortVideoFeedItem(
+              post: videos[index],
+              isActive: widget.isParentActive && (index == _focusedIndex),
+              onPostUpdated: loadVideoFeed,
+            );
+          },
         );
       },
-    );
-  }
-
-  Widget _buildCreateVideoBtn(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.black45,
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white24, width: 1.5),
-      ),
-      child: IconButton(
-        icon: const Icon(Icons.add, color: Colors.white, size: 22),
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const CreateVideoPostScreen()),
-          );
-          if (result == true) {
-            _loadVideoFeed();
-          }
-        },
-        tooltip: 'Publish Short Video',
-      ),
     );
   }
 }
