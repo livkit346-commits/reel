@@ -60,14 +60,38 @@ class _CreateVideoPostScreenState extends State<CreateVideoPostScreen> {
       // Initialize video player
       _videoController?.dispose();
       final controller = VideoPlayerController.file(file);
-      await controller.initialize();
-      controller.setLooping(true);
-      controller.play();
+      try {
+        await controller.initialize();
+        if (controller.value.duration.inSeconds > 600) {
+          await controller.dispose();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Video is too long! The maximum allowed duration is 10 minutes.'),
+                backgroundColor: Color(0xFFFE2C55),
+              ),
+            );
+          }
+          return;
+        }
+        controller.setLooping(true);
+        controller.play();
 
-      setState(() {
-        _videoFile = file;
-        _videoController = controller;
-      });
+        setState(() {
+          _videoFile = file;
+          _videoController = controller;
+        });
+      } catch (e) {
+        await controller.dispose();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to load video: $e'),
+              backgroundColor: const Color(0xFF7E1C31),
+            ),
+          );
+        }
+      }
     }
   }
 
