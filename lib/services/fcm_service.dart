@@ -246,119 +246,122 @@ class _HeadsUpNotificationBannerState extends State<_HeadsUpNotificationBanner> 
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
-    return SlideTransition(
-      position: _offsetAnimation,
-      child: Dismissible(
-        key: const Key('heads_up_notification_banner'),
-        direction: DismissDirection.horizontal,
-        onDismissed: (_) {
-          widget.onDismiss();
-        },
-        child: GestureDetector(
-          onVerticalDragEnd: (details) {
-            if (details.primaryVelocity != null && details.primaryVelocity! < -100) {
+    return Material(
+      type: MaterialType.transparency,
+      child: SlideTransition(
+        position: _offsetAnimation,
+        child: Dismissible(
+          key: const Key('heads_up_notification_banner'),
+          direction: DismissDirection.horizontal,
+          onDismissed: (_) {
+            widget.onDismiss();
+          },
+          child: GestureDetector(
+            onVerticalDragEnd: (details) {
+              if (details.primaryVelocity != null && details.primaryVelocity! < -100) {
+                _dismiss();
+              }
+            },
+            onTap: () {
+              widget.onTap();
               _dismiss();
-            }
-          },
-          onTap: () {
-            widget.onTap();
-            _dismiss();
-          },
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1F2C34) : Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isDark ? Colors.white.withOpacity(0.12) : Colors.black.withOpacity(0.08),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.25),
-                  blurRadius: 12,
-                  spreadRadius: 1,
-                  offset: const Offset(0, 4),
+            },
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1F2C34) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isDark ? Colors.white.withOpacity(0.12) : Colors.black.withOpacity(0.08),
+                  width: 1,
                 ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Top App Header
-                    Row(
-                      children: [
-                        const Icon(Icons.chat_bubble_outline, color: Color(0xFF25D366), size: 13),
-                        const SizedBox(width: 6),
-                        Text(
-                          'REEL',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
-                            color: const Color(0xFF25D366),
-                            letterSpacing: 1.2,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.25),
+                    blurRadius: 12,
+                    spreadRadius: 1,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Top App Header
+                      Row(
+                        children: [
+                          const Icon(Icons.chat_bubble_outline, color: Color(0xFF25D366), size: 13),
+                          const SizedBox(width: 6),
+                          Text(
+                            'REEL',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              color: const Color(0xFF25D366),
+                              letterSpacing: 1.2,
+                            ),
                           ),
-                        ),
-                        Text(
-                          ' • now',
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: isDark ? Colors.white38 : Colors.black38,
+                          Text(
+                            ' • now',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: isDark ? Colors.white38 : Colors.black38,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    // Profile + Message Details Row
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        CircleAvatar(
-                          radius: 20,
-                          backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
-                          backgroundImage: (_senderProfile != null && _senderProfile!['photoUrl'] != null)
-                              ? NetworkImage(_senderProfile!['photoUrl'])
-                              : null,
-                          child: (_senderProfile == null || _senderProfile!['photoUrl'] == null)
-                              ? Icon(Icons.person, color: isDark ? Colors.white54 : Colors.black45, size: 20)
-                              : null,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _senderProfile != null ? (_senderProfile!['name'] ?? widget.title) : widget.title,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                  fontSize: 13.5,
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      // Profile + Message Details Row
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          CircleAvatar(
+                            radius: 20,
+                            backgroundColor: isDark ? Colors.white10 : Colors.black.withOpacity(0.05),
+                            backgroundImage: (_senderProfile != null && _senderProfile!['photoUrl'] != null)
+                                ? NetworkImage(_senderProfile!['photoUrl'])
+                                : null,
+                            child: (_senderProfile == null || _senderProfile!['photoUrl'] == null)
+                                ? Icon(Icons.person, color: isDark ? Colors.white54 : Colors.black45, size: 20)
+                                : null,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _senderProfile != null ? (_senderProfile!['name'] ?? widget.title) : widget.title,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark ? Colors.white : Colors.black87,
+                                    fontSize: 13.5,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                widget.body,
-                                style: TextStyle(
-                                  color: isDark ? Colors.white70 : Colors.black54,
-                                  fontSize: 12.5,
-                                  height: 1.2,
+                                const SizedBox(height: 2),
+                                Text(
+                                  widget.body,
+                                  style: TextStyle(
+                                    color: isDark ? Colors.white70 : Colors.black54,
+                                    fontSize: 12.5,
+                                    height: 1.2,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

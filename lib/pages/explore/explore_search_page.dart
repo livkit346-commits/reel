@@ -60,48 +60,73 @@ class _ExploreSearchPageState extends State<ExploreSearchPage> with SingleTicker
 
     final supabase = context.read<SupabaseService>();
     
+    // Helper to query users
+    List<dynamic> usersResponse = [];
     try {
-      // 1. Fetch matching users
-      final usersResponse = await supabase.client
+      usersResponse = await supabase.client
           .from('users')
           .select()
           .or('name.ilike.%$cleanQuery%,username.ilike.%$cleanQuery%')
           .limit(20);
+    } catch (e) {
+      debugPrint("Users search error: $e");
+    }
 
-      // 2. Fetch matching text posts
-      final postsResponse = await supabase.client
+    // Helper to query text posts with fallback
+    List<dynamic> postsResponse = [];
+    try {
+      postsResponse = await supabase.client
           .from('posts')
           .select()
           .eq('mediaType', 'text')
           .ilike('text', '%$cleanQuery%')
           .order('createdAt', ascending: false)
           .limit(25);
+    } catch (_) {
+      try {
+        postsResponse = await supabase.client
+            .from('posts')
+            .select()
+            .eq('mediatype', 'text')
+            .ilike('text', '%$cleanQuery%')
+            .order('createdat', ascending: false)
+            .limit(25);
+      } catch (e) {
+        debugPrint("Text posts search error: $e");
+      }
+    }
 
-      // 3. Fetch matching video posts
-      final videosResponse = await supabase.client
+    // Helper to query video posts with fallback
+    List<dynamic> videosResponse = [];
+    try {
+      videosResponse = await supabase.client
           .from('posts')
           .select()
           .eq('mediaType', 'video')
           .ilike('text', '%$cleanQuery%')
           .order('createdAt', ascending: false)
           .limit(25);
+    } catch (_) {
+      try {
+        videosResponse = await supabase.client
+            .from('posts')
+            .select()
+            .eq('mediatype', 'video')
+            .ilike('text', '%$cleanQuery%')
+            .order('createdat', ascending: false)
+            .limit(25);
+      } catch (e) {
+        debugPrint("Videos search error: $e");
+      }
+    }
 
-      if (mounted) {
-        setState(() {
-          _users = usersResponse as List<dynamic>;
-          _posts = postsResponse as List<dynamic>;
-          _videos = videosResponse as List<dynamic>;
-          _loading = false;
-        });
-      }
-    } catch (e) {
-      debugPrint("Search error: $e");
-      if (mounted) {
-        setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Search failed: $e'), backgroundColor: const Color(0xFF7E1C31)),
-        );
-      }
+    if (mounted) {
+      setState(() {
+        _users = usersResponse;
+        _posts = postsResponse;
+        _videos = videosResponse;
+        _loading = false;
+      });
     }
   }
 
@@ -139,7 +164,10 @@ class _ExploreSearchPageState extends State<ExploreSearchPage> with SingleTicker
             decoration: InputDecoration(
               hintText: 'Search Reel...',
               hintStyle: TextStyle(color: isDark ? Colors.white30 : Colors.black38, fontSize: 14),
-              prefixIcon: Icon(Icons.search, color: isDark ? Colors.white30 : Colors.black38, size: 20),
+              prefixIcon: IconButton(
+                icon: Icon(Icons.search, color: isDark ? Colors.white30 : Colors.black38, size: 20),
+                onPressed: () => _performSearch(_searchController.text),
+              ),
               suffixIcon: _searchController.text.isNotEmpty
                   ? IconButton(
                       icon: Icon(Icons.clear, color: textColor, size: 18),

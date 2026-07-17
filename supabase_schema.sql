@@ -587,6 +587,51 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 
+-- RPC: Get Video feed recommendations utilizing pgvector and tiered distribution
+CREATE OR REPLACE FUNCTION public.get_video_feed_recommendations(
+  p_user_id UUID,
+  p_limit INT DEFAULT 25
+)
+RETURNS SETOF public.posts AS $$
+DECLARE
+  v_user_vector vector(384);
+BEGIN
+  -- 1. Try to get user's interest vector
+  SELECT interest_vector INTO v_user_vector
+  FROM public.user_interests
+  WHERE "userId" = p_user_id;
+
+  -- 2. If user has no vector, fall back to default order by recency
+  IF v_user_vector IS NULL THEN
+    RETURN QUERY 
+    SELECT * 
+    FROM public.posts
+    WHERE "mediaType" = 'video' OR "mediatype" = 'video'
+    ORDER BY "createdAt" DESC
+    LIMIT p_limit;
+  ELSE
+    -- 3. Mix: 80% interest-matched (popular/viral), 20% fresh/evaluation posts (Tier 0)
+    RETURN QUERY
+    (
+      SELECT *
+      FROM public.posts
+      WHERE ("mediaType" = 'video' OR "mediatype" = 'video') AND "tier" > 0 AND "embedding" IS NOT NULL
+      ORDER BY ("embedding" <=> v_user_vector) ASC
+      LIMIT (p_limit * 80 / 100)
+    )
+    UNION ALL
+    (
+      SELECT *
+      FROM public.posts
+      WHERE ("mediaType" = 'video' OR "mediatype" = 'video') AND ("tier" = 0 OR "embedding" IS NULL)
+      ORDER BY "createdAt" DESC
+      LIMIT (p_limit * 20 / 100)
+    );
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
 -- ========================================================
 -- ADMIN PORTAL SYSTEM CONFIGURATIONS
 -- ========================================================

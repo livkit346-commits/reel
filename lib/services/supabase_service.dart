@@ -965,6 +965,22 @@ class SupabaseService {
               .limit(20);
         }
       } else {
+        dynamic response;
+        if (myId != null) {
+          try {
+            response = await client.rpc('get_video_feed_recommendations', params: {
+              'p_user_id': myId,
+              'p_limit': 25,
+            });
+          } catch (rpcError) {
+            debugPrint('get_video_feed_recommendations RPC failed, falling back: $rpcError');
+          }
+        }
+
+        if (response != null) {
+          return response as List<dynamic>;
+        }
+
         try {
           return await client
               .from('posts')

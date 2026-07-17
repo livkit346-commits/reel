@@ -51,7 +51,9 @@ class _ChatListPageState extends State<ChatListPage> {
       if (type == 'message') {
         await supabase.saveIncomingMessage(event);
         if (mounted) {
-          _loadChats(forceRefresh: false);
+          final chatId = event['chatId'] ?? event['chatid'] ?? '';
+          final hasChat = _chats.any((c) => c['chatId'] == chatId);
+          _loadChats(forceRefresh: !hasChat);
         }
       } else if (type == 'status') {
         await supabase.saveIncomingStatus(event);
