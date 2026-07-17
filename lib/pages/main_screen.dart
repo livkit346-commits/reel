@@ -6,6 +6,7 @@ import 'package:reel/pages/chat/chat_list_page.dart';
 import 'package:reel/pages/explore/explore_feed_page.dart';
 import 'package:reel/pages/updates/updates_page.dart';
 import 'package:reel/pages/add/add_friends_page.dart';
+import 'package:reel/services/websocket_service.dart';
 import 'package:reel/pages/profile/reel_profile_page.dart';
 
 class MainScreen extends StatefulWidget {
@@ -15,17 +16,35 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   int _selectedIndex = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final supabaseService = context.read<SupabaseService>();
       FcmService().init(supabaseService);
       supabaseService.initializeGlobalRealtime();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      debugPrint('App backgrounded/inactive: disconnecting WebSocket to allow push notifications');
+      WebSocketService().disconnect();
+    } else if (state == AppLifecycleState.resumed) {
+      debugPrint('App resumed/foregrounded: reconnecting WebSocket');
+      WebSocketService().connect();
+    }
   }
 
   @override

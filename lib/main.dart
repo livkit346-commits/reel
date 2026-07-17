@@ -6,7 +6,9 @@ import 'package:reel/services/supabase_service.dart';
 import 'package:reel/theme/reel_theme.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:reel/firebase_options.dart';
+import 'package:reel/services/fcm_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,6 +16,8 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   
   await Supabase.initialize(
     url: 'https://zvxrcwgvvubgqlxbcyov.supabase.co',

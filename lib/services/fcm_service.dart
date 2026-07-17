@@ -7,7 +7,7 @@ import 'package:reel/services/supabase_service.dart';
 
 // Background message handler (Must be a top-level function)
 @pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   debugPrint("Handling background messaging: ${message.messageId}");
 }
 
@@ -44,7 +44,7 @@ class FcmService {
       }
 
       // 2. Set background message handler
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
       // 3. Register current push token
       await _registerToken(supabaseService);

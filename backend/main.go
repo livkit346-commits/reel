@@ -865,6 +865,23 @@ func sendFcmNotification(recipientID, senderID, chatID, messageText string) {
 			Title: title,
 			Body:  body,
 		},
+		Android: &messaging.AndroidConfig{
+			Priority: "high",
+			Notification: &messaging.AndroidNotification{
+				ChannelID: "high_importance_channel",
+				Sound:     "default",
+			},
+		},
+		APNS: &messaging.APNSConfig{
+			Headers: map[string]string{
+				"apns-priority": "10",
+			},
+			Payload: &messaging.APNSPayload{
+				Aps: &messaging.Aps{
+					Sound: "default",
+				},
+			},
+		},
 		Data: map[string]string{
 			"click_action": "FLUTTER_NOTIFICATION_CLICK",
 			"chatId":       chatID,
