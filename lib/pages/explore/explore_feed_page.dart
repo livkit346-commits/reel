@@ -9,8 +9,6 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
-import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/explore/create_post_screen.dart';
 import 'package:reel/pages/explore/create_video_post_page.dart';
@@ -1975,6 +1973,9 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   bool _isReposted = false;
   BoxFit _fitMode = BoxFit.contain;
   bool _isFastForwarding = false;
+  bool _isScrubbing = false;
+  double _scrubValue = 0.0;
+  Duration? _scrubTime;
 
   // Custom heart pop coordinate list
   final List<Offset> _hearts = [];
@@ -2212,12 +2213,12 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                 CircularProgressIndicator(color: Color(0xFFFE2C55)),
                 SizedBox(height: 20),
                 Text(
-                  'Saving video with watermark...',
+                  'Saving video...',
                   style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
                 SizedBox(height: 8),
                 Text(
-                  'Please wait while we process the video',
+                  'Please wait while we download the video',
                   style: TextStyle(color: Colors.white38, fontSize: 11),
                 ),
               ],
@@ -2241,82 +2242,11 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
       final videoFile = File('${tempDir.path}/temp_video_${DateTime.now().millisecondsSinceEpoch}.mp4');
       await videoFile.writeAsBytes(videoBytes);
       
-      // 2. Generate watermark image dynamically using Canvas
-      final recorder = ui.PictureRecorder();
-      final canvas = ui.Canvas(recorder);
-      
-      // Create watermark dimensions (say, 360x100)
-      final paint = ui.Paint()..color = Colors.black.withOpacity(0.5);
-      canvas.drawRRect(
-        ui.RRect.fromRectAndRadius(ui.Rect.fromLTWH(0, 0, 360, 100), ui.Radius.circular(16)),
-        paint,
-      );
-      
-      // Load the app icon
-      ui.Image? iconImage;
-      try {
-        final byteData = await rootBundle.load('assets/icon_transparent.png');
-        final codec = await ui.instantiateImageCodec(byteData.buffer.asUint8List(), targetWidth: 64, targetHeight: 64);
-        final frameInfo = await codec.getNextFrame();
-        iconImage = frameInfo.image;
-      } catch (iconErr) {
-        debugPrint('Could not load icon asset, fallback: $iconErr');
-      }
-      
-      if (iconImage != null) {
-        canvas.drawImage(iconImage, const ui.Offset(18, 18), ui.Paint());
-      }
-      
-      // Draw watermark text
-      final textPainter = TextPainter(
-        text: TextSpan(
-          children: [
-            const TextSpan(
-              text: 'Reel App\n',
-              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: ui.FontWeight.w900),
-            ),
-            TextSpan(
-              text: '@$creatorName',
-              style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: ui.FontWeight.w500),
-            ),
-          ],
-        ),
-        textDirection: TextDirection.ltr,
-      );
-      textPainter.layout();
-      textPainter.paint(canvas, ui.Offset(iconImage != null ? 96 : 24, 24));
-      
-      final picture = recorder.endRecording();
-      final img = await picture.toImage(360, 100);
-      final pngBytes = await img.toByteData(format: ui.ImageByteFormat.png);
-      
-      final watermarkFile = File('${tempDir.path}/watermark_${DateTime.now().millisecondsSinceEpoch}.png');
-      await watermarkFile.writeAsBytes(pngBytes!.buffer.asUint8List());
-      
-      // 3. Process video using FFmpeg
-      final outputFile = File('${tempDir.path}/watermarked_${DateTime.now().millisecondsSinceEpoch}.mp4');
-      
-      // Place the watermark at the bottom-right corner of the video with 24px padding
-      final ffmpegCommand = '-i ${videoFile.path} -i ${watermarkFile.path} -filter_complex "overlay=main_w-overlay_w-24:main_h-overlay_h-24" -codec:a copy ${outputFile.path}';
-      
-      final session = await FFmpegKit.execute(ffmpegCommand);
-      final returnCode = await session.getReturnCode();
-      
-      File finalFile = videoFile; // Fallback to unwatermarked if FFmpeg fails
-      if (ReturnCode.isSuccess(returnCode)) {
-        finalFile = outputFile;
-        debugPrint('FFmpeg watermarking succeeded.');
-      } else {
-        final logs = await session.getLogs();
-        final failMsg = logs.map((l) => l.getMessage()).join('\n');
-        debugPrint('FFmpeg failed. Logs:\n$failMsg');
-      }
-      
-      // 4. Request photo manager permission and save to gallery
+      // 2. Request photo manager permission and save to gallery directly
       final ps = await PhotoManager.requestPermissionExtend();
       if (ps.isAuth) {
         await PhotoManager.editor.saveVideo(
-          finalFile,
+          videoFile,
           title: 'reel_${DateTime.now().millisecondsSinceEpoch}',
         );
         
@@ -2336,10 +2266,6 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
       // Cleanup temp files
       try {
         await videoFile.delete();
-        if (finalFile != videoFile) {
-          await finalFile.delete();
-        }
-        await watermarkFile.delete();
       } catch (_) {}
       
     } catch (e) {
@@ -2357,39 +2283,11 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     }
   }
 
-  Widget _buildSocialShareItem({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 80,
-        margin: const EdgeInsets.symmetric(horizontal: 4),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: Colors.white, size: 24),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 11),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return '$minutes:$seconds';
   }
 
   Future<void> _toggleRepost() async {
@@ -3543,7 +3441,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
               ),
             ),
 
-          // Video Progress Bar (TikTok style thin bar at bottom)
+          // Video Progress Bar (TikTok style scrubbing bar at bottom)
           if (_videoController != null && _videoController!.value.isInitialized)
             ValueListenableBuilder(
               valueListenable: _videoController!,
@@ -3554,20 +3452,100 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                 if (duration > 0) {
                   progress = (position / duration).clamp(0.0, 1.0);
                 }
+                final activeProgress = _isScrubbing ? _scrubValue : progress;
+
                 return Positioned(
                   bottom: 0,
                   left: 0,
                   right: 0,
-                  child: SizedBox(
-                    height: 2.5,
-                    child: LinearProgressIndicator(
-                      value: progress,
-                      backgroundColor: Colors.white24,
-                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onHorizontalDragStart: (details) {
+                      setState(() {
+                        _isScrubbing = true;
+                        _scrubValue = progress;
+                        _pauseVideo();
+                      });
+                    },
+                    onHorizontalDragUpdate: (details) {
+                      final screenWidth = MediaQuery.of(context).size.width;
+                      final deltaProgress = details.primaryDelta! / screenWidth;
+                      setState(() {
+                        _scrubValue = (_scrubValue + deltaProgress).clamp(0.0, 1.0);
+                        final durationMs = _videoController!.value.duration.inMilliseconds;
+                        _scrubTime = Duration(milliseconds: (_scrubValue * durationMs).toInt());
+                      });
+                    },
+                    onHorizontalDragEnd: (details) {
+                      final durationMs = _videoController!.value.duration.inMilliseconds;
+                      final seekToMs = (_scrubValue * durationMs).toInt();
+                      _videoController!.seekTo(Duration(milliseconds: seekToMs)).then((_) {
+                        _replayVideo();
+                      });
+                      setState(() {
+                        _isScrubbing = false;
+                      });
+                    },
+                    onTapDown: (details) {
+                      final screenWidth = MediaQuery.of(context).size.width;
+                      final clickX = details.globalPosition.dx;
+                      final tapProgress = (clickX / screenWidth).clamp(0.0, 1.0);
+                      final durationMs = _videoController!.value.duration.inMilliseconds;
+                      _videoController!.seekTo(Duration(milliseconds: (tapProgress * durationMs).toInt()));
+                    },
+                    child: Container(
+                      height: 24, // Expanded hit area
+                      alignment: Alignment.bottomCenter,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Container(
+                            height: _isScrubbing ? 8.0 : 2.5,
+                            width: double.infinity,
+                            color: Colors.white24,
+                            alignment: Alignment.centerLeft,
+                            child: FractionallySizedBox(
+                              widthFactor: activeProgress,
+                              child: Container(
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );
               },
+            ),
+
+          // Scrubbing Progress Preview Overlay (center screen overlay just like TikTok)
+          if (_isScrubbing && _scrubTime != null && _videoController != null)
+            Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.linear_scale, color: Colors.white, size: 28),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${_formatDuration(_scrubTime!)} / ${_formatDuration(_videoController!.value.duration)}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
 
           // Heart Coordinate pop animations
