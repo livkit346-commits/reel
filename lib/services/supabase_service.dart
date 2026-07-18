@@ -706,6 +706,7 @@ class SupabaseService {
             if (statusUploadProgress.value != null) {
               statusUploadProgress.value = progress;
             }
+            await Future.delayed(const Duration(milliseconds: 1));
           }
           await request.sink.close();
         });
@@ -914,11 +915,12 @@ class SupabaseService {
     final myId = currentUser?.id;
     if (myId == null) throw Exception('User not authenticated');
 
+    statusUploadProgress.value = 0.0;
+
     try {
       final userProfile = await getUserProfile(myId);
       final userName = userProfile?['name'] ?? 'User';
 
-      statusUploadProgress.value = 0.0;
       final videoUrl = await uploadToR2(videoFile);
 
       await createPost(myId, userName, text, null, videoUrl: videoUrl, mediaType: 'video');

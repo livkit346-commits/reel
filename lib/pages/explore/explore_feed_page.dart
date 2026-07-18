@@ -1973,7 +1973,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
 
   late int _repostsCount;
   bool _isReposted = false;
-  BoxFit _fitMode = BoxFit.cover;
+  BoxFit _fitMode = BoxFit.contain;
   bool _isFastForwarding = false;
 
   // Custom heart pop coordinate list
@@ -2594,64 +2594,22 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                                 ),
                     ),
                     const Divider(color: Colors.white12, height: 24),
-                    const Text(
-                      'Share to',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                    const SizedBox(height: 16),
-                    // Horizontal Social Share list
-                    SizedBox(
-                      height: 90,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        children: [
-                          _buildSocialShareItem(
-                            icon: Icons.chat,
-                            label: 'WhatsApp',
-                            color: const Color(0xFF25D366),
-                            onTap: () {
-                              Navigator.pop(context);
-                              Share.share('Check out this video on Reel: $videoUrl');
-                            },
-                          ),
-                          _buildSocialShareItem(
-                            icon: Icons.camera_alt,
-                            label: 'Instagram',
-                            color: const Color(0xFFE1306C),
-                            onTap: () {
-                              Navigator.pop(context);
-                              Share.share('Check out this video on Reel: $videoUrl');
-                            },
-                          ),
-                          _buildSocialShareItem(
-                            icon: Icons.facebook,
-                            label: 'Facebook',
-                            color: const Color(0xFF1877F2),
-                            onTap: () {
-                              Navigator.pop(context);
-                              Share.share('Check out this video on Reel: $videoUrl');
-                            },
-                          ),
-                          _buildSocialShareItem(
-                            icon: Icons.message,
-                            label: 'SMS',
-                            color: const Color(0xFF00BFFF),
-                            onTap: () {
-                              Navigator.pop(context);
-                              Share.share('Check out this video on Reel: $videoUrl');
-                            },
-                          ),
-                          _buildSocialShareItem(
-                            icon: Icons.more_horiz,
-                            label: 'More',
-                            color: Colors.white24,
-                            onTap: () {
-                              Navigator.pop(context);
-                              Share.share('Check out this video on Reel: $videoUrl');
-                            },
-                          ),
-                        ],
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFE2C55),
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(double.infinity, 48),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                          elevation: 0,
+                        ),
+                        icon: const Icon(Icons.share, size: 20),
+                        label: const Text('Share to other apps...', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          Share.share('Check out this video on Reel: $videoUrl');
+                        },
                       ),
                     ),
                     const Divider(color: Colors.white12, height: 24),
