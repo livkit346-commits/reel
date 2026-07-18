@@ -1,7 +1,16 @@
 import 'dart:math' as math;
+import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:reel/main.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:photo_manager/photo_manager.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new/return_code.dart';
 import 'package:reel/services/supabase_service.dart';
 import 'package:reel/pages/explore/create_post_screen.dart';
 import 'package:reel/pages/explore/create_video_post_page.dart';
@@ -1864,6 +1873,12 @@ class ShortVideoFeedViewState extends State<ShortVideoFeedView> {
 
         final videos = snapshot.data ?? [];
 
+        if (videos.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _preloadNextVideos(videos);
+          });
+        }
+
         if (videos.isEmpty) {
           return Center(
             child: Padding(
@@ -1900,6 +1915,7 @@ class ShortVideoFeedViewState extends State<ShortVideoFeedView> {
             setState(() {
               _focusedIndex = index;
             });
+            _preloadNextVideos(videos);
           },
           itemBuilder: (context, index) {
             return ShortVideoFeedItem(
@@ -1911,6 +1927,19 @@ class ShortVideoFeedViewState extends State<ShortVideoFeedView> {
         );
       },
     );
+  }
+
+  void _preloadNextVideos(List<dynamic> videos) {
+    for (int i = 1; i <= 2; i++) {
+      final nextIndex = _focusedIndex + i;
+      if (nextIndex < videos.length) {
+        final nextPost = videos[nextIndex];
+        final nextUrl = nextPost['videoUrl'] as String?;
+        if (nextUrl != null && nextUrl.isNotEmpty) {
+          VideoControllerCache.preloadController(nextUrl);
+        }
+      }
+    }
   }
 }
 
@@ -1930,12 +1959,13 @@ class ShortVideoFeedItem extends StatefulWidget {
   State<ShortVideoFeedItem> createState() => _ShortVideoFeedItemState();
 }
 
-class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTickerProviderStateMixin {
+class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTickerProviderStateMixin, RouteAware {
   VideoPlayerController? _videoController;
   bool _isControllerFromCache = false;
   late AnimationController _discController;
   bool _isPlaying = false;
   bool _isLiked = false;
+  bool _isSaved = false;
   late int _likesCount;
   int _commentsCount = 0;
   bool _showPlayPauseOverlay = false;
@@ -1943,7 +1973,8 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
 
   late int _repostsCount;
   bool _isReposted = false;
-  BoxFit _fitMode = BoxFit.contain;
+  BoxFit _fitMode = BoxFit.cover;
+  bool _isFastForwarding = false;
 
   // Custom heart pop coordinate list
   final List<Offset> _hearts = [];
@@ -1955,6 +1986,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     _repostsCount = (widget.post['reposts'] as num?)?.toInt() ?? 0;
     final supabase = context.read<SupabaseService>();
     _isLiked = supabase.likedPostIds.contains(widget.post['id']);
+    _isSaved = supabase.savedPostIds.contains(widget.post['id']);
     _isReposted = false;
 
     _discController = AnimationController(
@@ -1964,6 +1996,12 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
 
     _initializeVideo();
     _loadCommentsCount();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    routeObserver.subscribe(this, ModalRoute.of(context)!);
   }
 
   @override
@@ -1977,21 +2015,43 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   void _handlePlaybackState() {
     if (_videoController == null || !_videoController!.value.isInitialized) return;
     if (widget.isActive) {
-      if (!_isPlaying) {
-        _videoController!.play();
-        setState(() {
-          _isPlaying = true;
-          _discController.repeat();
-        });
-      }
+      _replayVideo();
     } else {
-      if (_isPlaying) {
-        _videoController!.pause();
-        setState(() {
-          _isPlaying = false;
-          _discController.stop();
-        });
-      }
+      _pauseVideo();
+    }
+  }
+
+  void _pauseVideo() {
+    if (_videoController == null || !_videoController!.value.isInitialized) return;
+    if (_isPlaying) {
+      _videoController!.pause();
+      setState(() {
+        _isPlaying = false;
+        _discController.stop();
+      });
+    }
+  }
+
+  void _replayVideo() {
+    if (_videoController == null || !_videoController!.value.isInitialized) return;
+    _videoController!.seekTo(Duration.zero).then((_) {
+      _videoController!.play();
+      setState(() {
+        _isPlaying = true;
+        _discController.repeat();
+      });
+    });
+  }
+
+  @override
+  void didPushNext() {
+    _pauseVideo();
+  }
+
+  @override
+  void didPopNext() {
+    if (widget.isActive) {
+      _replayVideo();
     }
   }
 
@@ -2027,6 +2087,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
 
   @override
   void dispose() {
+    routeObserver.unsubscribe(this);
     if (!_isControllerFromCache) {
       _videoController?.dispose();
     } else {
@@ -2043,12 +2104,12 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
         _videoController!.pause();
         _isPlaying = false;
         _discController.stop();
-        _playIconIsPlay = false;
+        _playIconIsPlay = true; // Show play arrow icon when we paused it
       } else {
         _videoController!.play();
         _isPlaying = true;
         _discController.repeat();
-        _playIconIsPlay = true;
+        _playIconIsPlay = false; // Show pause icon when we played it
       }
       _showPlayPauseOverlay = true;
     });
@@ -2106,6 +2167,229 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     try {
       await supabase.toggleLikePost(widget.post['id'], _likesCount + (increment ? -1 : 1), increment);
     } catch (_) {}
+  }
+
+  void _toggleSave() async {
+    final supabase = context.read<SupabaseService>();
+    final myId = supabase.currentUser?.id;
+    if (myId == null) return;
+
+    setState(() {
+      _isSaved = !_isSaved;
+    });
+
+    try {
+      await supabase.toggleSavePost(widget.post['id']);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_isSaved ? 'Video saved to Bookmarks' : 'Video removed from Bookmarks'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (_) {}
+  }
+
+  bool _isSavingVideo = false;
+
+  Future<void> _downloadAndWatermarkVideo(String videoUrl, String creatorName) async {
+    if (_isSavingVideo) return;
+    
+    // Show download overlay dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return WillPopScope(
+          onWillPop: () async => false,
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF1E1E24),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                CircularProgressIndicator(color: Color(0xFFFE2C55)),
+                SizedBox(height: 20),
+                Text(
+                  'Saving video with watermark...',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Please wait while we process the video',
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    try {
+      setState(() => _isSavingVideo = true);
+      
+      // 1. Download original video
+      final response = await http.get(Uri.parse(videoUrl));
+      if (response.statusCode != 200) {
+        throw Exception('Failed to download video file');
+      }
+      final videoBytes = response.bodyBytes;
+      
+      final tempDir = await getTemporaryDirectory();
+      final videoFile = File('${tempDir.path}/temp_video_${DateTime.now().millisecondsSinceEpoch}.mp4');
+      await videoFile.writeAsBytes(videoBytes);
+      
+      // 2. Generate watermark image dynamically using Canvas
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      
+      // Create watermark dimensions (say, 360x100)
+      final paint = ui.Paint()..color = Colors.black.withOpacity(0.5);
+      canvas.drawRRect(
+        ui.RRect.fromRectAndRadius(ui.Rect.fromLTWH(0, 0, 360, 100), ui.Radius.circular(16)),
+        paint,
+      );
+      
+      // Load the app icon
+      ui.Image? iconImage;
+      try {
+        final byteData = await rootBundle.load('assets/icon_transparent.png');
+        final codec = await ui.instantiateImageCodec(byteData.buffer.asUint8List(), targetWidth: 64, targetHeight: 64);
+        final frameInfo = await codec.getNextFrame();
+        iconImage = frameInfo.image;
+      } catch (iconErr) {
+        debugPrint('Could not load icon asset, fallback: $iconErr');
+      }
+      
+      if (iconImage != null) {
+        canvas.drawImage(iconImage, const ui.Offset(18, 18), ui.Paint());
+      }
+      
+      // Draw watermark text
+      final textPainter = TextPainter(
+        text: TextSpan(
+          children: [
+            const TextSpan(
+              text: 'Reel App\n',
+              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: ui.FontWeight.w900),
+            ),
+            TextSpan(
+              text: '@$creatorName',
+              style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: ui.FontWeight.w500),
+            ),
+          ],
+        ),
+        textDirection: TextDirection.ltr,
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, ui.Offset(iconImage != null ? 96 : 24, 24));
+      
+      final picture = recorder.endRecording();
+      final img = await picture.toImage(360, 100);
+      final pngBytes = await img.toByteData(format: ui.ImageByteFormat.png);
+      
+      final watermarkFile = File('${tempDir.path}/watermark_${DateTime.now().millisecondsSinceEpoch}.png');
+      await watermarkFile.writeAsBytes(pngBytes!.buffer.asUint8List());
+      
+      // 3. Process video using FFmpeg
+      final outputFile = File('${tempDir.path}/watermarked_${DateTime.now().millisecondsSinceEpoch}.mp4');
+      
+      // Place the watermark at the bottom-right corner of the video with 24px padding
+      final ffmpegCommand = '-i ${videoFile.path} -i ${watermarkFile.path} -filter_complex "overlay=main_w-overlay_w-24:main_h-overlay_h-24" -codec:a copy ${outputFile.path}';
+      
+      final session = await FFmpegKit.execute(ffmpegCommand);
+      final returnCode = await session.getReturnCode();
+      
+      File finalFile = videoFile; // Fallback to unwatermarked if FFmpeg fails
+      if (ReturnCode.isSuccess(returnCode)) {
+        finalFile = outputFile;
+        debugPrint('FFmpeg watermarking succeeded.');
+      } else {
+        final logs = await session.getLogs();
+        final failMsg = logs.map((l) => l.getMessage()).join('\n');
+        debugPrint('FFmpeg failed. Logs:\n$failMsg');
+      }
+      
+      // 4. Request photo manager permission and save to gallery
+      final ps = await PhotoManager.requestPermissionExtend();
+      if (ps.isAuth) {
+        await PhotoManager.editor.saveVideo(
+          finalFile,
+          title: 'reel_${DateTime.now().millisecondsSinceEpoch}',
+        );
+        
+        if (mounted) {
+          Navigator.pop(context); // Pop loading dialog
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Video saved to Gallery successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        throw Exception('Storage permission was denied');
+      }
+      
+      // Cleanup temp files
+      try {
+        await videoFile.delete();
+        if (finalFile != videoFile) {
+          await finalFile.delete();
+        }
+        await watermarkFile.delete();
+      } catch (_) {}
+      
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Pop loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save video: $e'),
+            backgroundColor: const Color(0xFF7E1C31),
+          ),
+        );
+      }
+    } finally {
+      setState(() => _isSavingVideo = false);
+    }
+  }
+
+  Widget _buildSocialShareItem({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 80,
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: Colors.white, size: 24),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white70, fontSize: 11),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _toggleRepost() async {
@@ -2196,6 +2480,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     final myId = supabase.currentUser?.id;
     final videoUrl = widget.post['videoUrl'] as String? ?? '';
     final caption = widget.post['text'] ?? '';
+    final creatorName = widget.post['userName'] ?? widget.post['username'] ?? 'User';
 
     List<dynamic> activeChats = [];
     bool loadingChats = true;
@@ -2308,7 +2593,67 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                                   },
                                 ),
                     ),
-                    
+                    const Divider(color: Colors.white12, height: 24),
+                    const Text(
+                      'Share to',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    const SizedBox(height: 16),
+                    // Horizontal Social Share list
+                    SizedBox(
+                      height: 90,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        children: [
+                          _buildSocialShareItem(
+                            icon: Icons.chat,
+                            label: 'WhatsApp',
+                            color: const Color(0xFF25D366),
+                            onTap: () {
+                              Navigator.pop(context);
+                              Share.share('Check out this video on Reel: $videoUrl');
+                            },
+                          ),
+                          _buildSocialShareItem(
+                            icon: Icons.camera_alt,
+                            label: 'Instagram',
+                            color: const Color(0xFFE1306C),
+                            onTap: () {
+                              Navigator.pop(context);
+                              Share.share('Check out this video on Reel: $videoUrl');
+                            },
+                          ),
+                          _buildSocialShareItem(
+                            icon: Icons.facebook,
+                            label: 'Facebook',
+                            color: const Color(0xFF1877F2),
+                            onTap: () {
+                              Navigator.pop(context);
+                              Share.share('Check out this video on Reel: $videoUrl');
+                            },
+                          ),
+                          _buildSocialShareItem(
+                            icon: Icons.message,
+                            label: 'SMS',
+                            color: const Color(0xFF00BFFF),
+                            onTap: () {
+                              Navigator.pop(context);
+                              Share.share('Check out this video on Reel: $videoUrl');
+                            },
+                          ),
+                          _buildSocialShareItem(
+                            icon: Icons.more_horiz,
+                            label: 'More',
+                            color: Colors.white24,
+                            onTap: () {
+                              Navigator.pop(context);
+                              Share.share('Check out this video on Reel: $videoUrl');
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
                     const Divider(color: Colors.white12, height: 24),
                     
                     // Utilities row
@@ -2341,10 +2686,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                             label: 'Save Video',
                             onTap: () {
                               Navigator.pop(context);
-                              Clipboard.setData(ClipboardData(text: videoUrl));
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Video link copied to clipboard. Paste in browser to download!')),
-                              );
+                              _downloadAndWatermarkVideo(videoUrl, creatorName);
                             },
                           ),
                           _buildShareAction(
@@ -3146,6 +3488,34 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
               onTap: _togglePlayPause,
               onDoubleTap: () {},
               onDoubleTapDown: _onDoubleTap,
+              onLongPressStart: (details) {
+                if (_videoController == null || !_videoController!.value.isInitialized) return;
+                final screenWidth = MediaQuery.of(context).size.width;
+                if (details.localPosition.dx > screenWidth / 2) {
+                  _videoController!.setPlaybackSpeed(2.0);
+                  setState(() {
+                    _isFastForwarding = true;
+                  });
+                }
+              },
+              onLongPressEnd: (details) {
+                if (_videoController == null || !_videoController!.value.isInitialized) return;
+                if (_isFastForwarding) {
+                  _videoController!.setPlaybackSpeed(1.0);
+                  setState(() {
+                    _isFastForwarding = false;
+                  });
+                }
+              },
+              onLongPressUp: () {
+                if (_videoController == null || !_videoController!.value.isInitialized) return;
+                if (_isFastForwarding) {
+                  _videoController!.setPlaybackSpeed(1.0);
+                  setState(() {
+                    _isFastForwarding = false;
+                  });
+                }
+              },
               child: SizedBox.expand(
                 child: FittedBox(
                   fit: _fitMode,
@@ -3181,6 +3551,65 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                   ),
                 ),
               ),
+            ),
+
+          // 2X Speed Indicator Banner Overlay
+          if (_isFastForwarding)
+            Positioned(
+              top: 80,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      Icon(Icons.fast_forward, color: Colors.white, size: 16),
+                      SizedBox(width: 6),
+                      Text(
+                        '2X Speed',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+          // Video Progress Bar (TikTok style thin bar at bottom)
+          if (_videoController != null && _videoController!.value.isInitialized)
+            ValueListenableBuilder(
+              valueListenable: _videoController!,
+              builder: (context, VideoPlayerValue value, child) {
+                final duration = value.duration.inMilliseconds;
+                final position = value.position.inMilliseconds;
+                double progress = 0.0;
+                if (duration > 0) {
+                  progress = (position / duration).clamp(0.0, 1.0);
+                }
+                return Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: SizedBox(
+                    height: 2.5,
+                    child: LinearProgressIndicator(
+                      value: progress,
+                      backgroundColor: Colors.white24,
+                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
+                );
+              },
             ),
 
           // Heart Coordinate pop animations
@@ -3362,6 +3791,15 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                 ),
                 const SizedBox(height: 14),
 
+                // Save Post (Bookmark)
+                _buildActionItem(
+                  icon: _isSaved ? Icons.bookmark : Icons.bookmark_border,
+                  label: 'Save',
+                  color: _isSaved ? Colors.amber : Colors.white,
+                  onTap: _toggleSave,
+                ),
+                const SizedBox(height: 14),
+
                 // Repost Button
                 _buildActionItem(
                   icon: Icons.repeat,
@@ -3376,18 +3814,6 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                   icon: Icons.reply_outlined,
                   label: 'Share',
                   onTap: _showShareSheet,
-                ),
-                const SizedBox(height: 14),
-
-                // Video Resize / Fit Mode Toggle
-                _buildActionItem(
-                  icon: _fitMode == BoxFit.cover ? Icons.aspect_ratio : Icons.fullscreen,
-                  label: _fitMode == BoxFit.cover ? 'Fit' : 'Cover',
-                  onTap: () {
-                    setState(() {
-                      _fitMode = _fitMode == BoxFit.cover ? BoxFit.contain : BoxFit.cover;
-                    });
-                  },
                 ),
               ],
             ),
@@ -3494,6 +3920,29 @@ class VideoControllerCache {
     }
 
     return controller;
+  }
+
+  static void preloadController(String url) {
+    if (_cache.containsKey(url)) return;
+
+    final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+    _cache[url] = controller;
+    _keys.add(url);
+
+    controller.initialize().then((_) {
+      debugPrint('Preloaded video successfully: $url');
+    }).catchError((e) {
+      debugPrint('Failed to preload video: $e');
+      _cache.remove(url);
+      _keys.remove(url);
+      controller.dispose();
+    });
+
+    if (_keys.length > _maxSize) {
+      final oldestUrl = _keys.removeAt(0);
+      final oldestController = _cache.remove(oldestUrl);
+      oldestController?.dispose();
+    }
   }
 
   static void clear() {

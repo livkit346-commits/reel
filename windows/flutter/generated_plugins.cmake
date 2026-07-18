@@ -5,11 +5,13 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
   audioplayers_windows
+  ffmpeg_kit_flutter_new
   file_selector_windows
   firebase_auth
   firebase_core
   geolocator_windows
   record_windows
+  share_plus
   url_launcher_windows
 )
 

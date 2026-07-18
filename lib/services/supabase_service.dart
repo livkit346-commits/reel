@@ -392,6 +392,7 @@ class SupabaseService {
             });
           }
           _startTokenRefreshTimer();
+          syncUserLikesAndSaves();
         }
       }
     } catch (e) {
@@ -523,6 +524,7 @@ class SupabaseService {
       // Pass token to Supabase client offline
       final authResponse = await _setSessionOffline(accessToken, refreshToken);
       _startTokenRefreshTimer();
+      syncUserLikesAndSaves();
 
       // Sign in to Firebase Auth as a fallback/sync (if firebase is still active for other things, though we don't require it)
       try {
@@ -2885,22 +2887,60 @@ class SupabaseService {
 
   // Posts: Toggle Like
   Future<void> toggleLikePost(String postId, int currentLikes, bool increment) async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
     try {
-      final newLikes = increment ? currentLikes + 1 : currentLikes - 1;
-      await client.from('posts').update({'likes': newLikes >= 0 ? newLikes : 0}).eq('id', postId);
+      final alreadyLiked = _likedPostIds.contains(postId);
+      if (increment == alreadyLiked) {
+        // Prevent duplicate requests from modifying counts multiple times
+        return;
+      }
+      
+      // Optimistically update local cache state first
       if (increment) {
         _likedPostIds.add(postId);
       } else {
         _likedPostIds.remove(postId);
       }
-      final myId = currentUser?.id;
-      if (myId != null) {
+      await LocalStorageService().cacheJson('liked_posts_$myId', _likedPostIds.toList());
+
+      // Fetch the latest likes count directly from the database to avoid race conditions
+      final postData = await client.from('posts').select('likes').eq('id', postId).maybeSingle();
+      final dbLikes = (postData?['likes'] as num?)?.toInt() ?? currentLikes;
+      final newLikes = increment ? dbLikes + 1 : dbLikes - 1;
+      
+      await client.from('posts').update({'likes': newLikes >= 0 ? newLikes : 0}).eq('id', postId);
+      
+      // Log the metric
+      await reportPostMetric(postId: postId, liked: increment);
+    } catch (e) {
+      debugPrint('Error toggling post like: $e');
+    }
+  }
+
+  // Posts: Sync user likes from the database
+  Future<void> syncUserLikesAndSaves() async {
+    final myId = currentUser?.id;
+    if (myId == null) return;
+    try {
+      final response = await client
+          .from('post_metrics')
+          .select('postId')
+          .eq('userId', myId)
+          .eq('liked', true);
+      
+      if (response is List) {
+        _likedPostIds.clear();
+        for (var row in response) {
+          final pId = row['postId'] ?? row['postid'];
+          if (pId != null) {
+            _likedPostIds.add(pId.toString());
+          }
+        }
         await LocalStorageService().cacheJson('liked_posts_$myId', _likedPostIds.toList());
-        // Report like metrics in the background
-        reportPostMetric(postId: postId, liked: increment);
       }
     } catch (e) {
-      rethrow;
+      debugPrint('Error syncing user likes: $e');
     }
   }
 

@@ -43,6 +43,7 @@ void main() async {
 }
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
 
 class ReelApp extends StatelessWidget {
   final bool showMainScreen;
@@ -52,6 +53,7 @@ class ReelApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
+      navigatorObservers: [routeObserver],
       title: 'Reel',
       debugShowCheckedModeBanner: false,
       theme: ReelTheme.lightTheme,
@@ -61,4 +63,3 @@ class ReelApp extends StatelessWidget {
     );
   }
 }
-
