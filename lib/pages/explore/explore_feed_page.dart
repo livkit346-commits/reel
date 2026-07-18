@@ -28,10 +28,10 @@ class ExploreFeedPage extends StatefulWidget {
   const ExploreFeedPage({super.key, this.isActive = true});
 
   @override
-  State<ExploreFeedPage> createState() => _ExploreFeedPageState();
+  State<ExploreFeedPage> createState() => ExploreFeedPageState();
 }
 
-class _ExploreFeedPageState extends State<ExploreFeedPage> {
+class ExploreFeedPageState extends State<ExploreFeedPage> {
   late Future<List<dynamic>> _feedFuture;
   String _activeTab = 'For You';
 
@@ -47,6 +47,14 @@ class _ExploreFeedPageState extends State<ExploreFeedPage> {
           ? context.read<SupabaseService>().getExploreFeed()
           : context.read<SupabaseService>().getFollowingFeed();
     });
+  }
+
+  void reloadPage() {
+    _refreshFeed();
+    if (_feedMode == 'video') {
+      _videoFeedKey.currentState?.loadVideoFeed();
+      _videoFeedKey.currentState?.resetToFirstPage();
+    }
   }
 
   Widget _buildTabButton(String tabName, BuildContext context) {
@@ -1855,6 +1863,16 @@ class ShortVideoFeedViewState extends State<ShortVideoFeedView> {
     setState(() {
       _videoFeedFuture = context.read<SupabaseService>().getVideoFeed(followingOnly: widget.followingOnly);
     });
+  }
+
+  void resetToFirstPage() {
+    if (_pageController.hasClients) {
+      _pageController.animateToPage(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
   @override

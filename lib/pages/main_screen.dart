@@ -18,6 +18,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   int _selectedIndex = 0;
+  final GlobalKey<ExploreFeedPageState> _exploreFeedKey = GlobalKey<ExploreFeedPageState>();
 
   @override
   void initState() {
@@ -59,7 +60,10 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
         index: _selectedIndex,
         children: [
           const ChatListPage(),
-          ExploreFeedPage(isActive: _selectedIndex == 1),
+          ExploreFeedPage(
+            key: _exploreFeedKey,
+            isActive: _selectedIndex == 1,
+          ),
           const UpdatesPage(),
           const AddFriendsPage(),
           const ReelProfilePage(),
@@ -67,7 +71,13 @@ class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
-        onTap: (index) => setState(() => _selectedIndex = index),
+        onTap: (index) {
+          if (index == 1 && _selectedIndex == 1) {
+            _exploreFeedKey.currentState?.reloadPage();
+          } else {
+            setState(() => _selectedIndex = index);
+          }
+        },
         type: BottomNavigationBarType.fixed,
         backgroundColor: navBgColor,
         selectedItemColor: navSelectedColor,
