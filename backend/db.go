@@ -2,18 +2,11 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
-	"strconv"
-	"time"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-// DynamoDB User representation
+// User representation
 type DBUser struct {
 	UserID       string
 	Email        string
@@ -23,7 +16,7 @@ type DBUser struct {
 	PhotoURL     string
 }
 
-// DynamoDB Refresh Token representation
+// Refresh Token representation
 type DBRefreshToken struct {
 	Token       string
 	UserID      string
@@ -32,354 +25,207 @@ type DBRefreshToken struct {
 	ParentToken string
 }
 
-// Ensure required DynamoDB tables exist
+// Ensure required PostgreSQL tables exist
 func EnsureTablesExist() {
-	if dbClient == nil {
-		log.Println("DynamoDB client is nil, skipping table check.")
+	if dbPool == nil {
+		log.Println("PostgreSQL pool is nil, skipping table check.")
 		return
 	}
 
-	tables := []struct {
-		name      string
-		hashKey   string
-		enableTTL bool
-	}{
-		{"ReelUsers", "email", false},
-		{"ReelRefreshTokens", "token", true},
-		{"ReelMessages", "chatId", false}, // In case this table isn't created yet either
-		{"ReelMutedChats", "userId", false},
-		{"ReelVerificationCodes", "email", true},
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS public.auth_credentials (
+			id UUID PRIMARY KEY,
+			email VARCHAR(255) UNIQUE NOT NULL,
+			password_hash VARCHAR(255) NOT NULL,
+			salt VARCHAR(255) NOT NULL,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS public.refresh_tokens (
+			token VARCHAR(255) PRIMARY KEY,
+			user_id UUID NOT NULL,
+			expires_at BIGINT NOT NULL,
+			revoked BOOLEAN DEFAULT false NOT NULL,
+			parent_token VARCHAR(255)
+		)`,
+		`CREATE TABLE IF NOT EXISTS public.muted_chats (
+			user_id VARCHAR(255) PRIMARY KEY,
+			muted_chats TEXT[] NOT NULL DEFAULT '{}'::TEXT[]
+		)`,
+		`CREATE TABLE IF NOT EXISTS public.verification_codes (
+			email VARCHAR(255) PRIMARY KEY,
+			code VARCHAR(10) NOT NULL,
+			expires_at BIGINT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS public.chat_messages (
+			chat_id VARCHAR(255) NOT NULL,
+			message_id VARCHAR(255) NOT NULL,
+			sender_id VARCHAR(255) NOT NULL,
+			recipient_id VARCHAR(255) NOT NULL,
+			text TEXT,
+			media_url TEXT,
+			media_type VARCHAR(50),
+			timestamp BIGINT NOT NULL,
+			status VARCHAR(50) DEFAULT 'sent',
+			expires_at BIGINT NOT NULL,
+			PRIMARY KEY (chat_id, message_id)
+		)`,
 	}
 
-	for _, t := range tables {
-		_, err := dbClient.DescribeTable(context.TODO(), &dynamodb.DescribeTableInput{
-			TableName: aws.String(t.name),
-		})
+	for _, q := range queries {
+		_, err := dbPool.Exec(context.Background(), q)
 		if err != nil {
-			var notFound *types.ResourceNotFoundException
-			if errors.As(err, &notFound) {
-				log.Printf("Table %s not found. Creating it...", t.name)
-				err = createTable(t.name, t.hashKey)
-				if err != nil {
-					log.Printf("Failed to create table %s: %v", t.name, err)
-					continue
-				}
-
-				if t.enableTTL {
-					// Wait for table to be active before enabling TTL
-					go func(tableName string) {
-						time.Sleep(10 * time.Second)
-						enableTTL(tableName, "expiresAt")
-					}(t.name)
-				}
-			} else {
-				log.Printf("Error describing table %s: %v", t.name, err)
-			}
-		} else {
-			log.Printf("Table %s exists.", t.name)
+			log.Printf("Failed to run migration query: %v", err)
 		}
 	}
+	log.Println("Successfully ran PostgreSQL database migrations/checks.")
 }
 
-func createTable(name, hashKey string) error {
-	// For ReelMessages, we also need a Sort Key (messageId)
-	var keySchema []types.KeySchemaElement
-	var attrDefs []types.AttributeDefinition
-
-	if name == "ReelMessages" {
-		keySchema = []types.KeySchemaElement{
-			{AttributeName: aws.String("chatId"), KeyType: types.KeyTypeHash},
-			{AttributeName: aws.String("messageId"), KeyType: types.KeyTypeRange},
-		}
-		attrDefs = []types.AttributeDefinition{
-			{AttributeName: aws.String("chatId"), AttributeType: types.ScalarAttributeTypeS},
-			{AttributeName: aws.String("messageId"), AttributeType: types.ScalarAttributeTypeS},
-		}
-	} else {
-		keySchema = []types.KeySchemaElement{
-			{AttributeName: aws.String(hashKey), KeyType: types.KeyTypeHash},
-		}
-		attrDefs = []types.AttributeDefinition{
-			{AttributeName: aws.String(hashKey), AttributeType: types.ScalarAttributeTypeS},
-		}
-	}
-
-	input := &dynamodb.CreateTableInput{
-		TableName:            aws.String(name),
-		KeySchema:            keySchema,
-		AttributeDefinitions: attrDefs,
-		BillingMode:          types.BillingModePayPerRequest, // Serverless On-Demand scaling
-	}
-
-	_, err := dbClient.CreateTable(context.TODO(), input)
-	return err
-}
-
-func enableTTL(tableName, attributeName string) {
-	input := &dynamodb.UpdateTimeToLiveInput{
-		TableName: aws.String(tableName),
-		TimeToLiveSpecification: &types.TimeToLiveSpecification{
-			AttributeName: aws.String(attributeName),
-			Enabled:       aws.Bool(true),
-		},
-	}
-	_, err := dbClient.UpdateTimeToLive(context.TODO(), input)
-	if err != nil {
-		log.Printf("Failed to enable TTL on table %s: %v", tableName, err)
-	} else {
-		log.Printf("Successfully enabled TTL on %s for attribute %s", tableName, attributeName)
-	}
-}
-
-// Create a new user in ReelUsers table
+// Create a new user credentials record
 func createUserInDynamoDB(userID, email, passwordHashB64, saltB64, name, photoURL string) error {
-	if dbClient == nil {
-		return fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.PutItemInput{
-		TableName: aws.String("ReelUsers"),
-		Item: map[string]types.AttributeValue{
-			"email":        &types.AttributeValueMemberS{Value: email},
-			"userId":       &types.AttributeValueMemberS{Value: userID},
-			"passwordHash": &types.AttributeValueMemberS{Value: passwordHashB64},
-			"salt":         &types.AttributeValueMemberS{Value: saltB64},
-			"name":         &types.AttributeValueMemberS{Value: name},
-			"photoUrl":     &types.AttributeValueMemberS{Value: photoURL},
-			"createdAt":    &types.AttributeValueMemberN{Value: strconv.FormatInt(time.Now().UnixMilli(), 10)},
-		},
-	}
+	// Insert into public.auth_credentials. Note: public.users is already synced by syncUserToSupabase.
+	query := `INSERT INTO public.auth_credentials (id, email, password_hash, salt) 
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (id) DO UPDATE SET email = EXCLUDED.email, password_hash = EXCLUDED.password_hash, salt = EXCLUDED.salt`
 
-	_, err := dbClient.PutItem(context.TODO(), input)
+	_, err := dbPool.Exec(context.Background(), query, userID, email, passwordHashB64, saltB64)
 	return err
 }
 
-// Update user's password in ReelUsers table
+// Update user's password
 func updateUserPasswordInDynamoDB(email, passwordHashB64, saltB64 string) error {
-	if dbClient == nil {
-		return fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.UpdateItemInput{
-		TableName: aws.String("ReelUsers"),
-		Key: map[string]types.AttributeValue{
-			"email": &types.AttributeValueMemberS{Value: email},
-		},
-		UpdateExpression: aws.String("SET passwordHash = :p, salt = :s"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":p": &types.AttributeValueMemberS{Value: passwordHashB64},
-			":s": &types.AttributeValueMemberS{Value: saltB64},
-		},
-	}
-
-	_, err := dbClient.UpdateItem(context.TODO(), input)
+	query := `UPDATE public.auth_credentials SET password_hash = $1, salt = $2 WHERE email = $3`
+	_, err := dbPool.Exec(context.Background(), query, passwordHashB64, saltB64, email)
 	return err
 }
 
-// Retrieve user by email from ReelUsers table
+// Retrieve user credentials by email
 func getUserFromDynamoDB(email string) (*DBUser, error) {
-	if dbClient == nil {
-		return nil, fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return nil, fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.GetItemInput{
-		TableName: aws.String("ReelUsers"),
-		Key: map[string]types.AttributeValue{
-			"email": &types.AttributeValueMemberS{Value: email},
-		},
-	}
+	// Join with users table to get the name/photoUrl
+	query := `SELECT c.id, c.email, c.password_hash, c.salt, COALESCE(u.name, ''), COALESCE(u."photoUrl", '') 
+		FROM public.auth_credentials c
+		LEFT JOIN public.users u ON u.id = c.id
+		WHERE c.email = $1`
 
-	result, err := dbClient.GetItem(context.TODO(), input)
+	var user DBUser
+	err := dbPool.QueryRow(context.Background(), query, email).Scan(
+		&user.UserID,
+		&user.Email,
+		&user.PasswordHash,
+		&user.Salt,
+		&user.Name,
+		&user.PhotoURL,
+	)
 	if err != nil {
+		// pgx returns ErrNoRows when no rows are found
+		if err.Error() == "no rows in result set" {
+			return nil, nil
+		}
 		return nil, err
 	}
-	if result.Item == nil {
-		return nil, nil // User not found
-	}
 
-	user := &DBUser{}
-	if val, ok := result.Item["userId"].(*types.AttributeValueMemberS); ok {
-		user.UserID = val.Value
-	}
-	if val, ok := result.Item["email"].(*types.AttributeValueMemberS); ok {
-		user.Email = val.Value
-	}
-	if val, ok := result.Item["passwordHash"].(*types.AttributeValueMemberS); ok {
-		user.PasswordHash = val.Value
-	}
-	if val, ok := result.Item["salt"].(*types.AttributeValueMemberS); ok {
-		user.Salt = val.Value
-	}
-	if val, ok := result.Item["name"].(*types.AttributeValueMemberS); ok {
-		user.Name = val.Value
-	}
-	if val, ok := result.Item["photoUrl"].(*types.AttributeValueMemberS); ok {
-		user.PhotoURL = val.Value
-	}
-
-	return user, nil
+	return &user, nil
 }
 
-// Save a new refresh token to ReelRefreshTokens table
+// Save a new refresh token
 func saveRefreshTokenToDynamoDB(token, userID string, expiresAt int64, parentToken string) error {
-	if dbClient == nil {
-		return fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.PutItemInput{
-		TableName: aws.String("ReelRefreshTokens"),
-		Item: map[string]types.AttributeValue{
-			"token":       &types.AttributeValueMemberS{Value: token},
-			"userId":      &types.AttributeValueMemberS{Value: userID},
-			"expiresAt":   &types.AttributeValueMemberN{Value: strconv.FormatInt(expiresAt, 10)},
-			"revoked":     &types.AttributeValueMemberBOOL{Value: false},
-			"parentToken": &types.AttributeValueMemberS{Value: parentToken},
-		},
-	}
+	query := `INSERT INTO public.refresh_tokens (token, user_id, expires_at, revoked, parent_token) 
+		VALUES ($1, $2, $3, $4, $5)`
 
-	_, err := dbClient.PutItem(context.TODO(), input)
+	_, err := dbPool.Exec(context.Background(), query, token, userID, expiresAt, false, parentToken)
 	return err
 }
 
-// Retrieve refresh token from ReelRefreshTokens table
+// Retrieve refresh token details
 func getRefreshTokenFromDynamoDB(token string) (*DBRefreshToken, error) {
-	if dbClient == nil {
-		return nil, fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return nil, fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.GetItemInput{
-		TableName: aws.String("ReelRefreshTokens"),
-		Key: map[string]types.AttributeValue{
-			"token": &types.AttributeValueMemberS{Value: token},
-		},
-	}
+	query := `SELECT token, user_id, expires_at, revoked, parent_token FROM public.refresh_tokens WHERE token = $1`
 
-	result, err := dbClient.GetItem(context.TODO(), input)
+	var rt DBRefreshToken
+	err := dbPool.QueryRow(context.Background(), query, token).Scan(
+		&rt.Token,
+		&rt.UserID,
+		&rt.ExpiresAt,
+		&rt.Revoked,
+		&rt.ParentToken,
+	)
 	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return nil, nil
+		}
 		return nil, err
 	}
-	if result.Item == nil {
-		return nil, nil // Token not found
-	}
 
-	rt := &DBRefreshToken{}
-	if val, ok := result.Item["token"].(*types.AttributeValueMemberS); ok {
-		rt.Token = val.Value
-	}
-	if val, ok := result.Item["userId"].(*types.AttributeValueMemberS); ok {
-		rt.UserID = val.Value
-	}
-	if val, ok := result.Item["parentToken"].(*types.AttributeValueMemberS); ok {
-		rt.ParentToken = val.Value
-	}
-	if val, ok := result.Item["revoked"].(*types.AttributeValueMemberBOOL); ok {
-		rt.Revoked = val.Value
-	}
-	if val, ok := result.Item["expiresAt"].(*types.AttributeValueMemberN); ok {
-		exp, _ := strconv.ParseInt(val.Value, 10, 64)
-		rt.ExpiresAt = exp
-	}
-
-	return rt, nil
+	return &rt, nil
 }
 
 // Revoke a specific refresh token (mark revoked = true)
 func revokeRefreshTokenInDynamoDB(token string) error {
-	if dbClient == nil {
-		return fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.UpdateItemInput{
-		TableName: aws.String("ReelRefreshTokens"),
-		Key: map[string]types.AttributeValue{
-			"token": &types.AttributeValueMemberS{Value: token},
-		},
-		UpdateExpression:          aws.String("SET revoked = :r"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":r": &types.AttributeValueMemberBOOL{Value: true},
-		},
-	}
-
-	_, err := dbClient.UpdateItem(context.TODO(), input)
+	query := `UPDATE public.refresh_tokens SET revoked = true WHERE token = $1`
+	_, err := dbPool.Exec(context.Background(), query, token)
 	return err
 }
 
-// Revoke all active refresh tokens for a user ID (for token compromise response)
+// Revoke all active refresh tokens for a user ID
 func revokeAllRefreshTokensForUserInDynamoDB(userID string) error {
-	if dbClient == nil {
-		return fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.ScanInput{
-		TableName:        aws.String("ReelRefreshTokens"),
-		FilterExpression: aws.String("userId = :uid AND revoked = :rev"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":uid": &types.AttributeValueMemberS{Value: userID},
-			":rev": &types.AttributeValueMemberBOOL{Value: false},
-		},
-	}
-
-	result, err := dbClient.Scan(context.TODO(), input)
-	if err != nil {
-		return err
-	}
-
-	for _, item := range result.Items {
-		if tokenVal, ok := item["token"].(*types.AttributeValueMemberS); ok {
-			err = revokeRefreshTokenInDynamoDB(tokenVal.Value)
-			if err != nil {
-				log.Printf("Failed to revoke token %s for user %s: %v", tokenVal.Value, userID, err)
-			}
-		}
-	}
-
-	return nil
+	query := `UPDATE public.refresh_tokens SET revoked = true WHERE user_id = $1`
+	_, err := dbPool.Exec(context.Background(), query, userID)
+	return err
 }
 
-// Retrieve muted chats for a user from ReelMutedChats table
+// Retrieve muted chats for a user
 func getMutedChatsFromDynamoDB(userID string) ([]string, error) {
-	if dbClient == nil {
-		return nil, fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return nil, fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.GetItemInput{
-		TableName: aws.String("ReelMutedChats"),
-		Key: map[string]types.AttributeValue{
-			"userId": &types.AttributeValueMemberS{Value: userID},
-		},
-	}
-
-	result, err := dbClient.GetItem(context.TODO(), input)
-	if err != nil {
-		return nil, err
-	}
-	if result.Item == nil {
-		return []string{}, nil
-	}
+	query := `SELECT muted_chats FROM public.muted_chats WHERE user_id = $1`
 
 	var mutedChats []string
-	if val, ok := result.Item["mutedChats"]; ok {
-		if setVal, ok := val.(*types.AttributeValueMemberSS); ok {
-			mutedChats = setVal.Value
-		} else if listVal, ok := val.(*types.AttributeValueMemberL); ok {
-			for _, item := range listVal.Value {
-				if sItem, ok := item.(*types.AttributeValueMemberS); ok {
-					mutedChats = append(mutedChats, sItem.Value)
-				}
-			}
+	err := dbPool.QueryRow(context.Background(), query, userID).Scan(&mutedChats)
+	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return []string{}, nil
 		}
+		return nil, err
 	}
 
 	return mutedChats, nil
 }
 
-// Add/Remove a chat from the user's muted chats set in ReelMutedChats table
+// Add/Remove a chat from the user's muted chats set
 func setChatMutedInDynamoDB(userID string, chatID string, isMuted bool) error {
-	if dbClient == nil {
-		return fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	// First get current list
+	// Fetch existing
 	current, err := getMutedChatsFromDynamoDB(userID)
 	if err != nil {
 		current = []string{}
@@ -402,97 +248,57 @@ func setChatMutedInDynamoDB(userID string, chatID string, isMuted bool) error {
 		updated = append(updated, c)
 	}
 
-	// Save back as a String Set (SS) or List (L)
-	var attrVal types.AttributeValue
-	if len(updated) > 0 {
-		attrVal = &types.AttributeValueMemberSS{Value: updated}
-	} else {
-		// DynamoDB SS cannot be empty, so we store an empty list L instead
-		attrVal = &types.AttributeValueMemberL{Value: []types.AttributeValue{}}
-	}
+	// Save back using upsert (ON CONFLICT DO UPDATE)
+	query := `INSERT INTO public.muted_chats (user_id, muted_chats) 
+		VALUES ($1, $2)
+		ON CONFLICT (user_id) DO UPDATE SET muted_chats = EXCLUDED.muted_chats`
 
-	input := &dynamodb.PutItemInput{
-		TableName: aws.String("ReelMutedChats"),
-		Item: map[string]types.AttributeValue{
-			"userId":     &types.AttributeValueMemberS{Value: userID},
-			"mutedChats": attrVal,
-		},
-	}
-
-	_, err = dbClient.PutItem(context.TODO(), input)
+	_, err = dbPool.Exec(context.Background(), query, userID, updated)
 	return err
 }
 
-// Save verification code in ReelVerificationCodes table
+// Save verification code
 func saveVerificationCode(email, code string, expiresAt int64) error {
-	if dbClient == nil {
-		return fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.PutItemInput{
-		TableName: aws.String("ReelVerificationCodes"),
-		Item: map[string]types.AttributeValue{
-			"email":     &types.AttributeValueMemberS{Value: email},
-			"code":      &types.AttributeValueMemberS{Value: code},
-			"expiresAt": &types.AttributeValueMemberN{Value: strconv.FormatInt(expiresAt, 10)},
-		},
-	}
-	_, err := dbClient.PutItem(context.TODO(), input)
+	query := `INSERT INTO public.verification_codes (email, code, expires_at) 
+		VALUES ($1, $2, $3)
+		ON CONFLICT (email) DO UPDATE SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at`
+
+	_, err := dbPool.Exec(context.Background(), query, email, code, expiresAt)
 	return err
 }
 
-// Retrieve verification code from ReelVerificationCodes table
+// Retrieve verification code details
 func getVerificationCode(email string) (string, int64, error) {
-	if dbClient == nil {
-		return "", 0, fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return "", 0, fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.GetItemInput{
-		TableName: aws.String("ReelVerificationCodes"),
-		Key: map[string]types.AttributeValue{
-			"email": &types.AttributeValueMemberS{Value: email},
-		},
-	}
+	query := `SELECT code, expires_at FROM public.verification_codes WHERE email = $1`
 
-	resp, err := dbClient.GetItem(context.TODO(), input)
+	var code string
+	var expiresAt int64
+	err := dbPool.QueryRow(context.Background(), query, email).Scan(&code, &expiresAt)
 	if err != nil {
+		if err.Error() == "no rows in result set" {
+			return "", 0, nil
+		}
 		return "", 0, err
 	}
 
-	if resp.Item == nil {
-		return "", 0, nil
-	}
-
-	codeVal, ok := resp.Item["code"].(*types.AttributeValueMemberS)
-	if !ok {
-		return "", 0, fmt.Errorf("invalid code attribute type")
-	}
-
-	expiresVal, ok := resp.Item["expiresAt"].(*types.AttributeValueMemberN)
-	if !ok {
-		return "", 0, fmt.Errorf("invalid expiresAt attribute type")
-	}
-
-	expiresAt, err := strconv.ParseInt(expiresVal.Value, 10, 64)
-	if err != nil {
-		return "", 0, err
-	}
-
-	return codeVal.Value, expiresAt, nil
+	return code, expiresAt, nil
 }
 
-// Delete verification code from ReelVerificationCodes table
+// Delete verification code
 func deleteVerificationCode(email string) error {
-	if dbClient == nil {
-		return fmt.Errorf("DynamoDB client not initialized")
+	if dbPool == nil {
+		return fmt.Errorf("PostgreSQL pool not initialized")
 	}
 
-	input := &dynamodb.DeleteItemInput{
-		TableName: aws.String("ReelVerificationCodes"),
-		Key: map[string]types.AttributeValue{
-			"email": &types.AttributeValueMemberS{Value: email},
-		},
-	}
-	_, err := dbClient.DeleteItem(context.TODO(), input)
+	query := `DELETE FROM public.verification_codes WHERE email = $1`
+	_, err := dbPool.Exec(context.Background(), query, email)
 	return err
 }

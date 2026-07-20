@@ -686,4 +686,54 @@ ALTER TABLE public.comments ADD COLUMN IF NOT EXISTS "isPinned" BOOLEAN DEFAULT 
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "videoUrl" TEXT;
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "mediaType" TEXT DEFAULT 'text';
 
+-- ========================================================
+-- SELF-HOSTED GATEWAY SERVICES AUTH AND CACHING TABLES
+-- ========================================================
+
+-- Store credentials for Go-auth users
+CREATE TABLE IF NOT EXISTS public.auth_credentials (
+  id UUID PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  salt VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- Store Go-auth user refresh tokens
+CREATE TABLE IF NOT EXISTS public.refresh_tokens (
+  token VARCHAR(255) PRIMARY KEY,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE NOT NULL,
+  expires_at BIGINT NOT NULL,
+  revoked BOOLEAN DEFAULT false NOT NULL,
+  parent_token VARCHAR(255)
+);
+
+-- Store muted chats per user
+CREATE TABLE IF NOT EXISTS public.muted_chats (
+  user_id VARCHAR(255) PRIMARY KEY,
+  muted_chats TEXT[] NOT NULL DEFAULT '{}'::TEXT[]
+);
+
+-- Store verification codes for email signups
+CREATE TABLE IF NOT EXISTS public.verification_codes (
+  email VARCHAR(255) PRIMARY KEY,
+  code VARCHAR(10) NOT NULL,
+  expires_at BIGINT NOT NULL
+);
+
+-- Store temporary/undelivered chat messages (replacing DynamoDB ReelMessages)
+CREATE TABLE IF NOT EXISTS public.chat_messages (
+  chat_id VARCHAR(255) NOT NULL,
+  message_id VARCHAR(255) NOT NULL,
+  sender_id VARCHAR(255) NOT NULL,
+  recipient_id VARCHAR(255) NOT NULL,
+  text TEXT,
+  media_url TEXT,
+  media_type VARCHAR(50),
+  timestamp BIGINT NOT NULL,
+  status VARCHAR(50) DEFAULT 'sent',
+  expires_at BIGINT NOT NULL,
+  PRIMARY KEY (chat_id, message_id)
+);
+
 

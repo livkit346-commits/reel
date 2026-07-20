@@ -16,18 +16,14 @@ import (
 
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/api/option"
 	"math"
 	"math/rand"
 	"regexp"
 	"sort"
-	"strconv"
 )
 
 // Unified Message payload format
@@ -75,7 +71,7 @@ var (
 		},
 	}
 	firebaseApp *firebase.App
-	dbClient    *dynamodb.Client
+	dbPool      *pgxpool.Pool
 	supabaseUrl string
 	supabaseKey string
 )
@@ -113,14 +109,22 @@ func main() {
 	supabaseUrl = os.Getenv("SUPABASE_URL")
 	supabaseKey = os.Getenv("SUPABASE_ANON_KEY")
 
-	// 2. Initialize AWS Config (DynamoDB)
-	cfg, err := config.LoadDefaultConfig(context.TODO())
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
+	// 2. Initialize PostgreSQL Pool
+	dbUrl := os.Getenv("DATABASE_URL")
+	if dbUrl == "" {
+		dbUrl = "postgres://postgres:postgres@localhost:5432/postgres"
 	}
-	dbClient = dynamodb.NewFromConfig(cfg)
+	poolConfig, err := pgxpool.ParseConfig(dbUrl)
+	if err != nil {
+		log.Fatalf("unable to parse database url: %v", err)
+	}
+	dbPool, err = pgxpool.NewWithConfig(context.Background(), poolConfig)
+	if err != nil {
+		log.Fatalf("unable to connect to database: %v", err)
+	}
+	log.Println("PostgreSQL connection pool successfully initialized.")
 
-	// Auto-create required DynamoDB tables (ReelUsers, ReelRefreshTokens, ReelMessages)
+	// Auto-create required PostgreSQL tables if they don't exist
 	EnsureTablesExist()
 
 	// 3. Initialize Firebase Admin SDK (used for FCM only)
@@ -509,98 +513,78 @@ func getChatMetadata(chatID string) (ChatMetadata, error) {
 	return meta, nil
 }
 
-// Write message log to DynamoDB table
+// Write message log to PostgreSQL table
 func saveMessageToDynamoDB(senderID, msgID string, timestamp int64, msg ChatMessage) error {
-	if dbClient == nil {
+	if dbPool == nil {
 		return nil
 	}
 
-	timestampStr := fmt.Sprintf("%d", timestamp)
-	ttlVal := time.Now().Add(48 * time.Hour).Unix()
-	ttlStr := fmt.Sprintf("%d", ttlVal)
+	expiresAt := time.Now().Add(48 * time.Hour).Unix()
 
-	input := &dynamodb.PutItemInput{
-		TableName: aws.String("ReelMessages"),
-		Item: map[string]types.AttributeValue{
-			"chatId":    &types.AttributeValueMemberS{Value: msg.ChatID},
-			"messageId": &types.AttributeValueMemberS{Value: msgID},
-			"senderId":  &types.AttributeValueMemberS{Value: senderID},
-			"text":      &types.AttributeValueMemberS{Value: msg.Text},
-			"mediaUrl":  &types.AttributeValueMemberS{Value: msg.MediaURL},
-			"mediaType": &types.AttributeValueMemberS{Value: msg.MediaType},
-			"timestamp": &types.AttributeValueMemberN{Value: timestampStr},
-			"status":    &types.AttributeValueMemberS{Value: "sent"},
-			"ttl":       &types.AttributeValueMemberN{Value: ttlStr},
-		},
-	}
+	query := `INSERT INTO public.chat_messages 
+		(chat_id, message_id, sender_id, recipient_id, text, media_url, media_type, timestamp, status, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
 
-	_, err := dbClient.PutItem(context.TODO(), input)
+	_, err := dbPool.Exec(context.Background(), query,
+		msg.ChatID,
+		msgID,
+		senderID,
+		msg.RecipientID,
+		msg.Text,
+		msg.MediaURL,
+		msg.MediaType,
+		timestamp,
+		"sent",
+		expiresAt,
+	)
 	return err
 }
 
-// Delete message from DynamoDB table (No-Op: messages are cleaned up automatically via TTL)
+// Delete message from PostgreSQL table
 func deleteMessageFromDynamoDB(chatID, messageID, userID string) error {
-	return nil
+	if dbPool == nil {
+		return nil
+	}
+	query := `DELETE FROM public.chat_messages WHERE chat_id = $1 AND message_id = $2`
+	_, err := dbPool.Exec(context.Background(), query, chatID, messageID)
+	return err
 }
 
-// Retrieve undelivered messages from DynamoDB
+// Retrieve undelivered messages from PostgreSQL
 func getMessagesFromDynamoDB(chatID, since string) ([]ChatMessage, error) {
-	if dbClient == nil {
+	if dbPool == nil {
 		return []ChatMessage{}, nil
 	}
 
-	// Always query all messages for the chatId since the table only stores undelivered/unseen messages
-	keyCond := "chatId = :chatId"
-	exprValues := map[string]types.AttributeValue{
-		":chatId": &types.AttributeValueMemberS{Value: chatID},
-	}
+	// First query all messages for the chat_id from PostgreSQL
+	query := `SELECT chat_id, message_id, sender_id, recipient_id, text, media_url, media_type, timestamp, status
+		FROM public.chat_messages 
+		WHERE chat_id = $1`
 
-	input := &dynamodb.QueryInput{
-		TableName:                 aws.String("ReelMessages"),
-		KeyConditionExpression:    aws.String(keyCond),
-		ExpressionAttributeValues: exprValues,
-	}
-
-	result, err := dbClient.Query(context.TODO(), input)
+	rows, err := dbPool.Query(context.Background(), query, chatID)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	messages := make([]ChatMessage, 0)
-	for _, item := range result.Items {
+	for rows.Next() {
 		var msg ChatMessage
 		msg.Type = "message"
-
-		if val, ok := item["chatId"].(*types.AttributeValueMemberS); ok {
-			msg.ChatID = val.Value
+		err := rows.Scan(
+			&msg.ChatID,
+			&msg.MessageID,
+			&msg.SenderID,
+			&msg.RecipientID,
+			&msg.Text,
+			&msg.MediaURL,
+			&msg.MediaType,
+			&msg.Timestamp,
+			&msg.Status,
+		)
+		if err != nil {
+			return nil, err
 		}
-		if val, ok := item["messageId"].(*types.AttributeValueMemberS); ok {
-			msg.MessageID = val.Value
-		}
-		if val, ok := item["senderId"].(*types.AttributeValueMemberS); ok {
-			msg.SenderID = val.Value
-		}
-		if val, ok := item["recipientId"].(*types.AttributeValueMemberS); ok {
-			msg.RecipientID = val.Value
-		}
-		if val, ok := item["text"].(*types.AttributeValueMemberS); ok {
-			msg.Text = val.Value
-		}
-		if val, ok := item["mediaUrl"].(*types.AttributeValueMemberS); ok {
-			msg.MediaURL = val.Value
-		}
-		if val, ok := item["mediaType"].(*types.AttributeValueMemberS); ok {
-			msg.MediaType = val.Value
-		}
-		if val, ok := item["status"].(*types.AttributeValueMemberS); ok {
-			msg.Status = val.Value
-		}
-		if val, ok := item["timestamp"].(*types.AttributeValueMemberN); ok {
-			if ts, err := strconv.ParseInt(val.Value, 10, 64); err == nil {
-				msg.Timestamp = ts
-			}
-		}
-
 		messages = append(messages, msg)
 	}
 
@@ -628,7 +612,7 @@ func getMessagesFromDynamoDB(chatID, since string) ([]ChatMessage, error) {
 					filtered = append(filtered, m)
 				}
 			} else {
-				// If the 'since' message is not in DynamoDB (already deleted/seen),
+				// If the 'since' message is not in Postgres (already deleted/seen),
 				// then since the DB only has undelivered messages, return all of them
 				filtered = append(filtered, m)
 			}
@@ -1476,20 +1460,12 @@ func handleRefresh(w http.ResponseWriter, r *http.Request) {
 	// We'll update getRefreshTokenFromDynamoDB to return the email.
 	// Let's write the code:
 	var userEmail string
-	// Let's do a scan of ReelUsers to get the email:
-	if dbClient != nil {
-		input := &dynamodb.ScanInput{
-			TableName:        aws.String("ReelUsers"),
-			FilterExpression: aws.String("userId = :uid"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":uid": &types.AttributeValueMemberS{Value: storedToken.UserID},
-			},
-		}
-		scanRes, err := dbClient.Scan(context.TODO(), input)
-		if err == nil && len(scanRes.Items) > 0 {
-			if val, ok := scanRes.Items[0]["email"].(*types.AttributeValueMemberS); ok {
-				userEmail = val.Value
-			}
+	// Fetch email from PostgreSQL:
+	if dbPool != nil {
+		query := `SELECT email FROM public.auth_credentials WHERE id = $1`
+		err = dbPool.QueryRow(context.Background(), query, storedToken.UserID).Scan(&userEmail)
+		if err != nil {
+			log.Printf("Warning: Failed to fetch email for user %s: %v", storedToken.UserID, err)
 		}
 	}
 
