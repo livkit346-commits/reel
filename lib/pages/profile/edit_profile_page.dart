@@ -20,6 +20,7 @@ class EditProfilePage extends StatefulWidget {
 
 class _EditProfilePageState extends State<EditProfilePage> {
   late TextEditingController _nameController;
+  late TextEditingController _usernameController;
   late TextEditingController _bioController;
   late TextEditingController _phoneController;
 
@@ -32,6 +33,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.profile?['name'] ?? '');
+    _usernameController = TextEditingController(text: widget.profile?['username'] ?? '');
     _bioController = TextEditingController(text: widget.profile?['bio'] ?? '');
     _phoneController = TextEditingController(text: widget.profile?['phone'] ?? '');
     _currentPhotoUrl = widget.profile?['photoUrl'];
@@ -40,6 +42,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   @override
   void dispose() {
     _nameController.dispose();
+    _usernameController.dispose();
     _bioController.dispose();
     _phoneController.dispose();
     super.dispose();
@@ -114,6 +117,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
   Future<void> _saveProfile() async {
     final name = _nameController.text.trim();
+    final username = _usernameController.text.trim().toLowerCase();
     final phone = _phoneController.text.trim();
     final bio = _bioController.text.trim();
 
@@ -121,6 +125,37 @@ class _EditProfilePageState extends State<EditProfilePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Name cannot be empty'),
+          backgroundColor: ReelTheme.accentColor,
+        ),
+      );
+      return;
+    }
+
+    if (username.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Username cannot be empty'),
+          backgroundColor: ReelTheme.accentColor,
+        ),
+      );
+      return;
+    }
+
+    if (username.length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Username must be at least 3 characters'),
+          backgroundColor: ReelTheme.accentColor,
+        ),
+      );
+      return;
+    }
+
+    final usernameRegex = RegExp(r'^[a-z0-9_]+$');
+    if (!usernameRegex.hasMatch(username)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Username can only contain lowercase letters, numbers, and underscores'),
           backgroundColor: ReelTheme.accentColor,
         ),
       );
@@ -136,8 +171,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
     if (user == null) return;
 
     try {
+      // Check if username is already taken by another user
+      final isTaken = await supabase.isUsernameTaken(username, excludeUserId: user.id);
+      if (isTaken) {
+        throw Exception("Username is already taken by another user.");
+      }
+
       await supabase.client.from('users').update({
         'name': name,
+        'username': username,
         'phone': phone.isNotEmpty ? phone : null,
         'bio': bio.isNotEmpty ? bio : null,
       }).eq('id', user.id);
@@ -397,6 +439,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
                           label: 'NAME',
                           icon: Icons.person_outline_rounded,
                           hint: 'Enter your name',
+                        ),
+                        const SizedBox(height: 24),
+                        _buildInputField(
+                          controller: _usernameController,
+                          label: 'USERNAME',
+                          icon: Icons.alternate_email_rounded,
+                          hint: 'Enter your unique username',
                         ),
                         const SizedBox(height: 24),
                         _buildInputField(

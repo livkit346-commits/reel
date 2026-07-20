@@ -422,6 +422,9 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
   // Tracking telemetry
   late DateTime _viewStartTime;
 
+  String? _creatorUsername;
+  String? _quotedPostCreatorUsername;
+
   @override
   void initState() {
     super.initState();
@@ -432,6 +435,18 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     final supabase = context.read<SupabaseService>();
     _isLiked = supabase.likedPostIds.contains(widget.post['id']);
     _isSaved = supabase.savedPostIds.contains(widget.post['id']);
+    
+    final creatorId = widget.post['userId'] ?? widget.post['userid'];
+    if (creatorId != null) {
+      supabase.getUserProfile(creatorId).then((profile) {
+        if (mounted && profile != null) {
+          setState(() {
+            _creatorUsername = profile['username'] as String?;
+          });
+        }
+      });
+    }
+
     _loadCommentsCount();
     _loadQuotedPost();
   }
@@ -483,6 +498,18 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
           _quotedPost = post;
           _loadingQuotedPost = false;
         });
+      }
+      if (post != null) {
+        final qCreatorId = post['userId'] ?? post['userid'];
+        if (qCreatorId != null) {
+          context.read<SupabaseService>().getUserProfile(qCreatorId).then((profile) {
+            if (mounted && profile != null) {
+              setState(() {
+                _quotedPostCreatorUsername = profile['username'] as String?;
+              });
+            }
+          });
+        }
       }
     }
   }
@@ -1401,7 +1428,7 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
               ),
               const SizedBox(width: 4),
               Text(
-                '@${qUserName.toLowerCase().replaceAll(' ', '')}',
+                '@${_quotedPostCreatorUsername ?? qUserName.toLowerCase().replaceAll(' ', '')}',
                 style: TextStyle(color: subTextColor, fontSize: 12),
               ),
             ],
@@ -1469,6 +1496,9 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
 
     final myId = context.read<SupabaseService>().currentUser?.id;
     final isMe = displayUserId == myId;
+    final displayHandle = isRepost 
+        ? (_quotedPostCreatorUsername ?? displayUserName.toLowerCase().replaceAll(' ', ''))
+        : (_creatorUsername ?? displayUserName.toLowerCase().replaceAll(' ', ''));
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black87;
@@ -1537,7 +1567,7 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '@${displayUserName.toLowerCase().replaceAll(' ', '')}',
+                          '@$displayHandle',
                           style: TextStyle(color: secondaryTextColor, fontSize: 14),
                         ),
                         const Spacer(),
@@ -1997,6 +2027,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   late int _savesCount;
   bool _isReposted = false;
   bool _isFollowing = false;
+  String? _creatorUsername;
   BoxFit _fitMode = BoxFit.contain;
   bool _isFastForwarding = false;
   bool _isScrubbing = false;
@@ -2019,14 +2050,23 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
 
     final myId = supabase.currentUser?.id;
     final creatorId = widget.post['userId'] ?? widget.post['userid'] ?? '';
-    if (creatorId.isNotEmpty && creatorId != myId) {
-      supabase.isFollowing(creatorId).then((val) {
-        if (mounted) {
+    if (creatorId.isNotEmpty) {
+      supabase.getUserProfile(creatorId).then((profile) {
+        if (mounted && profile != null) {
           setState(() {
-            _isFollowing = val;
+            _creatorUsername = profile['username'] as String?;
           });
         }
       });
+      if (creatorId != myId) {
+        supabase.isFollowing(creatorId).then((val) {
+          if (mounted) {
+            setState(() {
+              _isFollowing = val;
+            });
+          }
+        });
+      }
     }
 
     _discController = AnimationController(
@@ -3653,7 +3693,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                     }
                   },
                   child: Text(
-                    '@$creatorName',
+                    '@${_creatorUsername ?? creatorName.toLowerCase().replaceAll(' ', '')}',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 15,

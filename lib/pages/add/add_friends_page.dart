@@ -669,7 +669,7 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                         itemBuilder: (context, index) {
                           final user = _searchResults[index];
                           final name = user['name'] ?? 'User';
-                          final username = '@${name.toLowerCase().replaceAll(' ', '')}';
+                          final username = '@${user['username'] ?? name.toLowerCase().replaceAll(' ', '')}';
                           final isAdded = _myFollowing.contains(user['id']);
 
                           return _buildSnapchatCard(
@@ -716,7 +716,7 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                             if (user == null) return const SizedBox.shrink();
                             
                             final name = user['name'] ?? 'User';
-                            final username = '@${name.toLowerCase().replaceAll(' ', '')}';
+                            final username = '@${user['username'] ?? name.toLowerCase().replaceAll(' ', '')}';
 
                             return _buildSnapchatCard(
                               userId: user['id'],
@@ -770,7 +770,7 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
                           itemBuilder: (context, index) {
                             final user = _quickAddList[index];
                             final name = user['name'] ?? 'Suggested';
-                            final username = '@${name.toLowerCase().replaceAll(' ', '')}';
+                            final username = '@${user['username'] ?? name.toLowerCase().replaceAll(' ', '')}';
 
                             return _buildSnapchatCard(
                               userId: user['id'],

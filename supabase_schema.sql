@@ -17,6 +17,7 @@ ALTER TABLE public.users ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS "coverUrl" TEXT;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS "shareLocation" BOOLEAN DEFAULT false NOT NULL;
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS "pushToken" TEXT;
+ALTER TABLE public.users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE;
 
 -- Enable Row Level Security (RLS) for users
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;

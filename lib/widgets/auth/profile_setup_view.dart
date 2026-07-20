@@ -14,6 +14,7 @@ class ProfileSetupView extends StatefulWidget {
 
 class _ProfileSetupViewState extends State<ProfileSetupView> {
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
   
@@ -59,7 +60,38 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
   }
 
   Future<void> _onFinish() async {
-    if (_nameController.text.trim().isEmpty) return;
+    final name = _nameController.text.trim();
+    final username = _usernameController.text.trim().toLowerCase();
+    final phone = _phoneController.text.trim();
+
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Name is required.')),
+      );
+      return;
+    }
+
+    if (username.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Username (handle) is required.')),
+      );
+      return;
+    }
+
+    if (username.length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Username must be at least 3 characters.')),
+      );
+      return;
+    }
+
+    final usernameRegex = RegExp(r'^[a-z0-9_]+$');
+    if (!usernameRegex.hasMatch(username)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Username can only contain lowercase letters, numbers, and underscores.')),
+      );
+      return;
+    }
 
     setState(() => _loading = true);
     final supabase = context.read<SupabaseService>();
@@ -68,12 +100,19 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
       final user = supabase.currentUser;
       if (user == null) throw Exception("User not authenticated.");
 
+      // Check if username is already taken
+      final isTaken = await supabase.isUsernameTaken(username);
+      if (isTaken) {
+        throw Exception("Username is already taken by another user.");
+      }
+
       // Create user document in Supabase
       await supabase.createUserProfile(
         user.id, 
-        _nameController.text.trim(), 
+        name, 
         _uploadedPhotoUrl, 
-        _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null
+        phone.isNotEmpty ? phone : null,
+        username: username,
       );
 
       if (mounted) {
@@ -188,6 +227,16 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
               hintText: 'Display Name (Required)',
               hintStyle: TextStyle(color: hintColor),
               prefixIcon: Icon(Icons.person_outline, color: iconColor),
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _usernameController,
+            style: TextStyle(color: textColor),
+            decoration: InputDecoration(
+              hintText: 'Username / Handle (Required)',
+              hintStyle: TextStyle(color: hintColor),
+              prefixIcon: Icon(Icons.alternate_email_outlined, color: iconColor),
             ),
           ),
           const SizedBox(height: 16),

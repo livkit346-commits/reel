@@ -637,9 +637,9 @@ class SupabaseService {
   }
 
   // Profile: Create/Update user doc
-  Future<void> createUserProfile(String userId, String name, String? photoUrl, String? phoneNumber, {String? bio}) async {
+  Future<void> createUserProfile(String userId, String name, String? photoUrl, String? phoneNumber, {String? bio, String? username}) async {
     try {
-      await client.from('users').upsert({
+      final data = {
         'id': userId,
         'name': name,
         'photoUrl': photoUrl,
@@ -649,9 +649,29 @@ class SupabaseService {
         'latitude': 0.0,
         'longitude': 0.0,
         'lastSeen': DateTime.now().toIso8601String(),
-      });
+      };
+      if (username != null) {
+        data['username'] = username.trim().toLowerCase();
+      }
+      await client.from('users').upsert(data);
     } catch (e) {
       rethrow;
+    }
+  }
+
+  // Check if username is already taken by another user
+  Future<bool> isUsernameTaken(String username, {String? excludeUserId}) async {
+    try {
+      final cleanUsername = username.trim().toLowerCase();
+      var query = client.from('users').select('id').eq('username', cleanUsername);
+      if (excludeUserId != null) {
+        query = query.neq('id', excludeUserId);
+      }
+      final response = await query.maybeSingle();
+      return response != null;
+    } catch (e) {
+      debugPrint('Error checking username unique status: $e');
+      return false;
     }
   }
 

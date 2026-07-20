@@ -475,6 +475,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
           }
 
           final name = userProfile['name'] ?? 'User';
+          final username = userProfile['username'] as String?;
           final phone = userProfile['phone'] ?? 'No phone linked';
           final bio = userProfile['bio'] ?? '';
           final photoUrl = userProfile['photoUrl'] as String?;
@@ -688,7 +689,7 @@ class _ReelProfilePageState extends State<ReelProfilePage> with SingleTickerProv
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              '@${name.toLowerCase().replaceAll(' ', '')}',
+                              '@${username ?? name.toLowerCase().replaceAll(' ', '')}',
                               style: TextStyle(color: secondaryTextColor, fontSize: 14),
                             ),
                             const SizedBox(height: 12),
