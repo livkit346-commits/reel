@@ -1020,6 +1020,11 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     // Update static in-memory cache
     _inMemoryMsgCache[widget.chatId] = List<Map<String, dynamic>>.from(_localMessages);
 
+    final supabase = context.read<SupabaseService>();
+    if (_localMessages.isNotEmpty) {
+      supabase.updateActiveChatLatestMessage(widget.chatId, _localMessages.last);
+    }
+
     final completer = Completer<void>();
     final previous = _saveQueue;
     _saveQueue = completer.future;

@@ -2033,6 +2033,8 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   bool _isScrubbing = false;
   double _scrubValue = 0.0;
   Duration? _scrubTime;
+  double _initialTouchX = 0.0;
+  double _initialScrubProgress = 0.0;
 
   // Custom heart pop coordinate list
   final List<Offset> _hearts = [];
@@ -3543,19 +3545,27 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onHorizontalDragStart: (details) {
-                      final screenWidth = MediaQuery.of(context).size.width;
+                      final durationMs = _videoController!.value.duration.inMilliseconds;
+                      final currentMs = _videoController!.value.position.inMilliseconds;
+                      double initialProgress = 0.0;
+                      if (durationMs > 0) {
+                        initialProgress = (currentMs / durationMs).clamp(0.0, 1.0);
+                      }
                       setState(() {
                         _isScrubbing = true;
-                        _scrubValue = (details.globalPosition.dx / screenWidth).clamp(0.0, 1.0);
-                        final durationMs = _videoController!.value.duration.inMilliseconds;
-                        _scrubTime = Duration(milliseconds: (_scrubValue * durationMs).toInt());
+                        _initialTouchX = details.globalPosition.dx;
+                        _initialScrubProgress = initialProgress;
+                        _scrubValue = initialProgress;
+                        _scrubTime = Duration(milliseconds: currentMs);
                         _pauseVideo();
                       });
                     },
                     onHorizontalDragUpdate: (details) {
                       final screenWidth = MediaQuery.of(context).size.width;
+                      final deltaX = details.globalPosition.dx - _initialTouchX;
+                      final deltaProgress = deltaX / screenWidth;
                       setState(() {
-                        _scrubValue = (details.globalPosition.dx / screenWidth).clamp(0.0, 1.0);
+                        _scrubValue = (_initialScrubProgress + deltaProgress).clamp(0.0, 1.0);
                         final durationMs = _videoController!.value.duration.inMilliseconds;
                         _scrubTime = Duration(milliseconds: (_scrubValue * durationMs).toInt());
                       });

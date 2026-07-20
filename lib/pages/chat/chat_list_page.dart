@@ -103,7 +103,7 @@ class _ChatListPageState extends State<ChatListPage> {
     await _loadChats(forceRefresh: true);
   }
 
-  Future<void> _loadChats({bool forceRefresh = false}) async {
+  Future<void> _loadChats({bool forceRefresh = true}) async {
     final supabase = context.read<SupabaseService>();
     try {
       final freshChats = await supabase.getActiveChats(forceRefresh: forceRefresh);
@@ -556,7 +556,7 @@ class _ChatListPageState extends State<ChatListPage> {
                                   isGroup: isGroup,
                                 ),
                               ),
-                            ).then((_) => _loadChats(forceRefresh: false));
+                            ).then((_) => _loadChats(forceRefresh: true));
                           },
                         );
                       },
@@ -567,7 +567,7 @@ class _ChatListPageState extends State<ChatListPage> {
           Navigator.push(
             context,
             MaterialPageRoute(builder: (context) => const SelectFriendPage()),
-          ).then((_) => _loadChats(forceRefresh: false));
+          ).then((_) => _loadChats(forceRefresh: true));
         },
         backgroundColor: Theme.of(context).primaryColor,
         child: const Icon(Icons.chat, color: Colors.white),

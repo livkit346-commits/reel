@@ -2361,6 +2361,8 @@ class SupabaseService {
           debugPrint('Chat $chatId automatically unarchived due to new message.');
         }
 
+        await updateActiveChatLatestMessage(chatId, localMsg);
+
         // Pre-cache media locally and immediately delete message from server database and storage
         if (senderId != myId) {
           final mediaUrl = event['mediaUrl'] as String?;
@@ -2387,6 +2389,58 @@ class SupabaseService {
       }
     } catch (e) {
       debugPrint('Error saving incoming message: $e');
+    }
+  }
+
+  // Update active chats list cache locally with a new latest message details to keep it sorted at top
+  Future<void> updateActiveChatLatestMessage(String chatId, Map<String, dynamic> message) async {
+    final myId = currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
+    if (myId == null || myId.isEmpty) return;
+
+    try {
+      final cacheKey = 'active_chats_$myId';
+      final cached = await LocalStorageService().getCachedJson(cacheKey);
+      if (cached != null && cached is List) {
+        final List<dynamic> list = List.from(cached);
+        final index = list.indexWhere((c) => c['chatId'] == chatId);
+        if (index != -1) {
+          final chatData = Map<String, dynamic>.from(list[index]);
+          chatData['latestMessageText'] = message['text'];
+          
+          String? timeStr;
+          if (message['createdAt'] != null) {
+            timeStr = message['createdAt'] as String;
+          } else if (message['timestamp'] != null) {
+            final ts = message['timestamp'] as int;
+            timeStr = DateTime.fromMillisecondsSinceEpoch(ts).toIso8601String();
+          }
+          chatData['latestMessageTime'] = timeStr ?? DateTime.now().toIso8601String();
+          chatData['latestMessageType'] = message['mediaType'];
+
+          final isMe = message['senderId'] == myId;
+          final isSeen = message['seen'] as bool? ?? false;
+          chatData['hasUnread'] = !isMe && !isSeen;
+
+          list[index] = chatData;
+
+          // Sort the list descending by time
+          list.sort((a, b) {
+            final timeA = DateTime.tryParse(a['latestMessageTime'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final timeB = DateTime.tryParse(b['latestMessageTime'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return timeB.compareTo(timeA);
+          });
+
+          await LocalStorageService().cacheJson(cacheKey, list);
+          await LocalStorageService().cacheJson('active_chats_offline_fallback', list);
+        } else {
+          // If the chat is not present in the cached list, force a refresh from server to retrieve its full metadata
+          await getActiveChats(forceRefresh: true);
+        }
+      } else {
+        await getActiveChats(forceRefresh: true);
+      }
+    } catch (e) {
+      debugPrint('Error updating active chat latest message cache: $e');
     }
   }
 
