@@ -413,6 +413,7 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
   bool _isSaved = false;
   late int _likesCount;
   late int _repostsCount;
+  late int _savesCount;
 
   Map<String, dynamic>? _quotedPost;
   bool _loadingQuotedPost = false;
@@ -426,6 +427,7 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
     _viewStartTime = DateTime.now();
     _likesCount = (widget.post['likes'] as num?)?.toInt() ?? 0;
     _repostsCount = (widget.post['reposts'] as num?)?.toInt() ?? 0;
+    _savesCount = (widget.post['saves'] as num?)?.toInt() ?? 0;
     final supabase = context.read<SupabaseService>();
     _isLiked = supabase.likedPostIds.contains(widget.post['id']);
     _isSaved = supabase.savedPostIds.contains(widget.post['id']);
@@ -508,15 +510,18 @@ class _ExplorePostItemState extends State<ExplorePostItem> {
   }
 
   Future<void> _toggleSave() async {
+    final increment = !_isSaved;
     setState(() {
-      _isSaved = !_isSaved;
+      _isSaved = increment;
+      _savesCount = increment ? _savesCount + 1 : (_savesCount > 0 ? _savesCount - 1 : 0);
+      widget.post['saves'] = _savesCount;
     });
     try {
-      await context.read<SupabaseService>().toggleSavePost(widget.post['id']);
+      await context.read<SupabaseService>().toggleSavePost(widget.post['id'], _savesCount + (increment ? -1 : 1), increment);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_isSaved ? 'Post saved to Bookmarks' : 'Post removed from Bookmarks'),
+            content: Text(increment ? 'Post saved to Bookmarks' : 'Post removed from Bookmarks'),
             duration: const Duration(seconds: 1),
           ),
         );
@@ -3520,7 +3525,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                     child: Container(
                       height: 38, // Expanded hit area to easily grab
                       alignment: Alignment.bottomCenter,
-                      padding: const EdgeInsets.bottom(4), // Slightly offset from absolute bottom to avoid system bars
+                      padding: const EdgeInsets.only(bottom: 4), // Slightly offset from absolute bottom to avoid system bars
                       child: Container(
                         height: _isScrubbing ? 8.0 : 2.5,
                         width: double.infinity,
