@@ -1988,6 +1988,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   bool _playIconIsPlay = false;
 
   late int _repostsCount;
+  late int _savesCount;
   bool _isReposted = false;
   BoxFit _fitMode = BoxFit.contain;
   bool _isFastForwarding = false;
@@ -2003,6 +2004,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     super.initState();
     _likesCount = (widget.post['likes'] as num?)?.toInt() ?? 0;
     _repostsCount = (widget.post['reposts'] as num?)?.toInt() ?? 0;
+    _savesCount = (widget.post['saves'] as num?)?.toInt() ?? 0;
     final supabase = context.read<SupabaseService>();
     _isLiked = supabase.likedPostIds.contains(widget.post['id']);
     _isSaved = supabase.savedPostIds.contains(widget.post['id']);
@@ -2193,16 +2195,18 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     final myId = supabase.currentUser?.id;
     if (myId == null) return;
 
+    final increment = !_isSaved;
     setState(() {
-      _isSaved = !_isSaved;
+      _isSaved = increment;
+      _savesCount = increment ? _savesCount + 1 : (_savesCount - 1).clamp(0, 999999);
     });
 
     try {
-      await supabase.toggleSavePost(widget.post['id']);
+      await supabase.toggleSavePost(widget.post['id'], _savesCount + (increment ? -1 : 1), increment);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(_isSaved ? 'Video saved to Bookmarks' : 'Video removed from Bookmarks'),
+            content: Text(increment ? 'Video saved to Bookmarks' : 'Video removed from Bookmarks'),
             duration: const Duration(seconds: 1),
           ),
         );
@@ -3479,17 +3483,19 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onHorizontalDragStart: (details) {
+                      final screenWidth = MediaQuery.of(context).size.width;
                       setState(() {
                         _isScrubbing = true;
-                        _scrubValue = progress;
+                        _scrubValue = (details.localPosition.dx / screenWidth).clamp(0.0, 1.0);
+                        final durationMs = _videoController!.value.duration.inMilliseconds;
+                        _scrubTime = Duration(milliseconds: (_scrubValue * durationMs).toInt());
                         _pauseVideo();
                       });
                     },
                     onHorizontalDragUpdate: (details) {
                       final screenWidth = MediaQuery.of(context).size.width;
-                      final deltaProgress = details.primaryDelta! / screenWidth;
                       setState(() {
-                        _scrubValue = (_scrubValue + deltaProgress).clamp(0.0, 1.0);
+                        _scrubValue = (details.localPosition.dx / screenWidth).clamp(0.0, 1.0);
                         final durationMs = _videoController!.value.duration.inMilliseconds;
                         _scrubTime = Duration(milliseconds: (_scrubValue * durationMs).toInt());
                       });
@@ -3512,24 +3518,20 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                       _videoController!.seekTo(Duration(milliseconds: (tapProgress * durationMs).toInt()));
                     },
                     child: Container(
-                      height: 24, // Expanded hit area
+                      height: 38, // Expanded hit area to easily grab
                       alignment: Alignment.bottomCenter,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Container(
-                            height: _isScrubbing ? 8.0 : 2.5,
-                            width: double.infinity,
-                            color: Colors.white24,
-                            alignment: Alignment.centerLeft,
-                            child: FractionallySizedBox(
-                              widthFactor: activeProgress,
-                              child: Container(
-                                color: Colors.white,
-                              ),
-                            ),
+                      padding: const EdgeInsets.bottom(4), // Slightly offset from absolute bottom to avoid system bars
+                      child: Container(
+                        height: _isScrubbing ? 8.0 : 2.5,
+                        width: double.infinity,
+                        color: Colors.white24,
+                        alignment: Alignment.centerLeft,
+                        child: FractionallySizedBox(
+                          widthFactor: activeProgress,
+                          child: Container(
+                            color: Colors.white,
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -3748,7 +3750,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                 // Save Post (Bookmark)
                 _buildActionItem(
                   icon: _isSaved ? Icons.bookmark : Icons.bookmark_border,
-                  label: 'Save',
+                  label: '$_savesCount',
                   color: _isSaved ? Colors.amber : Colors.white,
                   onTap: _toggleSave,
                 ),
@@ -3847,11 +3849,17 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   }
 }
 
-// LRU Video Controller Cache to avoid redownloading videos when leaving/scrolling
+// LRU Video Controller Cache with persistent file caching to support offline play
 class VideoControllerCache {
   static final Map<String, VideoPlayerController> _cache = {};
   static final List<String> _keys = [];
   static const int _maxSize = 10;
+
+  static Future<File> _getLocalFile(String url) async {
+    final cleanName = url.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    final tempDir = await getTemporaryDirectory();
+    return File('${tempDir.path}/cached_vid_$cleanName.mp4');
+  }
 
   static Future<VideoPlayerController> getController(String url) async {
     if (_cache.containsKey(url)) {
@@ -3861,7 +3869,26 @@ class VideoControllerCache {
       return controller;
     }
 
-    final controller = VideoPlayerController.networkUrl(Uri.parse(url));
+    VideoPlayerController controller;
+    try {
+      final file = await _getLocalFile(url);
+      if (await file.exists()) {
+        controller = VideoPlayerController.file(file);
+      } else {
+        // Download completely to disk
+        final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          await file.writeAsBytes(response.bodyBytes);
+          controller = VideoPlayerController.file(file);
+        } else {
+          controller = VideoPlayerController.networkUrl(Uri.parse(url));
+        }
+      }
+    } catch (e) {
+      debugPrint("Error downloading/retrieving local video file: $e");
+      controller = VideoPlayerController.networkUrl(Uri.parse(url));
+    }
+
     await controller.initialize();
     
     _cache[url] = controller;
@@ -3876,26 +3903,44 @@ class VideoControllerCache {
     return controller;
   }
 
-  static void preloadController(String url) {
+  static void preloadController(String url) async {
     if (_cache.containsKey(url)) return;
 
-    final controller = VideoPlayerController.networkUrl(Uri.parse(url));
-    _cache[url] = controller;
-    _keys.add(url);
+    try {
+      final file = await _getLocalFile(url);
+      if (!await file.exists()) {
+        final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
+        if (response.statusCode == 200) {
+          await file.writeAsBytes(response.bodyBytes);
+        }
+      }
 
-    controller.initialize().then((_) {
-      debugPrint('Preloaded video successfully: $url');
-    }).catchError((e) {
-      debugPrint('Failed to preload video: $e');
-      _cache.remove(url);
-      _keys.remove(url);
-      controller.dispose();
-    });
+      VideoPlayerController controller;
+      if (await file.exists()) {
+        controller = VideoPlayerController.file(file);
+      } else {
+        controller = VideoPlayerController.networkUrl(Uri.parse(url));
+      }
 
-    if (_keys.length > _maxSize) {
-      final oldestUrl = _keys.removeAt(0);
-      final oldestController = _cache.remove(oldestUrl);
-      oldestController?.dispose();
+      _cache[url] = controller;
+      _keys.add(url);
+
+      controller.initialize().then((_) {
+        debugPrint('Preloaded cached video successfully: $url');
+      }).catchError((e) {
+        debugPrint('Failed to preload video: $e');
+        _cache.remove(url);
+        _keys.remove(url);
+        controller.dispose();
+      });
+
+      if (_keys.length > _maxSize) {
+        final oldestUrl = _keys.removeAt(0);
+        final oldestController = _cache.remove(oldestUrl);
+        oldestController?.dispose();
+      }
+    } catch (e) {
+      debugPrint("Preload error: $e");
     }
   }
 

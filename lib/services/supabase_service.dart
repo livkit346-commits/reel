@@ -1103,6 +1103,7 @@ class SupabaseService {
     bool? shared,
     bool? liked,
     bool? commented,
+    bool? saved,
   }) async {
     final myId = currentUser?.id;
     if (myId == null) return;
@@ -1126,6 +1127,7 @@ class SupabaseService {
         if (shared != null) 'shared': shared,
         if (liked != null) 'liked': liked,
         if (commented != null) 'commented': commented,
+        if (saved != null) 'saved': saved,
       };
 
       if (existing != null) {
@@ -2941,22 +2943,54 @@ class SupabaseService {
         }
         await LocalStorageService().cacheJson('liked_posts_$myId', _likedPostIds.toList());
       }
+
+      final responseSaves = await client
+          .from('post_metrics')
+          .select('postId')
+          .eq('userId', myId)
+          .eq('saved', true);
+      
+      if (responseSaves is List) {
+        _savedPostIds.clear();
+        for (var row in responseSaves) {
+          final pId = row['postId'] ?? row['postid'];
+          if (pId != null) {
+            _savedPostIds.add(pId.toString());
+          }
+        }
+        await LocalStorageService().cacheJson('saved_posts_$myId', _savedPostIds.toList());
+      }
     } catch (e) {
-      debugPrint('Error syncing user likes: $e');
+      debugPrint('Error syncing user likes and saves: $e');
     }
   }
 
   // Posts: Toggle Save (Bookmark)
-  Future<void> toggleSavePost(String postId) async {
+  Future<void> toggleSavePost(String postId, int currentSaves, bool increment) async {
     final myId = currentUser?.id;
     if (myId == null) return;
     try {
-      if (_savedPostIds.contains(postId)) {
-        _savedPostIds.remove(postId);
-      } else {
+      final alreadySaved = _savedPostIds.contains(postId);
+      if (increment == alreadySaved) {
+        return;
+      }
+      
+      if (increment) {
         _savedPostIds.add(postId);
+      } else {
+        _savedPostIds.remove(postId);
       }
       await LocalStorageService().cacheJson('saved_posts_$myId', _savedPostIds.toList());
+
+      // Fetch the latest saves count directly from the database to avoid race conditions
+      final postData = await client.from('posts').select('saves').eq('id', postId).maybeSingle();
+      final dbSaves = (postData?['saves'] as num?)?.toInt() ?? currentSaves;
+      final newSaves = increment ? dbSaves + 1 : dbSaves - 1;
+      
+      await client.from('posts').update({'saves': newSaves >= 0 ? newSaves : 0}).eq('id', postId);
+      
+      // Log the metric
+      await reportPostMetric(postId: postId, saved: increment);
     } catch (e) {
       debugPrint('Error toggling save post: $e');
     }

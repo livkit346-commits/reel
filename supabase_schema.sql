@@ -685,6 +685,8 @@ ALTER TABLE public.comments ADD COLUMN IF NOT EXISTS "isPinned" BOOLEAN DEFAULT 
 -- Migration statements for short-video posts support:
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "videoUrl" TEXT;
 ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "mediaType" TEXT DEFAULT 'text';
+ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "saves" INTEGER DEFAULT 0 NOT NULL;
+ALTER TABLE public.post_metrics ADD COLUMN IF NOT EXISTS "saved" BOOLEAN DEFAULT FALSE NOT NULL;
 
 -- ========================================================
 -- SELF-HOSTED GATEWAY SERVICES AUTH AND CACHING TABLES

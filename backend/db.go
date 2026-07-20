@@ -69,6 +69,8 @@ func EnsureTablesExist() {
 			expires_at BIGINT NOT NULL,
 			PRIMARY KEY (chat_id, message_id)
 		)`,
+		`ALTER TABLE public.posts ADD COLUMN IF NOT EXISTS "saves" INTEGER DEFAULT 0 NOT NULL`,
+		`ALTER TABLE public.post_metrics ADD COLUMN IF NOT EXISTS "saved" BOOLEAN DEFAULT FALSE NOT NULL`,
 	}
 
 	for _, q := range queries {
