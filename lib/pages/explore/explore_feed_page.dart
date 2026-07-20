@@ -22,6 +22,7 @@ import 'package:video_player/video_player.dart';
 import 'package:reel/services/local_storage_service.dart';
 import 'package:reel/pages/explore/explore_search_page.dart';
 import 'package:reel/pages/explore/full_screen_video_viewer.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 class ExploreFeedPage extends StatefulWidget {
   final bool isActive;
@@ -1995,6 +1996,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   late int _repostsCount;
   late int _savesCount;
   bool _isReposted = false;
+  bool _isFollowing = false;
   BoxFit _fitMode = BoxFit.contain;
   bool _isFastForwarding = false;
   bool _isScrubbing = false;
@@ -2014,6 +2016,18 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     _isLiked = supabase.likedPostIds.contains(widget.post['id']);
     _isSaved = supabase.savedPostIds.contains(widget.post['id']);
     _isReposted = false;
+
+    final myId = supabase.currentUser?.id;
+    final creatorId = widget.post['userId'] ?? widget.post['userid'] ?? '';
+    if (creatorId.isNotEmpty && creatorId != myId) {
+      supabase.isFollowing(creatorId).then((val) {
+        if (mounted) {
+          setState(() {
+            _isFollowing = val;
+          });
+        }
+      });
+    }
 
     _discController = AnimationController(
       vsync: this,
@@ -3356,6 +3370,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
 
   @override
   Widget build(BuildContext context) {
+    final supabase = context.read<SupabaseService>();
     final videoUrl = widget.post['videoUrl'] as String?;
     final caption = widget.post['text'] ?? '';
     final creatorId = widget.post['userId'] ?? widget.post['userid'] ?? '';
@@ -3491,7 +3506,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                       final screenWidth = MediaQuery.of(context).size.width;
                       setState(() {
                         _isScrubbing = true;
-                        _scrubValue = (details.localPosition.dx / screenWidth).clamp(0.0, 1.0);
+                        _scrubValue = (details.globalPosition.dx / screenWidth).clamp(0.0, 1.0);
                         final durationMs = _videoController!.value.duration.inMilliseconds;
                         _scrubTime = Duration(milliseconds: (_scrubValue * durationMs).toInt());
                         _pauseVideo();
@@ -3500,7 +3515,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                     onHorizontalDragUpdate: (details) {
                       final screenWidth = MediaQuery.of(context).size.width;
                       setState(() {
-                        _scrubValue = (details.localPosition.dx / screenWidth).clamp(0.0, 1.0);
+                        _scrubValue = (details.globalPosition.dx / screenWidth).clamp(0.0, 1.0);
                         final durationMs = _videoController!.value.duration.inMilliseconds;
                         _scrubTime = Duration(milliseconds: (_scrubValue * durationMs).toInt());
                       });
@@ -3730,6 +3745,40 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                         ),
                         child: UserAvatar(userId: creatorId, radius: 22),
                       ),
+                      if (creatorId.isNotEmpty && creatorId != supabase.currentUser?.id && !_isFollowing)
+                        Positioned(
+                          bottom: -8,
+                          child: GestureDetector(
+                            onTap: () async {
+                              try {
+                                await supabase.followUser(creatorId);
+                                setState(() {
+                                  _isFollowing = true;
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Followed creator!'),
+                                    duration: Duration(seconds: 1),
+                                  ),
+                                );
+                              } catch (e) {
+                                debugPrint("Failed to follow: $e");
+                              }
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(3),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFFE2C55),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.add,
+                                color: Colors.white,
+                                size: 12,
+                              ),
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -3854,17 +3903,11 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   }
 }
 
-// LRU Video Controller Cache with persistent file caching to support offline play
+// LRU Video Controller Cache with progressive background caching via flutter_cache_manager
 class VideoControllerCache {
   static final Map<String, VideoPlayerController> _cache = {};
   static final List<String> _keys = [];
   static const int _maxSize = 10;
-
-  static Future<File> _getLocalFile(String url) async {
-    final cleanName = url.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
-    final tempDir = await getTemporaryDirectory();
-    return File('${tempDir.path}/cached_vid_$cleanName.mp4');
-  }
 
   static Future<VideoPlayerController> getController(String url) async {
     if (_cache.containsKey(url)) {
@@ -3876,21 +3919,18 @@ class VideoControllerCache {
 
     VideoPlayerController controller;
     try {
-      final file = await _getLocalFile(url);
-      if (await file.exists()) {
-        controller = VideoPlayerController.file(file);
+      final fileInfo = await DefaultCacheManager().getFileFromCache(url);
+      if (fileInfo != null) {
+        // Play directly from offline cache
+        controller = VideoPlayerController.file(fileInfo.file);
       } else {
-        // Download completely to disk
-        final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
-        if (response.statusCode == 200) {
-          await file.writeAsBytes(response.bodyBytes);
-          controller = VideoPlayerController.file(file);
-        } else {
-          controller = VideoPlayerController.networkUrl(Uri.parse(url));
-        }
+        // Play instantly from network streaming (no delay!)
+        controller = VideoPlayerController.networkUrl(Uri.parse(url));
+        // Cache in background
+        DefaultCacheManager().downloadFile(url);
       }
     } catch (e) {
-      debugPrint("Error downloading/retrieving local video file: $e");
+      debugPrint("Error loading cached video: $e");
       controller = VideoPlayerController.networkUrl(Uri.parse(url));
     }
 
@@ -3912,17 +3952,13 @@ class VideoControllerCache {
     if (_cache.containsKey(url)) return;
 
     try {
-      final file = await _getLocalFile(url);
-      if (!await file.exists()) {
-        final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
-        if (response.statusCode == 200) {
-          await file.writeAsBytes(response.bodyBytes);
-        }
-      }
+      // Trigger download in background
+      DefaultCacheManager().downloadFile(url);
 
       VideoPlayerController controller;
-      if (await file.exists()) {
-        controller = VideoPlayerController.file(file);
+      final fileInfo = await DefaultCacheManager().getFileFromCache(url);
+      if (fileInfo != null) {
+        controller = VideoPlayerController.file(fileInfo.file);
       } else {
         controller = VideoPlayerController.networkUrl(Uri.parse(url));
       }
@@ -3931,7 +3967,7 @@ class VideoControllerCache {
       _keys.add(url);
 
       controller.initialize().then((_) {
-        debugPrint('Preloaded cached video successfully: $url');
+        debugPrint('Preloaded video successfully: $url');
       }).catchError((e) {
         debugPrint('Failed to preload video: $e');
         _cache.remove(url);

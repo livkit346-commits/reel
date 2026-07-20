@@ -45,6 +45,16 @@ def main():
             
         sftp.put(local_gz, remote_gz, callback=progress)
         print("\nUpload complete.")
+
+        # Upload firebase-service-account.json
+        local_json = r"c:\Users\Hp\.gemini\antigravity\scratch\reel\backend\firebase-service-account.json"
+        remote_json = "/home/ubuntu/firebase-service-account.json"
+        if os.path.exists(local_json):
+            print(f"Uploading {local_json} to {remote_json}...")
+            sftp.put(local_json, remote_json)
+            print("Uploaded firebase-service-account.json successfully.")
+        else:
+            print("Warning: local firebase-service-account.json not found, skipping upload.")
         sftp.close()
         
         # 3. Stop service, gunzip, and restart service
@@ -67,9 +77,11 @@ def main():
             out = stdout.read().decode('utf-8', errors='replace')
             err = stderr.read().decode('utf-8', errors='replace')
             if out:
-                print(f"STDOUT:\n{out}")
+                sys.stdout.buffer.write(f"STDOUT:\n{out}".encode('utf-8'))
+                print()
             if err:
-                print(f"STDERR:\n{err}")
+                sys.stdout.buffer.write(f"STDERR:\n{err}".encode('utf-8'))
+                print()
             if exit_status != 0 and cmd != "sudo systemctl stop reel": # stop reel might return non-zero if already stopped
                 print(f"Command failed with exit status {exit_status}")
                 

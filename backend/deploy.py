@@ -30,6 +30,17 @@ def main():
         sys.exit(1)
         
     print("SCP upload complete.")
+
+    # Upload firebase-service-account.json
+    print("Uploading firebase-service-account.json using scp...")
+    scp_json_cmd = [
+        "scp",
+        "-i", "reel-key.pem",
+        "-o", "StrictHostKeyChecking=no",
+        "firebase-service-account.json",
+        "ubuntu@54.205.149.147:/home/ubuntu/firebase-service-account.json"
+    ]
+    subprocess.run(scp_json_cmd)
     
     # 3. Stop service, gunzip, and restart service via ssh
     print("Running remote commands via ssh...")
