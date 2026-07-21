@@ -1874,6 +1874,7 @@ class ShortVideoFeedViewState extends State<ShortVideoFeedView> {
   late Future<List<dynamic>> _videoFeedFuture;
   final PageController _pageController = PageController();
   int _focusedIndex = 0;
+  List<dynamic>? _cachedVideos;
 
   @override
   void initState() {
@@ -1885,6 +1886,7 @@ class ShortVideoFeedViewState extends State<ShortVideoFeedView> {
   void didUpdateWidget(covariant ShortVideoFeedView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.followingOnly != widget.followingOnly) {
+      _cachedVideos = null;
       loadVideoFeed();
     }
   }
@@ -1916,14 +1918,19 @@ class ShortVideoFeedViewState extends State<ShortVideoFeedView> {
     return FutureBuilder<List<dynamic>>(
       future: _videoFeedFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator(color: Color(0xFFFE2C55)));
-        }
-        if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.white54)));
+        if (snapshot.hasData && snapshot.data != null && snapshot.data!.isNotEmpty) {
+          _cachedVideos = snapshot.data;
         }
 
-        final videos = snapshot.data ?? [];
+        final videos = snapshot.data ?? _cachedVideos ?? [];
+
+        if (videos.isEmpty && snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator(color: Color(0xFFFE2C55)));
+        }
+
+        if (videos.isEmpty && snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.white54)));
+        }
 
         if (videos.isNotEmpty) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
