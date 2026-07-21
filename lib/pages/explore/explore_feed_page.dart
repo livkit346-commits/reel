@@ -2035,6 +2035,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
   Duration? _scrubTime;
   double _initialTouchX = 0.0;
   double _initialScrubProgress = 0.0;
+  String? _myUserId;
 
   // Custom heart pop coordinate list
   final List<Offset> _hearts = [];
@@ -2050,7 +2051,28 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
     _isSaved = supabase.savedPostIds.contains(widget.post['id']);
     _isReposted = false;
 
-    final myId = supabase.currentUser?.id;
+    _myUserId = supabase.currentUser?.id;
+    if (_myUserId == null || _myUserId!.isEmpty) {
+      LocalStorageService().getString('last_logged_in_user_id').then((uid) {
+        if (mounted && uid != null) {
+          setState(() {
+            _myUserId = uid;
+          });
+          final creatorId = widget.post['userId'] ?? widget.post['userid'] ?? '';
+          if (creatorId.isNotEmpty && creatorId != uid) {
+            supabase.isFollowing(creatorId).then((val) {
+              if (mounted) {
+                setState(() {
+                  _isFollowing = val;
+                });
+              }
+            });
+          }
+        }
+      });
+    }
+
+    final myId = _myUserId ?? supabase.currentUser?.id;
     final creatorId = widget.post['userId'] ?? widget.post['userid'] ?? '';
     if (creatorId.isNotEmpty) {
       supabase.getUserProfile(creatorId).then((profile) {
@@ -2105,8 +2127,8 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
 
   void _pauseVideo() {
     if (_videoController == null || !_videoController!.value.isInitialized) return;
+    _videoController!.pause();
     if (_isPlaying) {
-      _videoController!.pause();
       setState(() {
         _isPlaying = false;
         _discController.stop();
@@ -2116,12 +2138,23 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
 
   void _replayVideo() {
     if (_videoController == null || !_videoController!.value.isInitialized) return;
+    VideoControllerCache.pauseAllExcept(_videoController);
     _videoController!.seekTo(Duration.zero).then((_) {
       _videoController!.play();
       setState(() {
         _isPlaying = true;
         _discController.repeat();
       });
+    });
+  }
+
+  void _resumeVideo() {
+    if (_videoController == null || !_videoController!.value.isInitialized) return;
+    VideoControllerCache.pauseAllExcept(_videoController);
+    _videoController!.play();
+    setState(() {
+      _isPlaying = true;
+      _discController.repeat();
     });
   }
 
@@ -2188,6 +2221,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
         _discController.stop();
         _playIconIsPlay = true; // Show play arrow icon when we paused it
       } else {
+        VideoControllerCache.pauseAllExcept(_videoController);
         _videoController!.play();
         _isPlaying = true;
         _discController.repeat();
@@ -2475,174 +2509,294 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
       }
     }
 
+    final Map<String, String> sendStates = {};
+
     if (mounted) {
       showModalBottomSheet(
         context: context,
-        backgroundColor: const Color(0xFF16161C),
+        backgroundColor: const Color(0xFF1E1E24),
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         builder: (context) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
           return StatefulBuilder(
             builder: (context, setShareState) {
-              return Container(
-                padding: const EdgeInsets.symmetric(vertical: 20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 16),
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.white24,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const Text(
-                      'Send to',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Horizontal Send list
-                    SizedBox(
-                      height: 90,
-                      child: loadingChats
-                          ? const Center(child: CircularProgressIndicator(color: Color(0xFFFE2C55)))
-                          : activeChats.isEmpty
-                              ? const Center(child: Text('No active chats', style: TextStyle(color: Colors.white30, fontSize: 13)))
-                              : ListView.builder(
-                                  scrollDirection: Axis.horizontal,
-                                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                                  itemCount: activeChats.length,
-                                  itemBuilder: (context, index) {
-                                    final chat = activeChats[index];
-                                    final chatName = chat['chatName'] ?? 'Chat';
-                                    final otherUserId = chat['otherUserId'] ?? '';
-                                    
-                                    return GestureDetector(
-                                      onTap: () async {
-                                        Navigator.pop(context);
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Sending video...')),
-                                        );
-                                        try {
-                                          await supabase.sendMessage(
-                                            chatId: chat['chatId'],
-                                            text: caption.isNotEmpty ? caption : 'Shared a video',
-                                            mediaUrl: videoUrl,
-                                            mediaType: 'video',
-                                          );
-                                          if (mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(
-                                                content: Text('Sent to $chatName'),
-                                                backgroundColor: Colors.green,
-                                              ),
-                                            );
-                                          }
-                                        } catch (e) {
-                                          if (mounted) {
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(
-                                                content: Text('Failed to send: $e'),
-                                                backgroundColor: const Color(0xFF7E1C31),
-                                              ),
-                                            );
-                                          }
-                                        }
-                                      },
-                                      child: Container(
-                                        width: 80,
-                                        margin: const EdgeInsets.symmetric(horizontal: 4),
-                                        child: Column(
-                                          children: [
-                                            UserAvatar(userId: otherUserId, radius: 24),
-                                            const SizedBox(height: 6),
-                                            Text(
-                                              chatName,
-                                              style: const TextStyle(color: Colors.white70, fontSize: 11),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              textAlign: TextAlign.center,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                    ),
-                    const Divider(color: Colors.white12, height: 24),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFE2C55),
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(double.infinity, 48),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                          elevation: 0,
+              return SafeArea(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // TikTok drag handle
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
                         ),
-                        icon: const Icon(Icons.share, size: 20),
-                        label: const Text('Share to other apps...', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                        onPressed: () {
-                          Navigator.pop(context);
-                          Share.share('Check out this video on Reel: $videoUrl');
-                        },
                       ),
-                    ),
-                    const Divider(color: Colors.white12, height: 24),
-                    
-                    // Utilities row
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          _buildShareAction(
-                            icon: Icons.link,
-                            label: 'Copy Link',
-                            onTap: () {
-                              Navigator.pop(context);
-                              Clipboard.setData(ClipboardData(text: videoUrl));
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Video link copied to clipboard')),
-                              );
-                            },
-                          ),
-                          _buildShareAction(
-                            icon: Icons.repeat,
-                            label: 'Repost',
-                            onTap: () {
-                              Navigator.pop(context);
-                              _toggleRepost();
-                            },
-                          ),
-                          _buildShareAction(
-                            icon: Icons.save_alt,
-                            label: 'Save Video',
-                            onTap: () {
-                              Navigator.pop(context);
-                              _downloadAndWatermarkVideo(videoUrl, creatorName);
-                            },
-                          ),
-                          _buildShareAction(
-                            icon: Icons.report,
-                            label: 'Report',
-                            onTap: () async {
-                              Navigator.pop(context);
-                              await supabase.reportPost(widget.post['id']);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Video reported successfully')),
-                              );
-                            },
-                          ),
-                        ],
+                      
+                      const Text(
+                        'Send to',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 14),
+                      
+                      // Direct message sends horizontal list
+                      SizedBox(
+                        height: 90,
+                        child: loadingChats
+                            ? const Center(child: CircularProgressIndicator(color: Color(0xFFFE2C55)))
+                            : activeChats.isEmpty
+                                ? const Center(
+                                    child: Text(
+                                      'No active chats yet',
+                                      style: TextStyle(color: Colors.white38, fontSize: 13),
+                                    ),
+                                  )
+                                : ListView.builder(
+                                    scrollDirection: Axis.horizontal,
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    itemCount: activeChats.length,
+                                    itemBuilder: (context, index) {
+                                      final chat = activeChats[index];
+                                      final chatName = chat['chatName'] ?? 'Chat';
+                                      final otherUserId = chat['otherUserId'] ?? '';
+                                      final chatId = chat['chatId'] ?? '';
+                                      final state = sendStates[chatId] ?? 'idle';
+
+                                      return GestureDetector(
+                                        onTap: () async {
+                                          if (state != 'idle') return;
+                                          setShareState(() {
+                                            sendStates[chatId] = 'sending';
+                                          });
+                                          try {
+                                            await supabase.sendMessage(
+                                              chatId: chatId,
+                                              text: caption.isNotEmpty ? caption : 'Shared a video',
+                                              mediaUrl: videoUrl,
+                                              mediaType: 'video',
+                                            );
+                                            setShareState(() {
+                                              sendStates[chatId] = 'sent';
+                                            });
+                                          } catch (e) {
+                                            setShareState(() {
+                                              sendStates[chatId] = 'idle';
+                                            });
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('Failed to send: $e')),
+                                            );
+                                          }
+                                        },
+                                        child: Container(
+                                          width: 72,
+                                          margin: const EdgeInsets.symmetric(horizontal: 6),
+                                          child: Column(
+                                            children: [
+                                              Stack(
+                                                alignment: Alignment.center,
+                                                children: [
+                                                  UserAvatar(userId: otherUserId, radius: 24),
+                                                  if (state == 'sending')
+                                                    Positioned.fill(
+                                                      child: Container(
+                                                        decoration: const BoxDecoration(
+                                                          color: Colors.black54,
+                                                          shape: BoxShape.circle,
+                                                        ),
+                                                        child: const Center(
+                                                          child: SizedBox(
+                                                            width: 20,
+                                                            height: 20,
+                                                            child: CircularProgressIndicator(
+                                                              color: Colors.white,
+                                                              strokeWidth: 2,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  if (state == 'sent')
+                                                    Positioned(
+                                                      right: 0,
+                                                      bottom: 0,
+                                                      child: Container(
+                                                        padding: const EdgeInsets.all(2),
+                                                        decoration: const BoxDecoration(
+                                                          color: Color(0xFF25D366),
+                                                          shape: BoxShape.circle,
+                                                        ),
+                                                        child: const Icon(
+                                                          Icons.check,
+                                                          color: Colors.white,
+                                                          size: 11,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 6),
+                                              Text(
+                                                state == 'sent' ? 'Sent' : chatName,
+                                                style: TextStyle(
+                                                  color: state == 'sent' ? const Color(0xFF25D366) : Colors.white70,
+                                                  fontSize: 10.5,
+                                                  fontWeight: state == 'sent' ? FontWeight.bold : FontWeight.normal,
+                                                ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                textAlign: TextAlign.center,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                      ),
+                      
+                      const Divider(color: Colors.white12, height: 16),
+                      
+                      // Row 2: Share to other apps (Horizontal Scroll List)
+                      SizedBox(
+                        height: 80,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          children: [
+                            _buildTikTokActionItem(
+                              child: _buildCircularIcon(icon: Icons.chat_bubble_outline, color: const Color(0xFF25D366)),
+                              label: 'WhatsApp',
+                              onTap: () {
+                                Navigator.pop(context);
+                                Share.share('Check out this video on Reel: $videoUrl');
+                              },
+                            ),
+                            _buildTikTokActionItem(
+                              child: _buildCircularIcon(
+                                icon: Icons.camera_alt_outlined, 
+                                color: Colors.transparent,
+                                gradientColors: [
+                                  const Color(0xFFFCAF45),
+                                  const Color(0xFFE1306C),
+                                  const Color(0xFF833AB4)
+                                ],
+                              ),
+                              label: 'Instagram',
+                              onTap: () {
+                                Navigator.pop(context);
+                                Share.share('Check out this video on Reel: $videoUrl');
+                              },
+                            ),
+                            _buildTikTokActionItem(
+                              child: _buildCircularIcon(icon: Icons.facebook_outlined, color: const Color(0xFF1877F2)),
+                              label: 'Facebook',
+                              onTap: () {
+                                Navigator.pop(context);
+                                Share.share('Check out this video on Reel: $videoUrl');
+                              },
+                            ),
+                            _buildTikTokActionItem(
+                              child: _buildCircularIcon(icon: Icons.message_outlined, color: const Color(0xFF00C6FF)),
+                              label: 'SMS',
+                              onTap: () {
+                                Navigator.pop(context);
+                                Share.share('Check out this video on Reel: $videoUrl');
+                              },
+                            ),
+                            _buildTikTokActionItem(
+                              child: _buildCircularIcon(icon: Icons.share, color: const Color(0xFF33333F)),
+                              label: 'Share...',
+                              onTap: () {
+                                Navigator.pop(context);
+                                Share.share('Check out this video on Reel: $videoUrl');
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      const Divider(color: Colors.white12, height: 16),
+                      
+                      // Row 3: Utilities options (Horizontal Scroll List)
+                      SizedBox(
+                        height: 80,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          children: [
+                            _buildTikTokActionItem(
+                              child: _buildCircularIcon(
+                                icon: Icons.repeat, 
+                                color: _isReposted ? const Color(0xFFFE2C55) : const Color(0xFF2B2B36),
+                                iconColor: _isReposted ? Colors.white : Colors.white70,
+                              ),
+                              label: 'Repost',
+                              onTap: () {
+                                Navigator.pop(context);
+                                _toggleRepost();
+                              },
+                            ),
+                            _buildTikTokActionItem(
+                              child: _buildCircularIcon(icon: Icons.link, color: const Color(0xFF2B2B36), iconColor: Colors.white70),
+                              label: 'Copy Link',
+                              onTap: () {
+                                Navigator.pop(context);
+                                Clipboard.setData(ClipboardData(text: videoUrl));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Video link copied to clipboard')),
+                                );
+                              },
+                            ),
+                            _buildTikTokActionItem(
+                              child: _buildCircularIcon(icon: Icons.save_alt, color: const Color(0xFF2B2B36), iconColor: Colors.white70),
+                              label: 'Save Video',
+                              onTap: () {
+                                Navigator.pop(context);
+                                _downloadAndWatermarkVideo(videoUrl, creatorName);
+                              },
+                            ),
+                            _buildTikTokActionItem(
+                              child: _buildCircularIcon(icon: Icons.report_gmailerrorred, color: const Color(0xFF2B2B36), iconColor: Colors.white70),
+                              label: 'Report',
+                              onTap: () async {
+                                Navigator.pop(context);
+                                await supabase.reportPost(widget.post['id']);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Video reported successfully')),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      // Cancel Button
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        width: double.infinity,
+                        child: TextButton(
+                          style: TextButton.styleFrom(
+                            backgroundColor: const Color(0xFF2B2B36),
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(double.infinity, 44),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text(
+                            'Cancel',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               );
             },
@@ -2650,6 +2804,62 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
         },
       );
     }
+  }
+
+  Widget _buildTikTokActionItem({
+    required Widget child,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 10),
+        width: 58,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            child,
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white60, fontSize: 10.5),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCircularIcon({
+    required IconData icon,
+    required Color color,
+    Color iconColor = Colors.white,
+    double size = 44,
+    double iconSize = 20,
+    List<Color>? gradientColors,
+  }) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: gradientColors == null ? color : null,
+        gradient: gradientColors != null
+            ? LinearGradient(
+                colors: gradientColors,
+                begin: Alignment.bottomLeft,
+                end: Alignment.topRight,
+              )
+            : null,
+      ),
+      child: Center(
+        child: Icon(icon, color: iconColor, size: iconSize),
+      ),
+    );
   }
 
   Widget _buildShareAction({required IconData icon, required String label, required VoidCallback onTap}) {
@@ -3574,7 +3784,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                       final durationMs = _videoController!.value.duration.inMilliseconds;
                       final seekToMs = (_scrubValue * durationMs).toInt();
                       _videoController!.seekTo(Duration(milliseconds: seekToMs)).then((_) {
-                        _replayVideo();
+                        _resumeVideo();
                       });
                       setState(() {
                         _isScrubbing = false;
@@ -3795,7 +4005,7 @@ class _ShortVideoFeedItemState extends State<ShortVideoFeedItem> with SingleTick
                         ),
                         child: UserAvatar(userId: creatorId, radius: 22),
                       ),
-                      if (creatorId.isNotEmpty && creatorId != supabase.currentUser?.id && !_isFollowing)
+                      if (creatorId.isNotEmpty && creatorId != (_myUserId ?? supabase.currentUser?.id) && !_isFollowing)
                         Positioned(
                           bottom: -8,
                           child: GestureDetector(
@@ -4032,6 +4242,16 @@ class VideoControllerCache {
       }
     } catch (e) {
       debugPrint("Preload error: $e");
+    }
+  }
+
+  static void pauseAllExcept(VideoPlayerController? activeController) {
+    for (final controller in _cache.values) {
+      if (controller != activeController) {
+        try {
+          controller.pause();
+        } catch (_) {}
+      }
     }
   }
 

@@ -44,22 +44,11 @@ class _ChatListPageState extends State<ChatListPage> {
     WebSocketService().connect();
     _initChats();
     
-    // Listen to real-time incoming messages and status updates
-    _wsSubscription = WebSocketService().messageStream.listen((event) async {
-      final type = event['type'] ?? 'message';
-      final supabase = context.read<SupabaseService>();
-      if (type == 'message') {
-        await supabase.saveIncomingMessage(event);
-        if (mounted) {
-          final chatId = event['chatId'] ?? event['chatid'] ?? '';
-          final hasChat = _chats.any((c) => c['chatId'] == chatId);
-          _loadChats(forceRefresh: !hasChat);
-        }
-      } else if (type == 'status') {
-        await supabase.saveIncomingStatus(event);
-        if (mounted) {
-          _loadChats(forceRefresh: false);
-        }
+    // Listen to real-time database cache changes to reload the list immediately
+    final supabase = context.read<SupabaseService>();
+    _wsSubscription = supabase.chatsChanged.listen((_) {
+      if (mounted) {
+        _loadChats(forceRefresh: false);
       }
     });
 

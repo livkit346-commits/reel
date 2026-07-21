@@ -642,7 +642,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
               final msgTime = m['timestamp'] != null
                   ? DateTime.fromMillisecondsSinceEpoch((m['timestamp'] as num).toInt(), isUtc: true)
                   : DateTime.tryParse(m['createdAt'] ?? '');
-              return msgTime != null && msgTime.isBefore(joinedTime);
+              return msgTime != null && msgTime.isBefore(joinedTime.subtract(const Duration(minutes: 5)));
             });
           }
         }
@@ -665,7 +665,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
             final msgTime = typedMsg['timestamp'] != null
                 ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt(), isUtc: true)
                 : DateTime.tryParse(typedMsg['createdAt'] ?? '');
-            if (msgTime != null && msgTime.isBefore(_joinedAt!)) {
+            if (msgTime != null && msgTime.isBefore(_joinedAt!.subtract(const Duration(minutes: 5)))) {
               continue;
             }
           }
@@ -874,7 +874,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
         final msgTime = event['timestamp'] != null
             ? DateTime.fromMillisecondsSinceEpoch((event['timestamp'] as num).toInt(), isUtc: true)
             : DateTime.tryParse(event['createdAt'] ?? '');
-        if (msgTime != null && msgTime.isBefore(_joinedAt!)) {
+        if (msgTime != null && msgTime.isBefore(_joinedAt!.subtract(const Duration(minutes: 5)))) {
           return;
         }
       }
@@ -2735,20 +2735,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                          timeStr,
                                                          style: const TextStyle(color: Colors.white, fontSize: 9),
                                                        ),
-                                                       if (isMe) ...[
-                                                         const SizedBox(width: 4),
-                                                         Icon(
-                                                            msg['isPending'] == true 
-                                                                ? Icons.access_time 
-                                                                : ((msg['seen'] == true || msg['status'] == 'read' || msg['status'] == 'seen' || msg['received'] == true || msg['status'] == 'delivered' || msg['status'] == 'received') ? Icons.done_all : Icons.done),
+                                                       if (isMe && msg['isPending'] == true) ...[
+                                                          const SizedBox(width: 4),
+                                                          const Icon(
+                                                            Icons.access_time,
                                                             size: 13,
-                                                            color: msg['isPending'] == true 
-                                                                ? Colors.white38 
-                                                                : ((msg['seen'] == true || msg['status'] == 'read' || msg['status'] == 'seen')
-                                                                    ? const Color(0xFF53BDEB) 
-                                                                    : ((msg['received'] == true || msg['status'] == 'delivered' || msg['status'] == 'received') ? Colors.white70 : Colors.white38)),
+                                                            color: Colors.white38,
                                                           ),
-                                                       ],
+                                                        ],
                                                      ],
                                                    ),
                                                  ),
@@ -2854,20 +2848,12 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                                                timeStr,
                                                style: TextStyle(color: isDark ? Colors.white38 : Colors.black45, fontSize: 10),
                                              ),
-                                             if (isMe) ...[
+                                             if (isMe && msg['isPending'] == true) ...[
                                                const SizedBox(width: 4),
                                                Icon(
-                                                 msg['isPending'] == true 
-                                                     ? Icons.access_time 
-                                                     : (msg['seen'] == true || msg['received'] == true ? Icons.done_all : Icons.done),
+                                                 Icons.access_time,
                                                  size: 13,
-                                                 color: msg['isPending'] == true 
-                                                     ? (isDark ? Colors.white38 : const Color(0xFF667781))
-                                                     : (msg['seen'] == true 
-                                                         ? const Color(0xFF53BDEB) 
-                                                         : (msg['received'] == true 
-                                                             ? (isDark ? Colors.white60 : const Color(0xFF667781)) 
-                                                             : (isDark ? Colors.white24 : const Color(0xFF8696A0)))),
+                                                 color: isDark ? Colors.white38 : const Color(0xFF667781),
                                                ),
                                              ],
                                            ],
@@ -2882,6 +2868,31 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         ),
                       ),
                     );
+
+                    final isLastMessage = index == displayMessages.length - 1;
+                    if (isLastMessage && isMe) {
+                      final isRead = msg['seen'] == true || msg['status'] == 'read' || msg['status'] == 'seen';
+                      if (isRead) {
+                        messageWidget = Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            messageWidget,
+                            Padding(
+                              padding: const EdgeInsets.only(right: 20, bottom: 4),
+                              child: Text(
+                                'Seen',
+                                style: TextStyle(
+                                  color: isDark ? Colors.white30 : Colors.black38,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      }
+                    }
 
                     if (showDateHeader && parsedDate != null) {
                       return Column(
@@ -3226,20 +3237,14 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           timeStr,
                           style: const TextStyle(color: Colors.white70, fontSize: 10),
                         ),
-                         if (isMe) ...[
-                          const SizedBox(width: 4),
-                          Icon(
-                            msg['isPending'] == true 
-                                ? Icons.access_time 
-                                : ((msg['seen'] == true || msg['status'] == 'read' || msg['status'] == 'seen' || msg['received'] == true || msg['status'] == 'delivered' || msg['status'] == 'received') ? Icons.done_all : Icons.done),
-                            color: msg['isPending'] == true 
-                                ? Colors.white38 
-                                : ((msg['seen'] == true || msg['status'] == 'read' || msg['status'] == 'seen')
-                                    ? const Color(0xFF53BDEB) 
-                                    : ((msg['received'] == true || msg['status'] == 'delivered' || msg['status'] == 'received') ? Colors.white70 : Colors.white30)),
-                            size: 11,
-                          ),
-                        ],
+                         if (isMe && msg['isPending'] == true) ...[
+                           const SizedBox(width: 4),
+                           const Icon(
+                             Icons.access_time,
+                             color: Colors.white38,
+                             size: 11,
+                           ),
+                         ],
                       ],
                     ),
                   ),

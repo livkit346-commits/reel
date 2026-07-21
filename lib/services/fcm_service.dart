@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -216,6 +217,12 @@ class _HeadsUpNotificationBannerState extends State<_HeadsUpNotificationBanner> 
 
     _controller.forward();
     _fetchSenderProfile();
+
+    Timer(const Duration(seconds: 4), () {
+      if (mounted) {
+        _dismiss();
+      }
+    });
   }
 
   Future<void> _fetchSenderProfile() async {

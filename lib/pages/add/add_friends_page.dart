@@ -257,14 +257,19 @@ class _AddFriendsPageState extends State<AddFriendsPage> {
       setState(() {
         _myFollowing.add(userId);
       });
-      // Refresh to recalculate lists
-      _loadSnapchatSocials();
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to add friend')),
         );
       }
+      return;
+    }
+
+    try {
+      await _loadSnapchatSocials();
+    } catch (e) {
+      debugPrint('Error reloading socials after follow: $e');
     }
   }
 

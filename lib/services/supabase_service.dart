@@ -24,6 +24,9 @@ class SupabaseService {
   // Track active chat room ID to avoid race conditions with background listeners
   String? activeChatId;
 
+  final StreamController<void> _chatsChangedController = StreamController<void>.broadcast();
+  Stream<void> get chatsChanged => _chatsChangedController.stream;
+
   StreamSubscription? _globalWsSubscription;
 
   void initializeGlobalRealtime() {
@@ -2055,6 +2058,7 @@ class SupabaseService {
       await LocalStorageService().cacheJson('active_chats_$myId', chatsList);
       await LocalStorageService().cacheJson('active_chats_offline_fallback', chatsList);
 
+      _chatsChangedController.add(null);
       return chatsList;
     } catch (e) {
       // Offline fallback: load cached active chats
@@ -2188,7 +2192,7 @@ class SupabaseService {
             final msgTime = typedMsg['timestamp'] != null
                 ? DateTime.fromMillisecondsSinceEpoch((typedMsg['timestamp'] as num).toInt(), isUtc: true)
                 : DateTime.tryParse(typedMsg['createdAt'] ?? '');
-            if (msgTime != null && msgTime.isBefore(joinedAt)) {
+            if (msgTime != null && msgTime.isBefore(joinedAt.subtract(const Duration(minutes: 5)))) {
               continue;
             }
           }
@@ -2432,6 +2436,7 @@ class SupabaseService {
 
           await LocalStorageService().cacheJson(cacheKey, list);
           await LocalStorageService().cacheJson('active_chats_offline_fallback', list);
+          _chatsChangedController.add(null);
         } else {
           // If the chat is not present in the cached list, force a refresh from server to retrieve its full metadata
           await getActiveChats(forceRefresh: true);
