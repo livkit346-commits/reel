@@ -149,8 +149,10 @@ class FcmService {
 
     _currentOverlay = OverlayEntry(
       builder: (context) {
+        final mediaQuery = MediaQuery.maybeOf(context);
+        final topPadding = mediaQuery?.padding.top ?? 32.0;
         return Positioned(
-          top: MediaQuery.of(context).padding.top,
+          top: topPadding > 0 ? topPadding : 32.0,
           left: 0,
           right: 0,
           child: _HeadsUpNotificationBanner(

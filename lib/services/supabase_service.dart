@@ -84,6 +84,7 @@ class SupabaseService {
                 final dir = Directory('${directory.path}/chats');
                 if (!await dir.exists()) await dir.create(recursive: true);
                 await file.writeAsString(jsonEncode(localMessages));
+                await updateActiveChatLatestMessage(chatId, localMsg);
               }
 
               // 2. Send 'delivered' status update back to sender online
@@ -1888,6 +1889,26 @@ class SupabaseService {
     }
   }
 
+  // Fetch the latest message for a specific chat from the remote Postgres DB
+  Future<Map<String, dynamic>?> getLatestMessageFromServer(String chatId) async {
+    try {
+      final res = await client
+          .from('messages')
+          .select('id, senderId, text, mediaUrl, mediaType, createdAt, seen')
+          .eq('chatId', chatId)
+          .order('createdAt', descending: true)
+          .limit(1)
+          .maybeSingle();
+      if (res != null) {
+        return Map<String, dynamic>.from(res);
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Error fetching latest message from server for chat $chatId: $e');
+      return null;
+    }
+  }
+
   // Get active chats list for the current user with latest-message sorting and offline cache support
   Future<List<dynamic>> getActiveChats({bool forceRefresh = false}) async {
     final myId = currentUser?.id ?? await LocalStorageService().getString('last_logged_in_user_id');
@@ -1971,6 +1992,39 @@ class SupabaseService {
           .select('id, isGroup, name, groupIcon, createdAt')
           .inFilter('id', chatIds);
 
+      // Fetch latest messages from server/local-cache in parallel to prevent order corruption on reload
+      final List<Future<MapEntry<String, Map<String, dynamic>?>>> latestMessageFutures = chatIds.map((cid) async {
+        // 1. Try loading from local JSON cache first
+        try {
+          final directory = await getApplicationDocumentsDirectory();
+          final file = File('${directory.path}/chats/${cid}_messages.json');
+          if (await file.exists()) {
+            final content = await file.readAsString();
+            final List<dynamic> decoded = jsonDecode(content);
+            if (decoded.isNotEmpty) {
+              return MapEntry(cid, Map<String, dynamic>.from(decoded.last));
+            }
+          }
+        } catch (_) {}
+
+        // 2. Query the server database
+        final serverMsg = await getLatestMessageFromServer(cid);
+        if (serverMsg != null) {
+          // Auto-heal local cache file
+          try {
+            final directory = await getApplicationDocumentsDirectory();
+            final file = File('${directory.path}/chats/${cid}_messages.json');
+            if (!await file.exists()) {
+              await file.writeAsString(jsonEncode([serverMsg]));
+            }
+          } catch (_) {}
+        }
+        return MapEntry(cid, serverMsg);
+      }).toList();
+
+      final results = await Future.wait(latestMessageFutures);
+      final Map<String, Map<String, dynamic>?> latestMsgMap = Map.fromEntries(results);
+
       final List<dynamic> chatsList = [];
 
       for (final chatMeta in chatsMetaResponse) {
@@ -2006,19 +2060,7 @@ class SupabaseService {
           }
         }
 
-        // 1. Try loading the latest message from local JSON cache
-        Map<String, dynamic>? latestMsg;
-        try {
-          final directory = await getApplicationDocumentsDirectory();
-          final file = File('${directory.path}/chats/${cid}_messages.json');
-          if (await file.exists()) {
-            final content = await file.readAsString();
-            final List<dynamic> decoded = jsonDecode(content);
-            if (decoded.isNotEmpty) {
-              latestMsg = Map<String, dynamic>.from(decoded.last);
-            }
-          }
-        } catch (_) {}
+        final latestMsg = latestMsgMap[cid];
 
         if (latestMsg != null) {
           chatData['latestMessageText'] = latestMsg['text'];
