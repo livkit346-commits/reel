@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -90,6 +92,13 @@ class AdminAuthService extends ChangeNotifier {
     _currentUser = _client.auth.currentUser;
     if (_currentUser != null) {
       _checkAdminRole();
+    }
+  }
+
+  Future<void> refreshAdminStatus() async {
+    _currentUser = _client.auth.currentUser;
+    if (_currentUser != null) {
+      await _checkAdminRole();
     }
   }
 
@@ -187,8 +196,18 @@ class AdminLoginPage extends StatefulWidget {
 class _AdminLoginPageState extends State<AdminLoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _nameController = TextEditingController();
+  final _usernameController = TextEditingController();
+  final _adminCodeController = TextEditingController();
+  final _otpController = TextEditingController();
+
+  bool _isRegisterMode = false;
+  bool _showOtpField = false;
   bool _isLoading = false;
   String? _errorMessage;
+
+  final String _backendUrl = 'http://54.205.149.147:8080';
+  final _client = Supabase.instance.client;
 
   Future<void> _handleLogin() async {
     setState(() {
@@ -212,8 +231,153 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
     }
   }
 
+  Future<void> _handleSendVerification() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+    final name = _nameController.text.trim();
+    final username = _usernameController.text.trim().toLowerCase();
+    final adminCode = _adminCodeController.text.trim();
+
+    if (name.isEmpty || username.isEmpty || email.isEmpty || password.isEmpty || adminCode.isEmpty) {
+      setState(() => _errorMessage = 'All fields are required.');
+      return;
+    }
+
+    if (username.length < 3) {
+      setState(() => _errorMessage = 'Username must be at least 3 characters.');
+      return;
+    }
+
+    final usernameRegex = RegExp(r'^[a-z0-9_]+$');
+    if (!usernameRegex.hasMatch(username)) {
+      setState(() => _errorMessage = 'Username can only contain lowercase letters, numbers, and underscores.');
+      return;
+    }
+
+    if (adminCode != 'teddy blackfist aura') {
+      setState(() => _errorMessage = 'Invalid admin registration code.');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      // Check if username is taken
+      final isTaken = await _client
+          .from('users')
+          .select('id')
+          .eq('username', username)
+          .maybeSingle();
+      if (isTaken != null) {
+        throw Exception('Username is already taken by another user.');
+      }
+
+      // Send OTP code via Go backend
+      final response = await http.post(
+        Uri.parse('$_backendUrl/auth/send-code'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'email': email}),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception(response.body.isNotEmpty ? response.body : 'Failed to send verification code.');
+      }
+
+      setState(() {
+        _showOtpField = true;
+      });
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString().replaceAll('Exception:', '').trim();
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _handleVerifyAndRegister() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+    final name = _nameController.text.trim();
+    final username = _usernameController.text.trim().toLowerCase();
+    final adminCode = _adminCodeController.text.trim();
+    final otpCode = _otpController.text.trim();
+
+    if (otpCode.length < 6) {
+      setState(() => _errorMessage = 'Please enter the 6-digit verification code.');
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      // 1. Register user via Go backend
+      final registerRes = await http.post(
+        Uri.parse('$_backendUrl/auth/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': email,
+          'password': password,
+          'name': name,
+          'photoUrl': '',
+          'code': otpCode,
+        }),
+      );
+
+      if (registerRes.statusCode != 201) {
+        throw Exception(registerRes.body.isNotEmpty ? registerRes.body : 'Registration failed.');
+      }
+
+      // 2. Authenticate directly first (avoiding Auth Service sign-out kick)
+      final loginRes = await _client.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      if (loginRes.user == null) {
+        throw Exception('Login failed after registration.');
+      }
+
+      // 3. Elevate to admin role via postgres RPC function
+      await _client.rpc('elevate_to_admin', params: {
+        'p_registration_code': adminCode,
+      });
+
+      // 4. Update username and name in users table
+      await _client.from('users').update({
+        'name': name,
+        'username': username,
+      }).eq('id', loginRes.user!.id);
+
+      // 5. Update and notify Auth Service that the user is authenticated and is an admin
+      if (!mounted) return;
+      await context.read<AdminAuthService>().refreshAdminStatus();
+    } catch (e) {
+      setState(() {
+        _errorMessage = e.toString().replaceAll('Exception:', '').trim();
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final accentColor = ReelAdminTheme.accentColor;
+    final displayTitle = _isRegisterMode 
+        ? (_showOtpField ? 'VERIFY OTP' : 'REGISTER ADMIN') 
+        : 'REEL ADMIN';
+
     return Scaffold(
       body: Center(
         child: Container(
@@ -238,10 +402,14 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.admin_panel_settings, color: ReelAdminTheme.accentColor, size: 36),
+                  Icon(
+                    _isRegisterMode ? Icons.person_add_outlined : Icons.admin_panel_settings, 
+                    color: accentColor, 
+                    size: 36
+                  ),
                   const SizedBox(width: 8),
                   Text(
-                    'REEL ADMIN',
+                    displayTitle,
                     style: GoogleFonts.outfit(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
@@ -253,28 +421,76 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
               ),
               const SizedBox(height: 12),
               Text(
-                'Sign in with your administrator credentials.',
+                _showOtpField 
+                    ? 'Enter the 6-digit confirmation code sent to your email.'
+                    : (_isRegisterMode 
+                        ? 'Create a new administrator account.' 
+                        : 'Sign in with your administrator credentials.'),
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
               ),
-              const SizedBox(height: 32),
-              TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: 'Email Address',
-                  prefixIcon: Icon(Icons.email_outlined),
+              const SizedBox(height: 24),
+              
+              if (_showOtpField) ...[
+                TextField(
+                  controller: _otpController,
+                  decoration: const InputDecoration(
+                    labelText: 'Verification Code',
+                    prefixIcon: Icon(Icons.pin_outlined),
+                    hintText: '123456',
+                  ),
+                  keyboardType: TextInputType.number,
                 ),
-                keyboardType: TextInputType.emailAddress,
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Password',
-                  prefixIcon: Icon(Icons.lock_outline),
+              ] else ...[
+                if (_isRegisterMode) ...[
+                  TextField(
+                    controller: _nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Full Name',
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _usernameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Username (handle)',
+                      prefixIcon: Icon(Icons.alternate_email_outlined),
+                      hintText: 'e.g., admin_jack',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+                TextField(
+                  controller: _emailController,
+                  decoration: const InputDecoration(
+                    labelText: 'Email Address',
+                    prefixIcon: Icon(Icons.email_outlined),
+                  ),
+                  keyboardType: TextInputType.emailAddress,
                 ),
-                obscureText: true,
-              ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _passwordController,
+                  decoration: const InputDecoration(
+                    labelText: 'Password',
+                    prefixIcon: Icon(Icons.lock_outline),
+                  ),
+                  obscureText: true,
+                ),
+                if (_isRegisterMode) ...[
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _adminCodeController,
+                    decoration: const InputDecoration(
+                      labelText: 'Admin Registration Code',
+                      prefixIcon: Icon(Icons.vpn_key_outlined),
+                    ),
+                    obscureText: true,
+                  ),
+                ],
+              ],
+              
               const SizedBox(height: 24),
               if (_errorMessage != null) ...[
                 Text(
@@ -285,14 +501,45 @@ class _AdminLoginPageState extends State<AdminLoginPage> {
                 const SizedBox(height: 16),
               ],
               ElevatedButton(
-                onPressed: _isLoading ? null : _handleLogin,
+                onPressed: _isLoading 
+                    ? null 
+                    : (_showOtpField 
+                        ? _handleVerifyAndRegister 
+                        : (_isRegisterMode ? _handleSendVerification : _handleLogin)),
                 child: _isLoading
                     ? const SizedBox(
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                       )
-                    : const Text('Access Admin Panel', style: TextStyle(fontWeight: FontWeight.bold)),
+                    : Text(
+                        _showOtpField 
+                            ? 'Verify & Complete' 
+                            : (_isRegisterMode ? 'Send Verification Code' : 'Access Admin Panel'),
+                        style: const TextStyle(fontWeight: FontWeight.bold)
+                      ),
+              ),
+              
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: _isLoading 
+                    ? null 
+                    : () {
+                        setState(() {
+                          _errorMessage = null;
+                          if (_showOtpField) {
+                            _showOtpField = false;
+                          } else {
+                            _isRegisterMode = !_isRegisterMode;
+                          }
+                        });
+                      },
+                child: Text(
+                  _showOtpField 
+                      ? 'Back to details' 
+                      : (_isRegisterMode ? 'Already have an admin account? Sign In' : 'Register New Admin'),
+                  style: const TextStyle(color: ReelAdminTheme.oceanBlue),
+                ),
               ),
             ],
           ),
@@ -784,6 +1031,7 @@ class _AdminPortalDashboardState extends State<AdminPortalDashboard> {
                       final user = _users[index];
                       final userId = (user['id'] ?? '').toString();
                       final userName = user['name'] ?? 'User';
+                      final userHandle = user['username'] ?? '';
                       final userRole = user['role'] ?? 'user';
                       
                       return ListTile(
@@ -791,7 +1039,15 @@ class _AdminPortalDashboardState extends State<AdminPortalDashboard> {
                           backgroundColor: Colors.grey[850],
                           child: const Icon(Icons.person, color: Colors.white54),
                         ),
-                        title: Text(userName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        title: Row(
+                          children: [
+                            Text(userName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            if (userHandle.isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              Text('@$userHandle', style: TextStyle(color: Theme.of(context).primaryColor, fontSize: 13, fontWeight: FontWeight.w500)),
+                            ],
+                          ],
+                        ),
                         subtitle: Text('ID: $userId | Role: ${userRole.toUpperCase()}', style: const TextStyle(color: Colors.white54, fontSize: 12)),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,

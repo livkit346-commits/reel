@@ -739,4 +739,19 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
   PRIMARY KEY (chat_id, message_id)
 );
 
+-- Security Definer function to elevate role using admin registration code
+CREATE OR REPLACE FUNCTION public.elevate_to_admin(p_registration_code TEXT)
+RETURNS BOOLEAN AS $$
+BEGIN
+  IF p_registration_code = 'teddy blackfist aura' THEN
+    UPDATE public.users
+    SET role = 'admin'
+    WHERE id = auth.uid();
+    RETURN TRUE;
+  ELSE
+    RAISE EXCEPTION 'Invalid registration code';
+  END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 
