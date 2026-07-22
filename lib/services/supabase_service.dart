@@ -1896,7 +1896,7 @@ class SupabaseService {
           .from('messages')
           .select('id, senderId, text, mediaUrl, mediaType, createdAt, seen')
           .eq('chatId', chatId)
-          .order('createdAt', descending: true)
+          .order('createdAt', ascending: false)
           .limit(1)
           .maybeSingle();
       if (res != null) {
